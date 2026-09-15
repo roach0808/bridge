@@ -15,6 +15,8 @@ const schema = z.object({
     .default('http://localhost:5173')
     .transform((v) => v.split(',').map((s) => s.trim()).filter(Boolean)),
   PORT: z.coerce.number().int().default(4000),
+  /** Proxy hops in front of the API whose X-Forwarded-For is trusted (e.g. 2 for Vercel → Render). */
+  TRUST_PROXY: z.coerce.number().int().min(0).default(1),
   HOST: z.string().default('0.0.0.0'),
   PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
   LOGIN_RATE_LIMIT: z.coerce.number().int().min(1).default(5),

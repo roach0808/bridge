@@ -1,0 +1,31 @@
+# Render Blueprint for the API (apps/api). The web app is deployed on Vercel,
+# which forwards /api and /socket.io to this service (see vercel.json).
+services:
+  - type: web
+    name: bridge-api
+    runtime: node
+    plan: free
+    buildCommand: >-
+      npx --yes pnpm@9.15.9 install --frozen-lockfile &&
+      npx --yes pnpm@9.15.9 --filter api exec prisma generate &&
+      npx --yes pnpm@9.15.9 --filter api build
+    # Apply pending migrations, then start. The seed is never run here.
+    startCommand: cd apps/api && npx prisma migrate deploy && NODE_ENV=production node dist/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        sync: false # paste the Aiven `god` connection string
+      - key: JWT_SECRET
+        generateValue: true
+      - key: CORS_ORIGINS
+        sync: false # the Vercel site, e.g. https://bridge-web.vercel.app
+      - key: PUBLIC_API_URL
+        sync: false # same Vercel site URL: avatars are served through its /api rewrite
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: TRUST_PROXY
+        value: "2" # Vercel edge → Render proxy → API
+      - key: LOG_LEVEL
+        value: info

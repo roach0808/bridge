@@ -24,7 +24,7 @@ import { usersRouter } from './users/users.routes';
 export function createApp() {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', 1);
+  app.set('trust proxy', config.TRUST_PROXY);
 
   app.use(
     pinoHttp({

@@ -12,7 +12,9 @@ export function createSocket(baseUrl: string, http: HttpClient): GodSocket {
   const socket: GodSocket = io(baseUrl || undefined, {
     path: '/socket.io',
     autoConnect: false,
-    transports: ['websocket', 'polling'],
+    // Start with HTTP long-polling and upgrade to WebSocket when the path allows it:
+    // proxies such as Vercel rewrites forward HTTP but not WebSocket upgrades.
+    transports: ['polling', 'websocket'],
     auth: (cb) => cb({ token: http.token }),
   });
 
