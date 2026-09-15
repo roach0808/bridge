@@ -187,6 +187,15 @@ export function createApiClient(options: ClientOptions) {
       done: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/done`, note ? { note } : {}),
     },
 
+    push: {
+      /** The VAPID public key, or null when the server has push turned off. */
+      config: () => get<{ publicKey: string | null }>('/push/config'),
+      subscribe: (subscription: { endpoint: string; keys: { p256dh: string; auth: string } }) =>
+        post<void>('/push/subscriptions', subscription),
+      unsubscribe: (endpoint: string) => del<void>('/push/subscriptions', { endpoint }),
+      test: () => post<{ browsers: number }>('/push/test'),
+    },
+
     notifications: {
       list: (query?: { unread?: 'true' | 'false'; limit?: number }) => get<NotificationList>('/notifications', query),
       markRead: (ids: string[]) => post<{ updated: number; unreadCount: number }>('/notifications/read', { ids }),

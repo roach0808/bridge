@@ -27,5 +27,9 @@ services:
         value: "true"
       - key: TRUST_PROXY
         value: "2" # Vercel edge → Render proxy → API
+      - key: VAPID_PUBLIC_KEY
+        sync: false # browser push: copy from apps/api/.env (same pair as local dev)
+      - key: VAPID_PRIVATE_KEY
+        sync: false
       - key: LOG_LEVEL
         value: info

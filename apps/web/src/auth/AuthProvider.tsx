@@ -2,6 +2,7 @@ import type { MeDTO, Role } from '@god/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { api, onSessionExpired, socket } from '@/lib/api';
+import { detachNotificationsOnSignOut, syncNotificationsAfterSignIn } from '@/lib/push';
 import { viewerZone } from '@/lib/time';
 
 type Status = 'loading' | 'authenticated' | 'anonymous';
@@ -49,6 +50,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [reset]);
 
+  // Attach this browser's notification subscription to whoever is signed in.
+  useEffect(() => {
+    if (status === 'authenticated') void syncNotificationsAfterSignIn();
+  }, [status, user?.id]);
+
   useEffect(() => {
     if (status === 'authenticated' && !socket.connected) socket.connect();
     const revoked = () => reset();
@@ -66,6 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     try {
+      await detachNotificationsOnSignOut();
       await api.auth.logout();
     } finally {
       reset();

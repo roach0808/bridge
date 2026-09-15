@@ -373,6 +373,18 @@ export interface TodoRemovedEvent {
   removed: true;
 }
 
+/** What the service worker receives in a push message. */
+export interface WebPushPayload {
+  title: string;
+  body: string;
+  /** App path to open when the notification is clicked. */
+  url: string;
+  /** Notifications with the same tag replace each other (e.g. one per chat). */
+  tag: string;
+  /** `test` always shows, even while the app is open and focused. */
+  kind: 'chat' | 'notification' | 'test';
+}
+
 // --- Socket events (§7) -----------------------------------------------------
 
 export interface ServerToClientEvents {

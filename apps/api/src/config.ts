@@ -26,6 +26,10 @@ const schema = z.object({
     .transform((v) => (v === undefined ? undefined : v === 'true')),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   EXPO_ACCESS_TOKEN: z.string().optional(),
+  /** Web Push (browser notifications). Disabled unless both keys are set; generate with `npx web-push generate-vapid-keys`. */
+  VAPID_PUBLIC_KEY: z.string().optional(),
+  VAPID_PRIVATE_KEY: z.string().optional(),
+  VAPID_SUBJECT: z.string().default('mailto:admin@god-system.app'),
   PUSH_ENABLED: z
     .enum(['true', 'false'])
     .default('false')

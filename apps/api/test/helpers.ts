@@ -66,6 +66,9 @@ export interface Fixtures {
   pendingProfileTeam2: { id: string; name: string };
 }
 
+/** Fixture users get distinct, increasing join times: several features order users by `createdAt`. */
+let joinClock = Date.parse('2026-01-01T00:00:00Z');
+
 async function makeUser(
   nickname: string,
   role: Role,
@@ -82,6 +85,7 @@ async function makeUser(
       avatarId: `${role}-01`,
       timeZone: opts.timeZone ?? 'America/New_York',
       isActive: opts.isActive ?? true,
+      createdAt: new Date((joinClock += 1000)),
     },
   });
   return { id: user.id, email, nickname, role, managerId: user.managerId, timeZone: user.timeZone };

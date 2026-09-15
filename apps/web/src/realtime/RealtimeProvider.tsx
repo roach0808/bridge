@@ -13,7 +13,9 @@ import type {
 } from '@god/shared';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { notificationLink, notificationText } from '@god/shared';
 import { useAuth } from '@/auth/AuthProvider';
+import { showInTabNotification } from '@/lib/push';
 import { socket } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 
@@ -37,6 +39,9 @@ export function patchCallInCache(queryClient: QueryClient, call: CallDTO) {
   queryClient.setQueryData<CallDetailDTO>(qk.calls.detail(call.id), (data) => (data ? { ...data, ...call } : data));
 }
 
+/** Asks the app (inside the router) to open a path; used by notification clicks. */
+export const navigateTo = (url: string) => window.dispatchEvent(new CustomEvent<string>('god:navigate', { detail: url }));
+
 interface RealtimeState {
   connected: boolean;
 }
@@ -45,7 +50,8 @@ const RealtimeContext = createContext<RealtimeState>({ connected: false });
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
-  const { status } = useAuth();
+  const { status, user } = useAuth();
+  const meId = user?.id;
   const [connected, setConnected] = useState(socket.connected);
 
   useEffect(() => {
@@ -95,6 +101,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(message.conversationId) });
       window.dispatchEvent(new CustomEvent<ChatMessageDTO>('god:chat-message', { detail: message }));
+      if (message.sender.id !== meId && message.kind === 'text') {
+        showInTabNotification(
+          message.sender.nickname,
+          { body: message.body, tag: `chat:${message.conversationId}`, url: `/chat/${message.conversationId}` },
+          navigateTo,
+        );
+      }
     };
 
     const onChatTodo = (todo: TodoDTO | TodoRemovedEvent) => {
@@ -116,6 +129,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       );
       void queryClient.invalidateQueries({ queryKey: qk.notifications, refetchType: 'none' });
       window.dispatchEvent(new CustomEvent<NotificationDTO>('god:notification', { detail: n }));
+      const text = notificationText(n);
+      showInTabNotification(text.title, { body: text.body, tag: `notification:${n.id}`, url: notificationLink(n) ?? '/notifications' }, navigateTo);
     };
 
     socket.on('connect', onConnect);
@@ -138,7 +153,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('chat:todo', onChatTodo);
       socket.off('chat:read', onChatRead);
     };
-  }, [queryClient, status]);
+  }, [queryClient, status, meId]);
 
   return <RealtimeContext.Provider value={{ connected }}>{children}</RealtimeContext.Provider>;
 }

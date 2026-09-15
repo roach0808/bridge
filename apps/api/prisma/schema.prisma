@@ -109,6 +109,7 @@ model User {
   messages           Message[]
   notifications      Notification[]
   deviceTokens       DeviceToken[]
+  pushSubscriptions  WebPushSubscription[]
   refreshTokens      RefreshToken[]
   createdProfiles    Profile[]           @relation("ProfileCreatedBy")
   reviewedProfiles   Profile[]           @relation("ProfileReviewedBy")
@@ -459,4 +460,21 @@ model Todo {
   @@index([assigneeId, status])
   @@index([createdById, status])
   @@map("todos")
+}
+
+/// A browser's Web Push subscription (one per browser profile). Moves to whoever signs in last.
+model WebPushSubscription {
+  id         String   @id @default(uuid()) @db.Uuid
+  userId     String   @map("user_id") @db.Uuid
+  endpoint   String   @unique
+  p256dh     String
+  auth       String
+  userAgent  String?  @map("user_agent")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("web_push_subscriptions")
 }

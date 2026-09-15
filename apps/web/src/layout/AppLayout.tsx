@@ -105,6 +105,23 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+/** Opens pages requested by notification clicks: in-tab notifications and the service worker. */
+function useNotificationNavigation() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const onWindow = (e: Event) => navigate((e as CustomEvent<string>).detail);
+    const onWorker = (e: MessageEvent<{ type?: string; url?: string }>) => {
+      if (e.data?.type === 'god:navigate' && e.data.url) navigate(e.data.url);
+    };
+    window.addEventListener('god:navigate', onWindow);
+    navigator.serviceWorker?.addEventListener('message', onWorker);
+    return () => {
+      window.removeEventListener('god:navigate', onWindow);
+      navigator.serviceWorker?.removeEventListener('message', onWorker);
+    };
+  }, [navigate]);
+}
+
 /** Unread chat messages and open to-dos assigned to me, for the sidebar badges. */
 function useNavBadges(): Record<NonNullable<NavItem['badge']>, number> {
   const conversations = useQuery({ queryKey: qk.chat.conversations, queryFn: api.chat.conversations, refetchInterval: 120_000 });
@@ -271,6 +288,7 @@ export function AppLayout() {
   const theme = useTheme();
   const desktop = useMediaQuery(theme.breakpoints.up('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
+  useNotificationNavigation();
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>

@@ -39,6 +39,7 @@ import { DateTime } from 'luxon';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
+import { BrowserNotificationsPrompt } from '@/components/BrowserNotifications';
 import { EmptyState, ErrorState } from '@/components/common';
 import { RoleBadge, UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
@@ -611,24 +612,30 @@ export default function ChatPage() {
     return conversationId ? (
       <ChatThread conversationId={conversationId} onBack={() => navigate('/chat')} />
     ) : (
-      <ConversationList activeId={null} onOpen={open} />
+      <>
+        <BrowserNotificationsPrompt />
+        <ConversationList activeId={null} onOpen={open} />
+      </>
     );
   }
 
   return (
-    <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'minmax(280px, 340px) minmax(0, 1fr)' }}>
-      <ConversationList activeId={conversationId} onOpen={open} />
-      {conversationId ? (
-        <ChatThread key={conversationId} conversationId={conversationId} />
-      ) : (
-        <Card sx={{ height: PANEL_HEIGHT, minHeight: 420, display: 'grid', placeItems: 'center' }}>
-          <EmptyState
-            icon={<ChatBubbleOutlineRounded />}
-            title="Pick a chat"
-            description="Choose a conversation on the left, or start a new one."
-          />
-        </Card>
-      )}
-    </Box>
+    <>
+      <BrowserNotificationsPrompt />
+      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: 'minmax(280px, 340px) minmax(0, 1fr)' }}>
+        <ConversationList activeId={conversationId} onOpen={open} />
+        {conversationId ? (
+          <ChatThread key={conversationId} conversationId={conversationId} />
+        ) : (
+          <Card sx={{ height: PANEL_HEIGHT, minHeight: 420, display: 'grid', placeItems: 'center' }}>
+            <EmptyState
+              icon={<ChatBubbleOutlineRounded />}
+              title="Pick a chat"
+              description="Choose a conversation on the left, or start a new one."
+            />
+          </Card>
+        )}
+      </Box>
+    </>
   );
 }

@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
+import { BrowserNotificationsPrompt } from '@/components/BrowserNotifications';
 import { EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { UserChip } from '@/components/identity';
 import { api } from '@/lib/api';
@@ -43,6 +44,8 @@ export default function TodosPage() {
             : 'Instructions from the Founder. Marking one done replies to it in the chat.'
         }
       />
+
+      <BrowserNotificationsPrompt />
 
       {isFounder && (
         <Tabs value={scope} onChange={(_, v: Scope) => setScope(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>

@@ -4,6 +4,7 @@ import type { Db } from '../db';
 import { iso, isoOrNull } from '../http';
 import { emitToUser } from '../realtime/hub';
 import { sendPush } from './push';
+import { notificationPush, sendWebPush } from './webPush';
 
 export const toNotificationDTO = (n: Prisma.NotificationGetPayload<object>): NotificationDTO => ({
   id: n.id,
@@ -36,6 +37,7 @@ export async function notify(
       const dto = toNotificationDTO(row);
       emitToUser(row.userId, 'notification:new', dto);
       void sendPush(row.userId, dto);
+      void sendWebPush([row.userId], notificationPush(dto));
     }
   };
 }

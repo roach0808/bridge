@@ -15,6 +15,7 @@ import {
   useColorScheme,
 } from '@mui/material';
 import { AVATAR_CREDITS, ROLE_LABELS, TEAM_TIME_ZONE, avatarAudienceForRole, password as passwordSchema } from '@god/shared';
+import { BrowserNotificationsSettings } from '@/components/BrowserNotifications';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
@@ -425,6 +426,9 @@ export default function SettingsPage() {
           <Stack spacing={2.5}>
             <PasswordSection />
             <TimeZoneSection />
+            <SectionCard id="settings-notifications" title="Browser notifications">
+              <BrowserNotificationsSettings />
+            </SectionCard>
             <AppearanceSection />
             <AboutSection />
           </Stack>

@@ -20,6 +20,7 @@ import { prisma, type Db } from '../db';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
+import { sendWebPush } from '../notifications/webPush';
 import { emitToUser } from '../realtime/hub';
 import { toUserRef, userRefSelect } from '../serializers';
 
@@ -254,6 +255,14 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   });
   const dto = toMessageDTO(message);
   emitToBoth(c, 'chat:message', dto);
+  void sendWebPush([otherOf(c, actor.id).id], {
+    title: actor.nickname,
+    body: body.length > 180 ? `${body.slice(0, 177)}…` : body,
+    url: `/chat/${c.id}`,
+    // One notification per chat: a newer message replaces the older one.
+    tag: `chat:${c.id}`,
+    kind: 'chat',
+  });
   res.status(201).json(dto);
 });
 
