@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
+import { CHAT_MESSAGE_MAX, TODO_STATUSES } from './chat';
 import { ROLES } from './roles';
 import {
   BLOCK_KINDS,
@@ -240,6 +241,21 @@ export const messageSchema = z.object({ body: trimmed('Message', 5000) });
 export const messagesQuerySchema = z.object({
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+
+// --- Chat & to-dos ------------------------------------------------------------
+
+export const startConversationSchema = z.object({ userId: uuid });
+export const chatMessageSchema = z.object({ body: trimmed('Message', CHAT_MESSAGE_MAX) });
+export const chatMessagesQuerySchema = z.object({
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export const todoDoneSchema = z.object({ note: optionalText(2000).optional() });
+export const listTodosQuerySchema = z.object({
+  /** `assigned` = to-dos assigned to me; `created` = to-dos I (a Founder) created. */
+  scope: z.enum(['assigned', 'created']).default('assigned'),
+  status: z.enum(TODO_STATUSES).optional(),
 });
 
 // --- Notifications & devices -------------------------------------------------

@@ -8,3 +8,4 @@ export * from './schemas';
 export * from './types';
 export * from './errors';
 export * from './features';
+export * from './chat';

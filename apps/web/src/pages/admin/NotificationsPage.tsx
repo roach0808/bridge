@@ -8,6 +8,8 @@ import GppBadOutlined from '@mui/icons-material/GppBadOutlined';
 import NotificationsNoneRounded from '@mui/icons-material/NotificationsNoneRounded';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import PersonAddAlt1Outlined from '@mui/icons-material/PersonAddAlt1Outlined';
+import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
+import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedUserOutlined from '@mui/icons-material/VerifiedUserOutlined';
 import {
   Box,
@@ -43,6 +45,8 @@ const TYPE_META: Record<NotificationType, { icon: ComponentType<SvgIconProps>; l
   'call.message': { icon: ChatBubbleOutlineRounded, label: 'Message' },
   'call.updated': { icon: EditNoteRounded, label: 'Update' },
   'call.created': { icon: AddRounded, label: 'New call' },
+  'todo.assigned': { icon: ChecklistRounded, label: 'To-do' },
+  'todo.done': { icon: TaskAltRounded, label: 'To-do done' },
   'profile.submitted': { icon: PersonAddAlt1Outlined, label: 'Profile submitted' },
   'profile.approved': { icon: VerifiedUserOutlined, label: 'Profile approved' },
   'profile.rejected': { icon: GppBadOutlined, label: 'Profile rejected' },

@@ -27,6 +27,17 @@ export const qk = {
     detail: (id: string) => ['profiles', 'detail', id] as const,
   },
   notifications: ['notifications'] as const,
+  chat: {
+    all: ['chat'] as const,
+    conversations: ['chat', 'conversations'] as const,
+    conversation: (id: string) => ['chat', 'conversation', id] as const,
+    messages: (id: string) => ['chat', 'messages', id] as const,
+    contacts: ['chat', 'contacts'] as const,
+  },
+  todos: {
+    all: ['todos'] as const,
+    list: (params?: object) => ['todos', 'list', params ?? {}] as const,
+  },
   banks: (profileId: string) => ['banks', profileId] as const,
   avatars: (audience?: string) => ['avatars', audience ?? 'all'] as const,
 };

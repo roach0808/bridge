@@ -9,6 +9,7 @@ import { avatarsRouter } from './avatars/avatars.routes';
 import { banksRouter } from './banks/banks.routes';
 import { calendarRouter } from './calendar/calendar.routes';
 import { callsRouter } from './calls/calls.routes';
+import { chatRouter } from './chat/chat.routes';
 import { config } from './config';
 import { dashboardRouter } from './dashboard/dashboard.routes';
 import { prisma } from './db';
@@ -68,6 +69,7 @@ export function createApp() {
   api.use(banksRouter);
   api.use(profilesRouter);
   api.use(callsRouter);
+  api.use(chatRouter);
   api.use(calendarRouter);
   api.use(notificationsRouter);
   api.use(dashboardRouter);

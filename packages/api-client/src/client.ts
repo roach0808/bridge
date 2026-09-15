@@ -1,5 +1,9 @@
 import type {
   AuthResponse,
+  ChatMessageDTO,
+  ConversationDTO,
+  TodoDTO,
+  TodoStatus,
   BankDTO,
   BankInput,
   AvatarAudience,
@@ -31,6 +35,7 @@ import type {
   TransitionInput,
   UpdateCallInput,
   UserDTO,
+  UserRef,
 } from '@god/shared';
 import { HttpClient, type ClientOptions, type Query } from './http';
 
@@ -161,6 +166,25 @@ export function createApiClient(options: ClientOptions) {
       messages: (id: string, cursor?: string | null, limit?: number) =>
         get<CursorPage<MessageDTO>>(`/calls/${enc(id)}/messages`, { cursor, limit }),
       postMessage: (id: string, body: string) => post<MessageDTO>(`/calls/${enc(id)}/messages`, { body }),
+    },
+
+    chat: {
+      contacts: () => get<UserRef[]>('/chat/contacts'),
+      conversations: () => get<ConversationDTO[]>('/chat/conversations'),
+      conversation: (id: string) => get<ConversationDTO>(`/chat/conversations/${enc(id)}`),
+      /** Opens (or creates) the one-to-one chat with a user. */
+      start: (userId: string) => post<ConversationDTO>('/chat/conversations', { userId }),
+      messages: (id: string, cursor?: string | null, limit?: number) =>
+        get<CursorPage<ChatMessageDTO>>(`/chat/conversations/${enc(id)}/messages`, { cursor, limit }),
+      send: (id: string, body: string) => post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { body }),
+      markRead: (id: string) => post<void>(`/chat/conversations/${enc(id)}/read`),
+      makeTodo: (messageId: string) => post<TodoDTO>(`/chat/messages/${enc(messageId)}/todo`),
+      removeTodo: (messageId: string) => del<void>(`/chat/messages/${enc(messageId)}/todo`),
+    },
+
+    todos: {
+      list: (query?: { scope?: 'assigned' | 'created'; status?: TodoStatus }) => get<TodoDTO[]>('/todos', query),
+      done: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/done`, note ? { note } : {}),
     },
 
     notifications: {

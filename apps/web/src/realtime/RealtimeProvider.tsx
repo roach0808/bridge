@@ -1,9 +1,33 @@
-import type { CallDetailDTO, CallDTO, CursorPage, MessageDTO, NotificationDTO, NotificationList, Paginated } from '@god/shared';
+import type {
+  CallDetailDTO,
+  CallDTO,
+  ChatMessageDTO,
+  ChatReadEvent,
+  CursorPage,
+  MessageDTO,
+  NotificationDTO,
+  NotificationList,
+  Paginated,
+  TodoDTO,
+  TodoRemovedEvent,
+} from '@god/shared';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { useAuth } from '@/auth/AuthProvider';
 import { socket } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
+
+type ChatPages = { pages: CursorPage<ChatMessageDTO>[]; pageParams: unknown[] };
+
+/** Adds a chat message to the loaded thread (newest page), ignoring duplicates. */
+export function appendChatMessage(queryClient: QueryClient, message: ChatMessageDTO) {
+  queryClient.setQueryData<ChatPages>(qk.chat.messages(message.conversationId), (data) => {
+    if (!data?.pages.length) return data;
+    if (data.pages.some((p) => p.items.some((m) => m.id === message.id))) return data;
+    const [first, ...rest] = data.pages;
+    return { ...data, pages: [{ ...first!, items: [...first!.items, message] }, ...rest] };
+  });
+}
 
 /** Patches every cached copy of a Call with the server's latest version (§9.3). */
 export function patchCallInCache(queryClient: QueryClient, call: CallDTO) {
@@ -32,6 +56,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       // Anything could have changed while we were away.
       void queryClient.invalidateQueries({ queryKey: qk.calls.all });
       void queryClient.invalidateQueries({ queryKey: qk.notifications });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.all });
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
     };
     const onDisconnect = () => setConnected(false);
 
@@ -64,6 +90,26 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       );
     };
 
+    const onChatMessage = (message: ChatMessageDTO) => {
+      appendChatMessage(queryClient, message);
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(message.conversationId) });
+      window.dispatchEvent(new CustomEvent<ChatMessageDTO>('god:chat-message', { detail: message }));
+    };
+
+    const onChatTodo = (todo: TodoDTO | TodoRemovedEvent) => {
+      // The to-do shows on its message, in the chat list counts and on the to-do lists.
+      void queryClient.invalidateQueries({ queryKey: qk.chat.messages(todo.conversationId) });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(todo.conversationId) });
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+    };
+
+    const onChatRead = (event: ChatReadEvent) => {
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(event.conversationId) });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+    };
+
     const onNotification = (n: NotificationDTO) => {
       queryClient.setQueryData<NotificationList>(qk.notifications, (data) =>
         data ? { items: [n, ...data.items], unreadCount: data.unreadCount + 1 } : data,
@@ -77,6 +123,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('call:updated', onCallUpdated);
     socket.on('call:message', onMessage);
     socket.on('notification:new', onNotification);
+    socket.on('chat:message', onChatMessage);
+    socket.on('chat:todo', onChatTodo);
+    socket.on('chat:read', onChatRead);
     if (socket.connected) setConnected(true);
 
     return () => {
@@ -85,6 +134,9 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('call:updated', onCallUpdated);
       socket.off('call:message', onMessage);
       socket.off('notification:new', onNotification);
+      socket.off('chat:message', onChatMessage);
+      socket.off('chat:todo', onChatTodo);
+      socket.off('chat:read', onChatRead);
     };
   }, [queryClient, status]);
 

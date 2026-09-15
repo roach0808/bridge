@@ -36,6 +36,10 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
       return { title: `${who} created a call`, body: n.payload.summary ?? '' };
     case 'call.updated':
       return { title: `${who} updated a call`, body: n.payload.summary ?? '' };
+    case 'todo.assigned':
+      return { title: `${who} gave you a to-do`, body: n.payload.summary ?? '' };
+    case 'todo.done':
+      return { title: `${who} finished a to-do`, body: n.payload.summary ?? '' };
     case 'profile.submitted':
       return { title: `${who} submitted a profile for review`, body: n.payload.summary ?? '' };
     case 'profile.approved':
@@ -49,6 +53,8 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
 
 export function notificationLink(n: NotificationDTO): string | null {
   if (n.payload.callId) return `/calls/${n.payload.callId}`;
+  if (n.type === 'todo.assigned') return '/todos';
+  if (n.payload.conversationId) return `/chat/${n.payload.conversationId}`;
   if (n.payload.profileId) return '/profiles';
   return null;
 }

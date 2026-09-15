@@ -1,5 +1,7 @@
 import AccountTreeRounded from '@mui/icons-material/AccountTreeRounded';
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
+import ChatRounded from '@mui/icons-material/ChatRounded';
+import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import DashboardRounded from '@mui/icons-material/DashboardRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import HubRounded from '@mui/icons-material/HubRounded';
@@ -18,6 +20,8 @@ export interface NavItem {
   icon: ComponentType<SvgIconProps>;
   roles: Role[];
   section: 'work' | 'admin' | 'account';
+  /** A live count shown next to the label. */
+  badge?: 'chat' | 'todos';
 }
 
 const ALL: Role[] = ['founder', 'manager', 'associate', 'expert'];
@@ -26,6 +30,8 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: DashboardRounded, roles: ALL, section: 'work' },
   { to: '/calls', label: 'Calls', icon: PhoneInTalkRounded, roles: ALL, section: 'work' },
   { to: '/calendar', label: 'Calendar', icon: CalendarMonthRounded, roles: ALL, section: 'work' },
+  { to: '/chat', label: 'Chat', icon: ChatRounded, roles: ALL, section: 'work', badge: 'chat' },
+  { to: '/todos', label: 'To-dos', icon: ChecklistRounded, roles: ALL, section: 'work', badge: 'todos' },
   { to: '/invoicing', label: 'Invoicing', icon: ReceiptLongRounded, roles: ['founder'], section: 'work' },
   { to: '/profiles', label: 'Profiles', icon: AccountTreeRounded, roles: ALL, section: 'admin' },
   { to: '/platforms', label: 'Platforms', icon: HubRounded, roles: ['founder', 'manager'], section: 'admin' },

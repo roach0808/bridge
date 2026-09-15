@@ -30,7 +30,10 @@ import { ROLE_LABELS } from '@god/shared';
 import { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth, useMe } from '@/auth/AuthProvider';
+import { api } from '@/lib/api';
+import { qk } from '@/lib/queryKeys';
 import { RoleDot, UserAvatar } from '@/components/identity';
 import { zoneCity } from '@/lib/time';
 import { useRealtime } from '@/realtime/RealtimeProvider';
@@ -68,6 +71,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const me = useMe();
   const navigate = useNavigate();
   const items = NAV_ITEMS.filter((i) => i.roles.includes(me.role));
+  const badges = useNavBadges();
   const groups = (['work', 'admin', 'account'] as const).map((s) => items.filter((i) => i.section === s)).filter((g) => g.length);
 
   return (
@@ -92,7 +96,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         {groups.map((group, i) => (
           <List key={i} dense disablePadding sx={{ pb: 1.5 }}>
             {group.map((item) => (
-              <NavEntry key={item.to} item={item} onNavigate={onNavigate} />
+              <NavEntry key={item.to} item={item} onNavigate={onNavigate} badge={item.badge ? badges[item.badge] : 0} />
             ))}
           </List>
         ))}
@@ -101,7 +105,21 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-function NavEntry({ item, onNavigate }: { item: NavItem; onNavigate?: () => void }) {
+/** Unread chat messages and open to-dos assigned to me, for the sidebar badges. */
+function useNavBadges(): Record<NonNullable<NavItem['badge']>, number> {
+  const conversations = useQuery({ queryKey: qk.chat.conversations, queryFn: api.chat.conversations, refetchInterval: 120_000 });
+  const todos = useQuery({
+    queryKey: qk.todos.list({ scope: 'assigned', status: 'open' }),
+    queryFn: () => api.todos.list({ scope: 'assigned', status: 'open' }),
+    refetchInterval: 120_000,
+  });
+  return {
+    chat: (conversations.data ?? []).reduce((n, c) => n + c.unreadCount, 0),
+    todos: todos.data?.length ?? 0,
+  };
+}
+
+function NavEntry({ item, onNavigate, badge = 0 }: { item: NavItem; onNavigate?: () => void; badge?: number }) {
   const Icon = item.icon;
   const location = useLocation();
   const active =
@@ -128,6 +146,26 @@ function NavEntry({ item, onNavigate }: { item: NavItem; onNavigate?: () => void
         <Icon sx={{ fontSize: 19 }} />
       </ListItemIcon>
       <ListItemText primary={item.label} slotProps={{ primary: { fontWeight: active ? 600 : 500, fontSize: 14 } }} />
+      {badge > 0 && (
+        <Box
+          component="span"
+          aria-label={`${badge} new`}
+          sx={{
+            minWidth: 20,
+            height: 20,
+            px: 0.75,
+            borderRadius: 99,
+            bgcolor: item.badge === 'chat' ? 'primary.main' : 'warning.main',
+            color: 'common.white',
+            fontSize: 11,
+            fontWeight: 700,
+            display: 'grid',
+            placeItems: 'center',
+          }}
+        >
+          {badge > 99 ? '99+' : badge}
+        </Box>
+      )}
     </ListItemButton>
   );
 }

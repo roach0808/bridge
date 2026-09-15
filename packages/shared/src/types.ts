@@ -2,6 +2,7 @@ import type { AvatarAudience, AvatarStyle } from './avatars';
 import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
 import type { BlockRule, Occurrence } from './scheduleBlocks';
+import type { ChatMessageKind, TodoStatus } from './chat';
 import type { PlatformRegistration } from './schemas';
 
 /** The only identity ever exposed about another user (§2.2). */
@@ -178,12 +179,16 @@ export type NotificationType =
   | 'call.message'
   | 'call.updated'
   | 'call.created'
+  | 'todo.assigned'
+  | 'todo.done'
   | 'profile.submitted'
   | 'profile.approved'
   | 'profile.rejected';
 
 export interface NotificationPayload {
   callId?: string;
+  conversationId?: string;
+  todoId?: string;
   profileId?: string;
   from?: CallStatus | null;
   to?: CallStatus;
@@ -310,12 +315,73 @@ export interface DashboardSummary {
   };
 }
 
+// --- Chat & to-dos ------------------------------------------------------------
+
+/** The to-do attached to a chat message, if the Founder marked it. */
+export interface TodoSummary {
+  id: string;
+  status: TodoStatus;
+  assignee: UserRef;
+  createdBy: UserRef;
+  doneAt: string | null;
+}
+
+export interface ChatMessageDTO {
+  id: string;
+  conversationId: string;
+  sender: UserRef;
+  body: string;
+  /** `todo_done` is the reply posted when the assignee marks a to-do done. */
+  kind: ChatMessageKind;
+  replyTo: { id: string; body: string; sender: UserRef } | null;
+  todo: TodoSummary | null;
+  createdAt: string;
+}
+
+export interface ConversationDTO {
+  id: string;
+  other: UserRef & { isActive: boolean };
+  lastMessage: Pick<ChatMessageDTO, 'id' | 'body' | 'kind' | 'createdAt'> & { senderId: string } | null;
+  unreadCount: number;
+  /** Open to-dos in this chat (assigned to either person). */
+  openTodoCount: number;
+  /** When the other person last read the chat (for "Seen"). */
+  otherLastReadAt: string | null;
+  /** Both people are active and still allowed to chat. */
+  canSend: boolean;
+  createdAt: string;
+}
+
+export interface TodoDTO extends TodoSummary {
+  conversationId: string;
+  message: { id: string; body: string; sender: UserRef; createdAt: string };
+  /** The note the assignee added when marking it done. */
+  doneNote: string | null;
+  createdAt: string;
+}
+
+export interface ChatReadEvent {
+  conversationId: string;
+  userId: string;
+  readAt: string;
+}
+
+export interface TodoRemovedEvent {
+  id: string;
+  conversationId: string;
+  messageId: string;
+  removed: true;
+}
+
 // --- Socket events (§7) -----------------------------------------------------
 
 export interface ServerToClientEvents {
   'call:updated': (call: CallDTO) => void;
   'call:message': (message: MessageDTO) => void;
   'notification:new': (notification: NotificationDTO) => void;
+  'chat:message': (message: ChatMessageDTO) => void;
+  'chat:todo': (todo: TodoDTO | TodoRemovedEvent) => void;
+  'chat:read': (event: ChatReadEvent) => void;
   'user:typing': (payload: { callId: string; userId: string; nickname: string }) => void;
   'session:revoked': () => void;
 }

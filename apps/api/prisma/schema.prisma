@@ -44,6 +44,16 @@ enum PlatformRegistration {
   banned
 }
 
+enum ChatMessageKind {
+  text
+  todo_done
+}
+
+enum TodoStatus {
+  open
+  done
+}
+
 enum AvatarAudience {
   founder
   manager
@@ -104,6 +114,11 @@ model User {
   reviewedProfiles   Profile[]           @relation("ProfileReviewedBy")
   scheduleBlocks     ScheduleBlock[]     @relation("BlockExpert")
   createdBlocks      ScheduleBlock[]     @relation("BlockCreatedBy")
+  conversationsA     Conversation[]      @relation("ConversationUserA")
+  conversationsB     Conversation[]      @relation("ConversationUserB")
+  chatMessages       ChatMessage[]       @relation("ChatMessageSender")
+  assignedTodos      Todo[]              @relation("TodoAssignee")
+  createdTodos       Todo[]              @relation("TodoCreatedBy")
 
   @@index([role])
   @@index([managerId])
@@ -378,4 +393,70 @@ model ProfilePlatformStatus {
 
   @@id([profileId, platformId])
   @@map("profile_platform_statuses")
+}
+
+/// A one-to-one chat. The pair is stored once with user_a_id < user_b_id.
+model Conversation {
+  id              String    @id @default(uuid()) @db.Uuid
+  userAId         String    @map("user_a_id") @db.Uuid
+  userBId         String    @map("user_b_id") @db.Uuid
+  userALastReadAt DateTime? @map("user_a_last_read_at") @db.Timestamptz(3)
+  userBLastReadAt DateTime? @map("user_b_last_read_at") @db.Timestamptz(3)
+  lastMessageAt   DateTime? @map("last_message_at") @db.Timestamptz(3)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  userA    User          @relation("ConversationUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB    User          @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+  todos    Todo[]
+
+  @@unique([userAId, userBId])
+  @@index([userBId])
+  @@map("conversations")
+}
+
+model ChatMessage {
+  id             String          @id @default(uuid()) @db.Uuid
+  conversationId String          @map("conversation_id") @db.Uuid
+  senderId       String          @map("sender_id") @db.Uuid
+  body           String
+  kind           ChatMessageKind @default(text)
+  replyToId      String?         @map("reply_to_id") @db.Uuid
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender       User          @relation("ChatMessageSender", fields: [senderId], references: [id], onDelete: Restrict)
+  replyTo      ChatMessage?  @relation("ChatMessageReply", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies      ChatMessage[] @relation("ChatMessageReply")
+  todo         Todo?         @relation("TodoMessage")
+  doneFor      Todo?         @relation("TodoDoneMessage")
+
+  @@index([conversationId, createdAt])
+  @@map("chat_messages")
+}
+
+/// A Founder turned a chat message into a to-do for the other person in the chat.
+model Todo {
+  id             String     @id @default(uuid()) @db.Uuid
+  messageId      String     @unique @map("message_id") @db.Uuid
+  conversationId String     @map("conversation_id") @db.Uuid
+  assigneeId     String     @map("assignee_id") @db.Uuid
+  createdById    String     @map("created_by") @db.Uuid
+  status         TodoStatus @default(open)
+  doneAt         DateTime?  @map("done_at") @db.Timestamptz(3)
+  doneNote       String?    @map("done_note")
+  /// The chat reply posted when the assignee marked it done.
+  doneMessageId  String?    @unique @map("done_message_id") @db.Uuid
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  message      ChatMessage  @relation("TodoMessage", fields: [messageId], references: [id], onDelete: Cascade)
+  doneMessage  ChatMessage? @relation("TodoDoneMessage", fields: [doneMessageId], references: [id], onDelete: SetNull)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  assignee     User         @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("TodoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([assigneeId, status])
+  @@index([createdById, status])
+  @@map("todos")
 }

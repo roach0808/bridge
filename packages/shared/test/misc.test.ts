@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   AVATAR_CATALOG,
+  canChat,
+  type Role,
   AVATAR_AUDIENCES,
   BLOCKING_STATUSES,
   CALL_DURATIONS,
@@ -135,5 +137,30 @@ describe('schemas', () => {
     const parsed = blockPatchSchema.parse({ changes: { repeat: { weekdays: [1] } } });
     expect(parsed.scope).toBe('all');
     expect(parsed.changes.repeat).toEqual({ weekdays: [1] });
+  });
+});
+
+describe('canChat', () => {
+  const u = (id: string, role: Role) => ({ id, role });
+  it.each<[Role, Role, boolean]>([
+    ['founder', 'founder', true],
+    ['founder', 'manager', true],
+    ['founder', 'associate', true],
+    ['founder', 'expert', true],
+    ['manager', 'manager', true],
+    ['associate', 'associate', true],
+    ['expert', 'expert', true],
+    ['associate', 'manager', true],
+    ['manager', 'associate', true],
+    ['associate', 'expert', false],
+    ['manager', 'expert', false],
+    ['expert', 'associate', false],
+    ['expert', 'manager', false],
+  ])('%s ↔ %s → %s', (a, b, expected) => {
+    expect(canChat(u('a', a), u('b', b))).toBe(expected);
+    expect(canChat(u('b', b), u('a', a))).toBe(expected);
+  });
+  it('nobody chats with themselves', () => {
+    expect(canChat(u('a', 'founder'), u('a', 'founder'))).toBe(false);
   });
 });
