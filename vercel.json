@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm --filter web build && rm -rf dist && cp -r apps/web/dist dist",
+  "buildCommand": "pnpm --filter web build && WEB=\"$(pnpm --silent --filter web exec pwd)\" && if [ \"$WEB\" != \"$PWD\" ]; then rm -rf dist && cp -r \"$WEB/dist\" dist; fi",
   "outputDirectory": "dist",
   "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
