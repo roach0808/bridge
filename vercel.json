@@ -3,5 +3,9 @@
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm --filter web build && WEB=\"$(pnpm --silent --filter web exec pwd)\" && if [ \"$WEB\" != \"$PWD\" ]; then rm -rf dist && cp -r \"$WEB/dist\" dist; fi",
   "outputDirectory": "dist",
-  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "https://bridge-api-bu45.onrender.com/api/$1" },
+    { "source": "/socket.io/(.*)", "destination": "https://bridge-api-bu45.onrender.com/socket.io/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }
