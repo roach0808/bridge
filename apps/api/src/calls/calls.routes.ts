@@ -17,6 +17,7 @@ import { idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import { emitToCall } from '../realtime/hub';
 import { historyInclude, messageInclude, toHistoryDTO, toMessageDTO } from '../serializers';
+import { visibleHistoryWhere } from './calls.access';
 import {
   createCall,
   getCallDetail,
@@ -51,9 +52,10 @@ callsRouter.post('/calls/:id/transition', async (req, res) => {
 });
 
 callsRouter.get('/calls/:id/history', async (req, res) => {
-  const call = await getCallForActor(actorOf(req), idParam(req));
+  const actor = actorOf(req);
+  const call = await getCallForActor(actor, idParam(req));
   const history = await prisma.callStatusHistory.findMany({
-    where: { callId: call.id },
+    where: { callId: call.id, ...visibleHistoryWhere(actor) },
     include: historyInclude,
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });

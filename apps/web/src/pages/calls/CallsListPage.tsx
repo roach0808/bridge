@@ -28,10 +28,10 @@ import {
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import {
   CALL_STATUSES,
-  STAGES,
   STAGE_LABELS,
   STAGE_STATUSES,
   STATUS_LABELS,
+  stagesForRole,
   type CallStatus,
   type UserRef,
 } from '@god/shared';
@@ -100,6 +100,8 @@ export default function CallsListPage() {
   const mobile = useMediaQuery(theme.breakpoints.down('md'));
   const [params, setParams] = useSearchParams();
 
+  // Experts never see the invoicing stage.
+  const stages = stagesForRole(me.role);
   const statuses = params.getAll('status').filter((s): s is CallStatus => (CALL_STATUSES as readonly string[]).includes(s));
   const associateId = params.get('associateId');
   const expertId = params.get('expertId');
@@ -210,7 +212,7 @@ export default function CallsListPage() {
                 },
               }}
             >
-              {STAGES.flatMap((stage) => [
+              {stages.flatMap((stage) => [
                 <MenuItem key={stage} disabled dense sx={{ opacity: '1 !important' }}>
                   <Typography variant="caption" color="text.secondary">
                     {STAGE_LABELS[stage]}
@@ -245,7 +247,7 @@ export default function CallsListPage() {
             />
           </Stack>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center" sx={{ rowGap: 1.5 }}>
-            {STAGES.map((stage) => {
+            {stages.map((stage) => {
               const active = STAGE_STATUSES[stage].every((s) => statuses.includes(s)) && statuses.length === STAGE_STATUSES[stage].length;
               return (
                 <Chip

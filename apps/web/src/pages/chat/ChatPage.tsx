@@ -98,7 +98,7 @@ function NewChatDialog({ open, onClose, onPick }: { open: boolean; onClose: () =
             <ErrorState error={contacts.error} onRetry={() => void contacts.refetch()} />
           </Box>
         ) : filtered.length === 0 ? (
-          <EmptyState title="Nobody found" description="You can chat with the Founder and people in your own role; Associates and Managers can also chat with each other." />
+          <EmptyState title="Nobody found" description="Everyone can chat with the Founder. Managers chat with Managers and Associates; Associates with Managers." />
         ) : (
           <List dense disablePadding>
             {ROLES.map((role) => {

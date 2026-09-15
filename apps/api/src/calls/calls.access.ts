@@ -1,4 +1,5 @@
 import {
+  INVOICING_STATUSES,
   STATUS_STAGE,
   allowedTransitions,
   type CallPermissions,
@@ -28,6 +29,11 @@ export function visibleCallsWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.Cal
     case 'expert':
       return { expertId: actor.id };
   }
+}
+
+/** Status-history rows a user may see: Experts don't see the invoicing steps. */
+export function visibleHistoryWhere(actor: Pick<Actor, 'role'>): Prisma.CallStatusHistoryWhereInput {
+  return actor.role === 'expert' ? { toStatus: { notIn: [...INVOICING_STATUSES] } } : {};
 }
 
 export function canViewCall(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape): boolean {

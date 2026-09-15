@@ -1,3 +1,5 @@
+import type { Role } from './roles';
+
 export const CALL_STATUSES = [
   'on_scheduling',
   'scheduled',
@@ -73,3 +75,26 @@ export const CALL_DURATIONS = [15, 30, 45, 60] as const;
 export type CallDuration = (typeof CALL_DURATIONS)[number];
 
 export const TERMINAL_STATUSES: readonly CallStatus[] = ['process_to_bank'];
+
+/** The invoicing stage. Experts never see it: to them these calls are simply finished. */
+export const INVOICING_STATUSES: readonly CallStatus[] = STAGE_STATUSES.invoicing;
+
+/** The status a role is shown for a call. */
+export function statusForRole(role: Role, status: CallStatus): CallStatus {
+  return role === 'expert' && INVOICING_STATUSES.includes(status) ? 'finished' : status;
+}
+
+/** The stages a role sees (Experts: scheduling and execution only). */
+export function stagesForRole(role: Role): Stage[] {
+  return role === 'expert' ? STAGES.filter((s) => s !== 'invoicing') : [...STAGES];
+}
+
+/**
+ * Turns a status filter from a role into the statuses to query: for Experts,
+ * `finished` also matches invoiced calls and invoicing statuses match nothing.
+ */
+export function statusFilterForRole(role: Role, statuses: CallStatus[]): CallStatus[] {
+  if (role !== 'expert') return statuses;
+  const visible = statuses.filter((s) => !INVOICING_STATUSES.includes(s));
+  return visible.includes('finished') ? [...visible, ...INVOICING_STATUSES] : visible;
+}

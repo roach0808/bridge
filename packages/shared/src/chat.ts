@@ -3,16 +3,17 @@ import type { Role } from './roles';
 /**
  * Who may hold a one-to-one chat with whom:
  * - the Founder with anyone;
- * - anyone with someone of the same role;
+ * - Managers with Managers;
  * - Associates with Managers (any Manager, not only their own).
+ * Associates don't chat with each other, and Experts only with the Founder.
  * The rule is symmetric, and nobody chats with themselves.
  */
 export function canChat(a: { id: string; role: Role }, b: { id: string; role: Role }): boolean {
   if (a.id === b.id) return false;
   if (a.role === 'founder' || b.role === 'founder') return true;
-  if (a.role === b.role) return true;
-  const pair = new Set([a.role, b.role]);
-  return pair.has('associate') && pair.has('manager');
+  if (a.role === 'manager') return b.role === 'manager' || b.role === 'associate';
+  if (b.role === 'manager') return a.role === 'associate';
+  return false;
 }
 
 export const CHAT_MESSAGE_KINDS = ['text', 'todo_done'] as const;

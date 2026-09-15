@@ -1,6 +1,6 @@
 # God System — Project Specification
 
-Version 1.1 · 2026-09-14 · Status: Phase 1 implemented
+Version 1.2 · 2026-09-15 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -28,7 +28,8 @@ PC browser and a mobile app.
 ### 1.2 Non-goals for version 1
 
 - Public sign-up (accounts are created by the Founder or a Manager).
-- Video or audio calling inside the system (calls happen on external platforms).
+- Video or audio calling inside the system (calls happen on external platforms;
+  the Expert shares a VDO.Ninja link on the call).
 - Accounting integration (the invoice stages are status tracking only).
 
 ---
@@ -40,7 +41,7 @@ PC browser and a mobile app.
 | **Founder** | Owner of the system. Full access. Handles invoice stages. Creates Managers. | — |
 | **Manager** | Manages a team of Associates. Oversees all Calls of those Associates. | Founder |
 | **Associate** | Creates and schedules Calls. Owns the scheduling stages. | Manager |
-| **Expert** | Performs the Call. Owns the execution stages. | Founder |
+| **Expert** | Confirms and performs the Call. Owns the execution stages. Never sees invoicing. | Founder |
 
 ### 2.1 Role hierarchy
 
@@ -64,8 +65,8 @@ grouped under Managers; they are assigned per Call.
   endpoint returns it, except the user's own `/me` endpoint (and the login and
   refresh responses, which describe the caller).
 - There is no real-name field anywhere in the schema.
-- Chat messages, status history entries, and assignments display nickname +
-  role only.
+- Chat messages, to-dos, status history entries, and assignments display
+  nickname + role only.
 - **[Implementation]** Call payloads also include the Expert's IANA time zone
   so clients can show the Expert's local time (§9.1 New Call).
 
@@ -78,21 +79,28 @@ grouped under Managers; they are assigned per Call.
 | Create Expert | ✓ | | | |
 | Deactivate user | ✓ | ✓ (own team) | | |
 | Create / edit Platform | ✓ | ✓ | | |
-| Add / edit Profile | ✓ | | | |
-| Add / edit a Profile's banks | ✓ | | | |
+| Add Profile | ✓ (approved at once) | | ✓ (pending until a Founder approves) | |
+| Edit Profile | ✓ | | own pending or rejected submission (sends it back for review) | |
+| View Profile details | all | shared + own team's submissions | shared + own submissions | Profiles of assigned Calls, without platform statuses |
+| Set a Profile's status on a platform | ✓ | | | |
+| See / edit a Profile's current address and banks | ✓ | | | |
 | Upload own photo | ✓ | ✓ | ✓ | ✓ |
 | Upload a Profile photo | ✓ | | | |
-| Approve / reject a pending Profile (older submissions only) | ✓ | | | |
+| Approve / reject a pending Profile | ✓ | | | |
 | Choose own avatar (from own role's set) | ✓ | ✓ | ✓ | ✓ |
 | Create Call | ✓ | ✓ | ✓ | |
 | View Call | all | own team's | own | assigned |
 | Reassign Associate on a Call | ✓ | ✓ (own team) | | |
 | Reassign Expert on a Call | ✓ | ✓ (own team) | ✓ (own, before scheduled) | |
-| Set scheduling statuses | override | override | ✓ | |
+| Set scheduling statuses | override | override | ✓ | request rescheduling only |
+| Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
-| Post message in Call thread | ✓ | ✓ | ✓ | ✓ |
-| View audit history | ✓ | ✓ (own team) | own | assigned |
+| See invoice statuses and amounts | ✓ | ✓ (own team) | own | |
+| Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
+| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders only |
+| Turn a chat message into a to-do | ✓ | | | |
+| View audit history | ✓ | ✓ (own team) | own | assigned (without invoicing steps) |
 
 "override" means the role may perform the transition on behalf of the normal
 owner. Every override is recorded in the status history with the actor.
@@ -110,6 +118,16 @@ as `permissions` on every Call:
 - `reassignExpert`: Founder or Manager during the scheduling stage; the call's
   Associate only while `on_scheduling`.
 - `editInvoice`: Founder.
+
+**[Implementation]** Experts never see invoicing. The server shows them
+`invoice_submit`, `invoice_approve` and `process_to_bank` calls as `finished`
+(in call payloads, lists, the calendar, dashboard counts and socket updates),
+sends `invoiceAmount`/`invoiceCurrency` as null, leaves invoicing steps out of
+their status history, treats a `finished` filter as including invoiced calls,
+and does not notify them about invoicing transitions or invoice edits. The web
+app drops the Invoicing stage from their status bar and filters
+(`statusForRole`, `stagesForRole`, `statusFilterForRole` in
+`packages/shared/src/callStatus.ts`).
 
 ---
 
@@ -152,14 +170,30 @@ as `permissions` on every Call:
 | name | text | |
 | linkedin_url | text, nullable | |
 | brief_experience | text | |
+| date_of_birth | date, nullable | |
+| gender | text, nullable | Male, Female or Other in the web form |
+| nationality, location | text, nullable | |
+| education, career_history | text, nullable | Free text |
+| current_address | text, nullable | Founder only: never returned to other roles, and ignored when others send it |
 | avatar_id | text → Avatar | Must be from the profile avatar set |
 | photo_id | uuid → Photo, nullable, unique | Uploaded by the Founder |
-| status | enum: pending, approved, rejected | Profiles added by the founder are approved at once; pending/rejected only exist for older associate submissions |
+| status | enum: pending, approved, rejected | Profiles added by a Founder are approved at once; Associate submissions start pending until a Founder approves or rejects them |
 | created_by | uuid → User | Who added it |
 | reviewed_by | uuid → User, nullable | Founder who approved or rejected |
 | reviewed_at | timestamptz, nullable | |
 | rejection_reason | text, nullable | Required when rejected |
 | created_at, updated_at | timestamptz | |
+
+#### ProfilePlatformStatus
+
+| Field | Type | Notes |
+|---|---|---|
+| profile_id, platform_id | uuid → Profile, uuid → Platform | Primary key together; deleted with either side |
+| status | enum PlatformRegistration: not_registered, registered, banned | |
+| updated_at | timestamptz | |
+
+A Profile's standing on each expert network platform. A missing row means
+`not_registered`. Only the Founder sets it; Experts don't see it.
 
 #### Call
 
@@ -177,7 +211,11 @@ as `permissions` on every Call:
 | notes | text | Internal notes |
 | project_details | text | Required, never blank. The project brief from the platform |
 | platform_associate_name | text | Required, never blank. The platform's own staff contact, not our associate |
-| invoice_amount | numeric(12,2), nullable | Founder stage |
+| ninja_link | text, nullable | Meeting link the Expert must add when starting the call |
+| actual_duration_minutes | integer, nullable | Entered by the Expert when finishing; the booked `duration_minutes` (and the calendar slot) stay unchanged |
+| rating | integer 1–5, nullable | The Expert's answer to "How did the call go?", required when finishing |
+| feedback | text, nullable | Optional note with the rating, e.g. "Call went well" |
+| invoice_amount | numeric(12,2), nullable | Founder stage. Never shown to Experts |
 | invoice_currency | text (ISO 4217), nullable | |
 | created_by | uuid → User | |
 | created_at, updated_at | timestamptz | |
@@ -283,7 +321,7 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | comment | text, nullable | |
 | created_at | timestamptz | |
 
-#### Message (per-Call thread)
+#### Message (per-Call thread, switched off)
 
 | Field | Type | Notes |
 |---|---|---|
@@ -299,10 +337,58 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 |---|---|---|
 | id | uuid | |
 | user_id | uuid → User | |
-| type | text | call.status_changed, call.assigned, call.created, call.updated, call.message, profile.approved, profile.rejected |
-| payload | jsonb | call_id, from, to, actor nickname + role, summary |
+| type | text | call.status_changed, call.assigned, call.created, call.updated, call.message, todo.assigned, todo.done, profile.submitted, profile.approved, profile.rejected |
+| payload | jsonb | callId, conversationId, todoId, profileId, from, to, actor nickname + role, summary |
 | read_at | timestamptz, nullable | |
 | created_at | timestamptz | |
+
+#### Conversation (one-to-one chat)
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| user_a_id, user_b_id | uuid → User | The pair is stored once, with `user_a_id < user_b_id` (check constraint, unique pair) |
+| user_a_last_read_at, user_b_last_read_at | timestamptz, nullable | Read markers for unread counts and "Seen" |
+| last_message_at | timestamptz, nullable | Chats without messages are not listed |
+| created_at | timestamptz | |
+
+#### ChatMessage
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| conversation_id | uuid → Conversation | |
+| sender_id | uuid → User | |
+| body | text | Never blank (check constraint), at most 5000 characters |
+| kind | enum: text, todo_done | `todo_done` is the reply posted when a to-do is marked done |
+| reply_to_id | uuid → ChatMessage, nullable | For `todo_done`: the to-do's message |
+| created_at | timestamptz | |
+
+#### Todo
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| message_id | uuid → ChatMessage, unique | The chat message the Founder turned into a to-do |
+| conversation_id | uuid → Conversation | |
+| assignee_id | uuid → User | The other person in the chat |
+| created_by | uuid → User (Founder) | |
+| status | enum: open, done | `done_at` is set exactly when done (check constraint) |
+| done_at | timestamptz, nullable | |
+| done_note | text, nullable | The assignee's note, also the body of the reply |
+| done_message_id | uuid → ChatMessage, nullable, unique | The `todo_done` reply |
+| created_at, updated_at | timestamptz | |
+
+#### WebPushSubscription
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| user_id | uuid → User | Whoever signed in last in that browser |
+| endpoint | text, unique | The push service URL for one browser profile |
+| p256dh, auth | text | Encryption keys from the browser |
+| user_agent | text, nullable | |
+| created_at, last_seen_at | timestamptz | |
 
 #### DeviceToken (Phase 2, table created in Phase 1)
 
@@ -337,8 +423,13 @@ User(expert) 1 ── * Call
 User(expert) 1 ── * ScheduleBlock
 Call         1 ── * CallStatusHistory
 Call         1 ── * Message
+Profile      1 ── * ProfilePlatformStatus * ── 1 Platform
+User         2 ── * Conversation          (one per pair)
+Conversation 1 ── * ChatMessage
+ChatMessage  1 ── 0..1 Todo
 User         1 ── * Notification
 User         1 ── * DeviceToken
+User         1 ── * WebPushSubscription
 ```
 
 ### 3.3 Database constraints
@@ -359,7 +450,7 @@ User         1 ── * DeviceToken
   `messages(call_id, created_at)`.
 - Exclusion constraint `calls_expert_no_overlap` (needs the `btree_gist`
   extension): an Expert cannot have two calls whose `[scheduled_at, ends_at)`
-  ranges overlap while both are in a blocking status: `scheduled`,
+  ranges overlap while both are in a blocking status: `scheduled`, `confirmed`,
   `on_rescheduling`, `ongoing`, `finished`, `invoice_submit`,
   `invoice_approve` or `process_to_bank`. `on_scheduling` is tentative and
   never blocks. Ranges are half-open, so a call ending at 10:00 and one
@@ -370,7 +461,10 @@ User         1 ── * DeviceToken
   days (3 years) after its start.
 - **[Implementation]** Also: `platforms_country_format`,
   `profiles_rejection_reason_required`, `users_manager_only_for_associates`,
-  `calls_invoice_amount_nonnegative`, `calls_invoice_currency_format`.
+  `calls_invoice_amount_nonnegative`, `calls_invoice_currency_format`,
+  `calls_rating_range` (1–5), `calls_actual_duration_positive`,
+  `conversations_ordered_pair`, `chat_messages_body_present`,
+  `todos_done_at_when_done`.
 
 ---
 
@@ -382,23 +476,28 @@ User         1 ── * DeviceToken
 |---|---|---|
 | on_scheduling | Scheduling | Associate |
 | scheduled | Scheduling | Associate |
-| on_rescheduling | Scheduling | Associate |
+| confirmed | Scheduling | Expert |
+| on_rescheduling | Scheduling | Associate or Expert |
 | ongoing | Execution | Expert |
 | finished | Execution | Expert |
 | invoice_submit | Invoicing | Founder |
 | invoice_approve | Invoicing | Founder |
 | process_to_bank | Invoicing | Founder |
 
-A new Call starts in `on_scheduling`.
+A new Call starts in `on_scheduling`: tentative, the Expert is optional and the
+Expert's time is not blocked. `on_rescheduling` is a booked call sent back: the
+Expert is required and the old slot stays blocked until it is scheduled again.
 
 ### 4.2 Allowed transitions
 
 ```
 on_scheduling ──(Associate)──► scheduled
-scheduled ──(Associate)──► on_rescheduling
+scheduled ──(Expert)──► confirmed
+scheduled ──(Associate or Expert)──► on_rescheduling
+confirmed ──(Associate or Expert)──► on_rescheduling
 on_rescheduling ──(Associate)──► scheduled
-scheduled ──(Expert)──► ongoing
-scheduled ──(Expert)──► finished
+confirmed ──(Expert)──► ongoing
+confirmed ──(Expert)──► finished
 ongoing ──(Expert)──► finished
 finished ──(Founder)──► invoice_submit
 invoice_submit ──(Founder)──► invoice_approve
@@ -409,6 +508,17 @@ Rules:
 
 - Ownership passes with the stage: once `scheduled`, the Associate can no
   longer move the Call forward, only back to `on_rescheduling`.
+- The Expert confirms a scheduled time (`confirmed`: they are available and
+  will take the call) before the call can start or finish.
+- Either the Associate or the Expert can send a scheduled or confirmed call
+  back to `on_rescheduling`; neither counts as an override. An Expert must give
+  a reason (400 without a comment), and the web app first reminds them to
+  update their calendar so the Associate can find their new availability.
+- Changing the time or duration of a `confirmed` call moves it back to
+  `scheduled` (with a history row and notifications): the Expert confirms again.
+- Moving to `ongoing` requires a `ninjaLink` (a URL). Moving to `finished`
+  requires `actualDurationMinutes` (1–600) and `rating` (1–5); `feedback` is
+  optional. Missing or invalid values are 400 with field issues.
 - Once `ongoing` or `finished`, the Associate has no transitions. Only the
   Founder may act after `finished`.
 - `process_to_bank` is terminal.
@@ -421,10 +531,12 @@ The rules live in one place, `packages/shared/src/callTransitions.ts`, as data:
 ```ts
 export const TRANSITIONS: Transition[] = [
   { from: 'on_scheduling',   to: 'scheduled',       roles: ['associate', 'manager', 'founder'] },
-  { from: 'scheduled',       to: 'on_rescheduling', roles: ['associate', 'manager', 'founder'] },
+  { from: 'scheduled',       to: 'confirmed',       roles: ['expert', 'founder'] },
+  { from: 'scheduled',       to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
+  { from: 'confirmed',       to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
   { from: 'on_rescheduling', to: 'scheduled',       roles: ['associate', 'manager', 'founder'] },
-  { from: 'scheduled',       to: 'ongoing',         roles: ['expert', 'founder'] },
-  { from: 'scheduled',       to: 'finished',        roles: ['expert', 'founder'] },
+  { from: 'confirmed',       to: 'ongoing',         roles: ['expert', 'founder'] },
+  { from: 'confirmed',       to: 'finished',        roles: ['expert', 'founder'] },
   { from: 'ongoing',         to: 'finished',        roles: ['expert', 'founder'] },
   { from: 'finished',        to: 'invoice_submit',  roles: ['founder'] },
   { from: 'invoice_submit',  to: 'invoice_approve', roles: ['founder'] },
@@ -437,7 +549,9 @@ export function canTransition(role, from, to, ctx): boolean
 `ctx` carries the relationship check: the Associate must be the Call's
 associate, the Expert must be the Call's expert, the Manager must manage the
 Call's associate. The server enforces this function; clients use it only to
-decide which buttons to render.
+decide which buttons to render. Each edge also has its normal owners
+(`EDGE_OWNERS`; rescheduling belongs to both the Associate and the Expert), and
+anyone else allowed is recorded as an override.
 
 **[Implementation]** Error precedence on `POST /calls/:id/transition`: a call
 the user cannot see is 404; an edge not in the table is 409
@@ -451,10 +565,13 @@ locked `FOR UPDATE`):
 
 1. Updates `calls.status`.
 2. Inserts a `call_status_history` row.
-3. Creates `notifications` for every other participant of the Call
-   (associate, expert, associate's manager, founder).
-4. After commit, emits `call:updated` and `notification:new` (§7.3).
-5. Phase 2: sends a push to each recipient's registered device tokens.
+3. Stores the step's extra fields: `ninjaLink` for `ongoing`;
+   `actualDurationMinutes`, `rating`, `feedback` for `finished`.
+4. Creates `notifications` for every other participant of the Call
+   (associate, expert, associate's manager, founder), except that the Expert
+   is not notified about invoicing steps.
+5. After commit, emits `call:updated` and `notification:new` (§7.3) and sends
+   browser push notifications (§7.5).
 
 ### 4.5 Proposed future statuses (not in v1)
 
@@ -484,6 +601,8 @@ locked `FOR UPDATE`):
 | Monorepo | pnpm workspaces + Turborepo | |
 | Testing | Vitest (unit), Supertest (API), Playwright (web e2e) | |
 | Local infra | Docker Compose (Postgres) | |
+| Browser push | Web Push (`web-push`, VAPID) + a service worker | |
+| Hosting **[Implementation]** | Vercel (web), Render (API), Aiven PostgreSQL | |
 
 **[Implementation]** Material UI replaces Tailwind CSS (product decision). The
 theme uses CSS variables with light and dark color schemes, Inter, and fixed
@@ -544,8 +663,9 @@ apps/api/src/
 ├── avatars/               catalog + SVG rendering
 ├── platforms/
 ├── profiles/
+├── chat/                  one-to-one chat and to-dos
 ├── calls/
-│   ├── calls.routes.ts    incl. history and messages
+│   ├── calls.routes.ts    incl. history and (switched-off) messages
 │   ├── calls.service.ts   create, list, get, update, transition, broadcast
 │   ├── calls.serialize.ts
 │   └── calls.access.ts    who can see / act on a call
@@ -554,7 +674,8 @@ apps/api/src/
 ├── notifications/
 │   ├── notify.ts          single entry point: db row + socket + (push)
 │   ├── push.ts            Expo push adapter (Phase 2, off unless PUSH_ENABLED)
-│   └── notifications.routes.ts  incl. devices
+│   ├── webPush.ts         browser push (off unless VAPID keys are set)
+│   └── notifications.routes.ts  incl. devices and browser push subscriptions
 └── realtime/              socket auth, room joins, emit helpers
 ```
 
@@ -604,16 +725,26 @@ hashed.
 | POST | /platforms | Founder, Manager |
 | PATCH | /platforms/:id | Founder, Manager |
 
+**[Implementation]** Platform links (`url`) are kept for the Founder's edit form
+but not shown anywhere else, and are not part of Call payloads.
+
 ### 6.4 Profiles
 
 | Method | Path | Who |
 |---|---|---|
-| GET | /profiles | all except Expert. Query: q, status. Approved profiles are shared; pending and rejected ones are visible to the founder, the author, and the author's manager |
+| GET | /profiles | all. Query: q, status. Approved profiles are shared; pending and rejected ones are visible to the Founder, the author, and the author's Manager. Experts see only the Profiles of Calls assigned to them |
 | GET | /profiles/:id | same visibility |
-| POST | /profiles | Founder only. { name, linkedinUrl?, briefExperience?, avatarId } Created approved |
-| PATCH | /profiles/:id | Founder (no re-approval), or the author of an older submission (sends it back to pending) |
+| POST | /profiles | Founder, Associate. { name, linkedinUrl?, briefExperience?, avatarId, dateOfBirth?, gender?, nationality?, location?, education?, careerHistory?, currentAddress? (Founder only) }. A Founder's profile is approved at once; an Associate's is pending and every active Founder gets `profile.submitted` |
+| PATCH | /profiles/:id | Founder (no re-approval), or the author of a pending or rejected submission (sends it back to pending and notifies the Founders). Approved profiles: Founder only |
 | POST | /profiles/:id/approve | Founder. Pending only; author is notified |
 | POST | /profiles/:id/reject | Founder. { reason } required; author is notified |
+| PUT | /profiles/:id/platforms/:platformId | Founder. { status: not_registered \| registered \| banned } |
+
+Profile responses include the personal details and `platformStatuses`: one
+entry per platform ({ platform: { id, name, priority }, status }) in priority
+order, `not_registered` when never set. Experts get `platformStatuses: null`.
+`currentAddress`, `bankCount` and `needsBank` are null for everyone except the
+Founder.
 
 A call can only be created with an approved profile (409
 `profile_not_approved`).
@@ -624,12 +755,17 @@ A call can only be created with an approved profile (409
 |---|---|---|---|
 | GET | /calls | all | Scoped per role (§2.3). Query: status (repeatable), associate_id, expert_id, platform_id, from, to, q, sort, page, pageSize |
 | POST | /calls | Founder, Manager, Associate | { platform_id, profile_id, associate_id?, expert_id?, scheduled_at, duration_minutes, project_details, platform_associate_name, notes? }. The profile must be approved. Founder and Manager must pass associate_id |
-| GET | /calls/:id | participants | Includes platform, profile, associate, manager, expert, last 50 messages, full history |
+| GET | /calls/:id | participants | Includes platform, profile, associate, manager, expert and the history (`messages` is always empty while messaging is off) |
 | PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, invoice_*. scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
-| POST | /calls/:id/transition | per §4 | { to, comment? } → 200 with updated Call, or 409 (invalid edge, or `expert_busy` when moving to a blocking status would double-book the Expert) |
-| GET | /calls/:id/history | participants | Status history |
-| GET | /calls/:id/messages | participants | Cursor paginated: newest page first, items oldest → newest; `nextCursor` loads older |
-| POST | /calls/:id/messages | participants | { body } |
+| POST | /calls/:id/transition | per §4 | { to, comment?, ninjaLink?, actualDurationMinutes?, rating?, feedback? } → 200 with updated Call; 400 when a required field for the step is missing (§4.2); 409 (invalid edge, or `expert_busy` when moving to a blocking status would double-book the Expert) |
+| GET | /calls/:id/history | participants | Status history (Experts: without invoicing steps) |
+| GET | /calls/:id/messages | participants | **Switched off** (404). Cursor paginated when on |
+| POST | /calls/:id/messages | participants | **Switched off** (404). { body } when on |
+
+**[Implementation]** Per-Call message threads are switched off
+(`FEATURES.messages` in `packages/shared/src/features.ts`): the routes return
+404 and the web app hides the thread. Existing rows are kept. Conversations
+now happen in one-to-one chat (§6.11).
 
 ### 6.6 Notifications
 
@@ -637,6 +773,10 @@ A call can only be created with an approved profile (409
 |---|---|---|
 | GET | /notifications | Own, newest first; `X-Unread-Count` header and `unreadCount` in the body. Query: unread, limit |
 | POST | /notifications/read | { ids } or { all: true } |
+| GET | /push/config | { publicKey }: the VAPID public key, or null when browser push is off |
+| POST | /push/subscriptions | { endpoint, keys: { p256dh, auth } }. Saves this browser for the caller; a browser that belonged to someone else moves to the caller |
+| DELETE | /push/subscriptions | Query: endpoint. Called on sign-out and when turning notifications off |
+| POST | /push/test | Sends a test notification to the caller's browsers. 409 when push is off or no browser is subscribed |
 
 ### 6.7 Devices (Phase 2, endpoint shipped in Phase 1)
 
@@ -651,7 +791,7 @@ A call can only be created with an approved profile (409
 {
   "id": "…",
   "status": "scheduled",
-  "platform":  { "id": "…", "name": "…", "url": "…", "country": "KR", "priority": 1 },
+  "platform":  { "id": "…", "name": "…", "country": "KR", "priority": 1 },
   "profile":   { "id": "…", "name": "…", "linkedinUrl": "…", "briefExperience": "…", "avatarId": "profile-03" },
   "associate": { "id": "…", "nickname": "…", "role": "associate", "avatarId": "associate-02" },
   "manager":   { "id": "…", "nickname": "…", "role": "manager", "avatarId": "manager-03" },
@@ -664,6 +804,10 @@ A call can only be created with an approved profile (409
   "platformAssociateName": "…",
   "invoiceAmount": null,
   "invoiceCurrency": null,
+  "ninjaLink": null,
+  "actualDurationMinutes": null,
+  "rating": null,
+  "feedback": null,
   "allowedTransitions": ["on_rescheduling"],
   "permissions": { "edit": true, "reassignAssociate": false, "reassignExpert": false, "editInvoice": false },
   "createdBy": { "id": "…", "nickname": "…", "role": "associate", "avatarId": "…" },
@@ -673,7 +817,8 @@ A call can only be created with an approved profile (409
 ```
 
 `allowedTransitions` and `permissions` are computed server-side for the
-requesting user so clients never guess.
+requesting user so clients never guess. For Experts, `status` never shows an
+invoicing status and the invoice fields are null (§2.3).
 
 ### 6.9 Calendar and availability
 
@@ -743,14 +888,45 @@ Profile responses carry `photoId`, and for the Founder `bankCount` and
 
 - `today` uses the viewer's zone (§9.3): Experts their own, everyone else New
   York. `ongoing` is every call in `ongoing`; `upcoming` is today's calls in
-  `scheduled`/`on_rescheduling`; `finished` is today's calls in `finished` or
-  an invoice status. Tentative `on_scheduling` calls are left out.
+  `scheduled`/`confirmed`/`on_rescheduling`; `finished` is today's calls in
+  `finished` or an invoice status. Tentative `on_scheduling` calls are left out.
+- `byStatus` for Experts counts invoiced calls under `finished`.
 - `tasks.invoicesToSubmit`: calls in `finished` (no invoice submitted yet).
 - `tasks.profilesNeedingBank`: Profiles with a booked call and no bank, with
   the number of booked calls and the next upcoming one.
 - `database`: current database size and per-table sizes.
 
-### 6.11 Health
+### 6.11 Chat and to-dos **[Implementation]**
+
+One-to-one chats. Who may chat with whom (`canChat` in
+`packages/shared/src/chat.ts`, enforced by the API):
+
+- a Founder with anyone;
+- Managers with Managers;
+- Associates with Managers (any Manager, not only their own).
+
+Associates don't chat with other Associates, and Experts chat only with
+Founders. A chat that the rules no longer allow (for example one between two
+Associates from before this rule) stays readable, with `canSend: false`.
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /chat/contacts | all | Active users the caller may chat with |
+| GET | /chat/conversations | all | The caller's chats with at least one message, newest first: { id, other (+ isActive), lastMessage, unreadCount, openTodoCount, otherLastReadAt, canSend } |
+| POST | /chat/conversations | all | { userId }. Opens or creates the chat (201). 403 when the rules don't allow it |
+| GET | /chat/conversations/:id | the two people | 404 for anyone else |
+| GET | /chat/conversations/:id/messages | the two people | Cursor paginated like call messages. Each message: { id, sender, body, kind, replyTo, todo, createdAt } |
+| POST | /chat/conversations/:id/messages | the two people | { body }. 403 when the other person is inactive or no longer allowed (`canSend: false`) |
+| POST | /chat/conversations/:id/read | the two people | Marks the chat read (204) |
+| POST | /chat/messages/:id/todo | Founder in that chat | Turns any regular message in the chat into a to-do for the other person; they get `todo.assigned`. 409 if already a to-do |
+| DELETE | /chat/messages/:id/todo | Founder in that chat | Removes an open to-do. 409 once done |
+| GET | /todos | all | Query: scope = assigned (mine, default) \| created (Founder: the ones I gave out), status. Open first |
+| POST | /todos/:id/done | the assignee | { note? }. Marks it done and posts a `todo_done` reply to the to-do's message in the chat (body = note or "Done"); the Founder gets `todo.done` |
+
+Sending a message counts as reading the chat. A chat message is pushed to the
+other person's browsers (§7.5); it does not create a bell notification.
+
+### 6.12 Health
 
 `GET /healthz` (outside `/api/v1`) returns `{ status, db, uptime }`; 503 when
 the database is unreachable.
@@ -781,6 +957,9 @@ the database is unreachable.
 | notification:new | user:{id} | Notification |
 | user:typing | call:{id} | { callId, userId, nickname } |
 | session:revoked | user:{id} | Sent before a deactivated user's sockets are dropped |
+| chat:message | both people's user rooms | ChatMessage |
+| chat:todo | both people's user rooms | Todo, or { id, conversationId, messageId, removed: true } |
+| chat:read | both people's user rooms | { conversationId, userId, readAt } |
 
 **[Implementation]** `call:updated` goes to each participant's `user:{id}`
 room rather than `call:{id}`, because `allowedTransitions` and `permissions`
@@ -795,8 +974,33 @@ receive it too.
 | call:leave | { callId } |
 | user:typing | { callId } |
 
-Messages are posted over HTTP (§6.5) and broadcast by the server; the socket is
-never the only path for a write.
+Messages are posted over HTTP (§6.5, §6.11) and broadcast by the server; the
+socket is never the only path for a write.
+
+**[Implementation]** The client starts with HTTP long-polling and upgrades to
+WebSocket when it can, because the Vercel rewrite in front of the API forwards
+HTTP but not WebSocket upgrades.
+
+### 7.5 Browser push notifications **[Implementation]**
+
+- Delivered with Web Push (VAPID) to a service worker (`apps/web/public/sw.js`),
+  so they arrive even when the site is closed. Off unless `VAPID_PUBLIC_KEY` and
+  `VAPID_PRIVATE_KEY` are set; every server sharing a database must use the
+  same pair.
+- Sent for every stored notification (same wording as the bell, from
+  `notificationText` in the shared package) and for every chat message
+  (title = sender, one notification per chat, newer replaces older).
+- Not shown when the person is already looking: the chat is open and focused,
+  or, for other notifications, any app window is focused (the app shows those
+  itself). Clicking focuses the app and opens the chat or page.
+- Subscriptions whose push service answers 404/410 are deleted.
+- The web app asks once (a prompt on Chat and To-dos; Settings → Browser
+  notifications has on/off and "Send a test"). On sign-in the browser's
+  subscription moves to the signed-in user; on sign-out it is detached.
+- Where push is unavailable but permission is granted, the open tab shows
+  the notifications itself while hidden.
+- iPhone and iPad: only after Add to Home Screen (the web app has a manifest
+  and icons).
 
 ---
 
@@ -816,6 +1020,8 @@ never the only path for a write.
 - Audit: every status change recorded with actor and override flag.
 - Deactivated users: refresh rejected, refresh tokens revoked, sockets disconnected.
 - Logs redact authorization headers, cookies, passwords, refresh tokens and emails.
+- **[Implementation]** `TRUST_PROXY` sets how many proxy hops' `X-Forwarded-For`
+  to trust (2 behind Vercel → Render), so the login limit counts real client IPs.
 
 ---
 
@@ -828,16 +1034,18 @@ never the only path for a write.
 | Login | all | Email + password |
 | Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, Profiles that need a bank, with an Add bank shortcut) and the **database size**. Manager: team counts per stage |
 | Call list | all | Table with filters (status, associate, expert, date range, search), live updates; filters live in the URL |
-| Call detail | participants | Header, status timeline, transition buttons from `allowedTransitions`, assignment controls, message thread |
+| Call detail | participants | Header with "View profile details", status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions`, assignment controls, status history and a Call card (Ninja link with "Join call", actual duration, rating and feedback). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks for the real duration and "How did the call go?" (1–5 stars) with an optional note; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
 | New Call | Founder, Manager, Associate | In this order: Profile (approved only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. Saving asks for confirmation when the time is today, in the past, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
-| Profiles | Founder, Manager, Associate | List; only the Founder adds and edits, uploads Profile photos and manages banks ("Needs bank" filter) |
+| Profiles | all | Cards with a details window (personal details, history; platform statuses for everyone but Experts; for the Founder a private section with the current address and banks). Founders add profiles (approved at once), review Associate submissions, upload photos, manage banks ("Needs bank" filter) and by default see a table of every Profile against every platform, editable in place. Associates submit profiles for review. Experts see the Profiles of their calls |
+| Chat | all | Chat list (search, unread counts, open to-do marker) beside the conversation; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders open a message's menu to mark it as a to-do; the assignee gets a "Mark done" button on it |
+| To-dos | all | My to-dos (open / done / all) with "Mark done" (optional note, posted as the chat reply) and "Open chat". Founders also have "Assigned by me" with the done notes |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create, deactivate |
 | Users | Founder | All users, create any role |
 | Invoicing | Founder | Calls in `finished` and invoice stages, amount entry, batch transitions |
 | Notifications | all | List, mark read |
-| Settings | all | Nickname (Founder-approved change **[Assumption]**, read-only for now), password, photo upload or avatar, appearance; Experts also set their time zone |
+| Settings | all | Nickname (Founder-approved change **[Assumption]**, read-only for now), password, photo upload or avatar, appearance, browser notifications (on/off, send a test); Experts also set their time zone |
 
 ### 9.2 Role landing pages
 
@@ -847,7 +1055,9 @@ the database size.
 
 ### 9.3 Behaviour
 
-- Every list subscribes to `call:updated` and patches the TanStack Query cache.
+- Every list subscribes to `call:updated` and patches the TanStack Query cache;
+  chat and to-do screens follow `chat:message`, `chat:todo` and `chat:read`.
+- The sidebar shows unread chat messages on Chat and open to-dos on To-dos.
 - Transition buttons are disabled while a request is in flight; a 409 refreshes
   the Call and shows the reason.
 - Time zones. Experts see every time in their own zone. Everyone else sees
@@ -882,6 +1092,8 @@ Creation and administration screens (Users, Platforms, Profiles) stay web-only
 in Phase 2 **[Assumption]**.
 
 ### 10.2 Push notifications
+
+Browser push is already live in the web app (§7.5). For the native app:
 
 - On login, app requests permission, obtains an Expo push token, and calls
   `POST /devices`.
@@ -942,6 +1154,9 @@ pnpm dev                      # api on :4000, web on :5173
 | LOGIN_RATE_LIMIT | 5 |
 | COOKIE_SECURE | true in production |
 | LOG_LEVEL | info |
+| TRUST_PROXY | 1 (2 behind Vercel → Render) |
+| VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY | Browser push keys (`npx web-push generate-vapid-keys`); empty = push off |
+| VAPID_SUBJECT | mailto:admin@god-system.app |
 | SEED_FOUNDER_EMAIL, SEED_PASSWORD | founder@god.local, Password123! |
 | PUSH_ENABLED, EXPO_ACCESS_TOKEN | (Phase 2) |
 
@@ -951,20 +1166,28 @@ Web: `VITE_API_URL` (empty = same origin; Vite proxies `/api` and `/socket.io` i
 
 One Founder (`founder` / configured password), two Managers (atlas, beacon),
 four Associates (pixel, sprout, mango, comet), three Experts, five Platforms,
-ten approved Profiles plus one pending and one rejected older submission, and
-a dozen Calls in every status with history and messages. The Experts live in
+ten approved Profiles (with personal details and platform statuses, one of
+them banned on a platform) plus one pending and one rejected Associate
+submission, and a dozen Calls in every status with history; started and
+finished calls have Ninja links, real durations and ratings. The Experts live in
 Seoul (ember), London (flint) and New York (quill), and each has repeating
 availability starting from the current week, plus some time off, so the
 calendar has something to show.
 
 ### 12.4 Testing
 
-- Unit (`packages/shared`, 913 tests): `canTransition` against every (role,
-  from, to) combination with and without the relationship; repeat expansion
+- Unit (`packages/shared`, 1078 tests): `canTransition` against every (role,
+  from, to) combination with and without the relationship; who may chat with
+  whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 204 tests): transition endpoint returns 403 for wrong role,
-  409 for wrong edge, 200 and a history row for valid moves; anonymity check
+- API (`apps/api`, 268 tests): transition endpoint returns 403 for wrong role,
+  409 for wrong edge, 200 and a history row for valid moves; confirmation,
+  rescheduling requests, Ninja link, duration and rating rules; Experts never
+  seeing invoicing; Profile submissions, personal details, founder-only address
+  and platform statuses; chat rules, unread counts, to-dos and their done
+  replies; browser push subscriptions and delivery (push service mocked);
+  per-Call messages switched off; anonymity check
   that no response contains an email; time zone permissions; schedule block
   edit scopes; calendar privacy (Associates see other Associates' calls only
   as busy time); double booking rejected with 409; auth rotation and reuse
@@ -972,10 +1195,29 @@ calendar has something to show.
 - API tests run against a separate local database, `god_testsuite`, migrated
   with `prisma migrate deploy` at the start of each run. They refuse to run
   against a non-local host.
-- E2E (web, Playwright): Associate schedules → Expert finishes → Founder
-  invoices, with a Manager's browser observing live updates.
+- E2E (web, Playwright): Associate schedules → Expert confirms and finishes
+  (duration and rating) → Founder invoices, with a Manager's browser observing
+  live updates.
 
-### 12.5 Deployment (initial)
+### 12.5 Deployment
+
+**[Implementation]** Live setup:
+
+- Web on **Vercel**, built from the repo root with `vercel.json`: only the web
+  workspace is built, `/api/*` and `/socket.io/*` are rewritten to the API, and
+  every other path falls back to `index.html`. The browser only ever talks to
+  the Vercel domain, so the refresh cookie stays first-party. Use the
+  production domain; one-off deployment URLs sit behind Vercel's login.
+- API on **Render** from `render.yaml` (Node 22, pnpm build, `prisma migrate
+  deploy` on start, health check `/healthz`). Environment: `DATABASE_URL`,
+  `JWT_SECRET` (generated), `CORS_ORIGINS` and `PUBLIC_API_URL` (both the
+  Vercel URL with `https://`), `COOKIE_SECURE=true`, `TRUST_PROXY=2`, and the
+  VAPID keys. Auto-deploy needs Render's GitHub app to have access to the
+  repository. On the free plan the API sleeps after about 15 minutes idle.
+- Database: **Aiven** PostgreSQL, database `god`, shared by production and
+  local development.
+
+Container alternative:
 
 - API: single container (`apps/api/Dockerfile`) behind a reverse proxy with TLS; runs `prisma migrate deploy` on start.
 - Web: static build served by nginx (`apps/web/Dockerfile`), which also proxies `/api` and `/socket.io`.
@@ -995,6 +1237,7 @@ calendar has something to show.
 | 1b | Calls API with transitions, history, notifications, Socket.IO — done |
 | 1c | Web app: all screens in §9 — done |
 | 1d | Tests in §12.4, deployment — done |
+| 1e | Call confirmation and feedback, Profile details and platform statuses, chat and to-dos, browser push — done |
 | 2 | Expo mobile app (§10), push notifications |
 | 3+ | See §14 |
 
@@ -1010,7 +1253,8 @@ calendar has something to show.
 - Calendar sync (ICS feed per user, Google Calendar).
 - Analytics dashboard for Founder: calls per stage, cycle time, per-Platform
   and per-Associate throughput.
-- Direct messages between users outside a Call thread.
+- Group chats; typing indicators and attachments in chat.
+- Turning per-Call message threads back on (`FEATURES.messages`).
 - Multi-currency invoice totals and export to CSV.
 - Two-factor authentication.
 - Multi-tenant (separate organisations) if the system is offered to others.
@@ -1026,11 +1270,14 @@ calendar has something to show.
    Founder or Manager edits nicknames.)
 2. Should Managers be able to perform execution-stage overrides (ongoing,
    finished) when an Expert is unresponsive? (Currently: Founder only.)
-3. Should Experts see the Profile's LinkedIn URL, or only name and brief
-   experience? (Currently: they see it.)
+3. Should Experts see the Profile's LinkedIn URL? (Currently: they see it,
+   with the personal details and history but not platform statuses.)
 4. Is `invoice_amount` entered per Call or imported from an external system?
    (Currently: per Call, on the Invoicing screen and Call detail.)
 5. Does one Call ever involve more than one Expert?
+6. Should Managers also be able to add Profiles, and to change platform
+   statuses? (Currently: Associates submit, Founders approve and set statuses.)
+7. Can a done to-do be reopened? (Currently: no; open ones can be removed.)
 
 ---
 
@@ -1044,6 +1291,11 @@ calendar has something to show.
 | Stage | Group of statuses owned by one role: Scheduling, Execution, Invoicing |
 | Override | A higher role performing a transition normally owned by another role |
 | Participant | The Associate, Expert, Associate's Manager, and Founder for a given Call |
+| Confirmed | The Expert has confirmed they are available for the scheduled time |
+| Ninja link | The VDO.Ninja meeting link the Expert adds when a call starts |
+| Platform status | A Profile's standing on an expert network platform: not registered, registered or banned |
+| Conversation | A one-to-one chat between two users |
+| To-do | A chat message a Founder assigned to the other person; marking it done replies in the chat |
 
 ## Appendix B. Change log
 
@@ -1058,3 +1310,11 @@ calendar has something to show.
 | 2026-09-14 | The database now refuses calls without a time, a duration, project details or a platform associate |
 | 2026-09-14 | Phase 1 implemented. Material UI 7 instead of Tailwind; `permissions`, `manager`, `projectDetails`, `platformAssociateName` and the Expert's `timeZone` on Call responses; `GET /dashboard`; per-viewer `call:updated` via user rooms; `session:revoked` socket event; refresh token families; login rate limit counts failures only; Playwright E2E; Dockerfiles, production compose and CI |
 | 2026-09-15 | Founder dashboard rebuilt around today (ongoing / coming up / finished), pending tasks (invoices to submit, Profiles needing a bank) and database size; Profile banks (several per Profile, one primary, Founder-only); photo uploads for users and Profiles; calmer visual design (neutral palette, dot status pills, no banner) |
+| 2026-09-15 | Calls: the Expert adds a Ninja link to start and enters the real duration and a 1–5 rating with feedback to finish; per-Call messages switched off; platform links hidden. Profiles: date of birth, gender, nationality, location, education and career history; status per expert network platform (default not registered) with a Founder table view; Experts can open the Profiles of their calls |
+| 2026-09-15 | Associates can add Profiles again; they stay pending until a Founder approves, and Founders are notified (`profile.submitted`) |
+| 2026-09-15 | New `confirmed` status: the Expert confirms a scheduled time before the call can start; Experts can request rescheduling with a reason and are reminded to update their calendar; moving a confirmed call's time needs a new confirmation. Founder-only current address and bank details on the Profile details view |
+| 2026-09-15 | Deployed: web on Vercel (rewrites to the API), API on Render (`render.yaml`), Aiven database; `TRUST_PROXY`; sockets start with long-polling |
+| 2026-09-15 | One-to-one chat (Founder with anyone, same role, Associates with Managers) with unread counts and read receipts; Founders turn chat messages into to-dos, and marking one done replies in the chat; Chat and To-dos pages with sidebar badges |
+| 2026-09-15 | Browser push notifications (Web Push + service worker) for chat messages and notifications, with Settings controls and an installable web app manifest |
+| 2026-09-15 | Experts no longer see invoicing: invoiced calls show as finished, without amounts, invoicing history or invoicing notifications |
+| 2026-09-15 | Chat narrowed: no chats between Associates or between Experts. Experts chat only with Founders; Managers with Founders, Managers and Associates; Associates with Founders and Managers. Older chats that are no longer allowed are read-only |

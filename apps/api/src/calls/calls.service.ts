@@ -1,11 +1,13 @@
 import {
   ERROR_CODES,
   FEATURES,
+  INVOICING_STATUSES,
   STATUS_LABELS,
   canTransition,
   isOverride,
   isValidEdge,
   listCallsQuerySchema,
+  statusFilterForRole,
   type CallDetailDTO,
   type CallDTO,
   type CallStatus,
@@ -24,7 +26,7 @@ import { logger } from '../logger';
 import { deliverAll, notify, type Deliver } from '../notifications/notify';
 import { emitToUser } from '../realtime/hub';
 import { historyInclude, messageInclude, toHistoryDTO, toMessageDTO } from '../serializers';
-import { callPermissions, canViewCall, transitionContext, visibleCallsWhere } from './calls.access';
+import { callPermissions, canViewCall, transitionContext, visibleCallsWhere, visibleHistoryWhere } from './calls.access';
 import { callInclude, toCallDTO, type CallRow } from './calls.serialize';
 
 type CreateCallInput = z.output<typeof createCallSchema>;
@@ -94,7 +96,7 @@ export async function listCalls(actor: Actor, query: ListCallsQuery): Promise<Pa
   const where: Prisma.CallWhereInput = {
     AND: [
       visibleCallsWhere(actor),
-      query.status ? { status: { in: query.status } } : {},
+      query.status ? { status: { in: statusFilterForRole(actor.role, query.status) } } : {},
       query.associateId ? { associateId: query.associateId } : {},
       query.expertId ? { expertId: query.expertId } : {},
       query.platformId ? { platformId: query.platformId } : {},
@@ -139,7 +141,7 @@ export async function getCallDetail(actor: Actor, id: string | null): Promise<Ca
       take: 50,
     }),
     prisma.callStatusHistory.findMany({
-      where: { callId: call.id },
+      where: { callId: call.id, ...visibleHistoryWhere(actor) },
       include: historyInclude,
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     }),
@@ -304,7 +306,11 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
 
     const before = new Set(await participantIds(tx, current));
     const after = await participantIds(tx, updated);
-    const recipients = [...new Set([...before, ...after])].filter((uid) => uid !== actor.id);
+    // An invoice-only edit is none of the Expert's business.
+    const invoiceOnly = Object.entries(input).every(([k, v]) => v === undefined || k === 'invoiceAmount' || k === 'invoiceCurrency');
+    const recipients = [...new Set([...before, ...after])].filter(
+      (uid) => uid !== actor.id && !(invoiceOnly && uid === updated.expertId),
+    );
     const newlyAssigned = [updated.expertId, updated.associateId].filter(
       (uid): uid is string => Boolean(uid) && !before.has(uid!) && uid !== actor.id,
     );
@@ -375,7 +381,11 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
         comment: comment ?? null,
       },
     });
-    const recipients = (await participantIds(tx, updated)).filter((uid) => uid !== actor.id);
+    // Experts are not told about invoicing.
+    const invoicing = INVOICING_STATUSES.includes(to);
+    const recipients = (await participantIds(tx, updated)).filter(
+      (uid) => uid !== actor.id && !(invoicing && uid === updated.expertId),
+    );
     const type: NotificationType = 'call.status_changed';
     const deliver = await notify(tx, recipients, type, {
       callId: id,

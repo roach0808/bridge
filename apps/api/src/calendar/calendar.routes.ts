@@ -11,6 +11,7 @@ import {
   normalizeBlock,
   occursOn,
   validateBlock,
+  statusForRole,
   type BlockRule,
   type BusyInterval,
   type CalendarCall,
@@ -48,9 +49,9 @@ const calendarCallSelect = {
 
 type CalendarCallRow = Prisma.CallGetPayload<{ select: typeof calendarCallSelect }>;
 
-const toCalendarCall = (c: CalendarCallRow): CalendarCall => ({
+const toCalendarCall = (c: CalendarCallRow, viewer: Pick<Actor, 'role'>): CalendarCall => ({
   id: c.id,
-  status: c.status,
+  status: statusForRole(viewer.role, c.status),
   scheduledAt: iso(c.scheduledAt),
   endsAt: iso(c.endsAt),
   durationMinutes: c.durationMinutes,
@@ -124,7 +125,7 @@ async function buildExpertCalendars(
 
   for (const call of calls) {
     const entry = result.get(call.expertId!)!;
-    if (visibleIds.has(call.id)) entry.calls.push(toCalendarCall(call));
+    if (visibleIds.has(call.id)) entry.calls.push(toCalendarCall(call, actor));
     else if ((BLOCKING_STATUSES as string[]).includes(call.status))
       entry.busy.push({ startsAt: iso(call.scheduledAt), endsAt: iso(call.endsAt) });
   }
@@ -164,7 +165,7 @@ calendarRouter.get('/calendar', requireAuth, async (req, res) => {
       to: query.to,
       expert: null,
       canEditBlocks: false,
-      calls: calls.map(toCalendarCall),
+      calls: calls.map((c) => toCalendarCall(c, actor)),
       busy: [],
       occurrences: [],
       rules: [],

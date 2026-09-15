@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   AVATAR_CATALOG,
   canChat,
+  stagesForRole,
+  statusFilterForRole,
+  statusForRole,
   type Role,
   AVATAR_AUDIENCES,
   BLOCKING_STATUSES,
@@ -148,8 +151,8 @@ describe('canChat', () => {
     ['founder', 'associate', true],
     ['founder', 'expert', true],
     ['manager', 'manager', true],
-    ['associate', 'associate', true],
-    ['expert', 'expert', true],
+    ['associate', 'associate', false],
+    ['expert', 'expert', false],
     ['associate', 'manager', true],
     ['manager', 'associate', true],
     ['associate', 'expert', false],
@@ -162,5 +165,23 @@ describe('canChat', () => {
   });
   it('nobody chats with themselves', () => {
     expect(canChat(u('a', 'founder'), u('a', 'founder'))).toBe(false);
+  });
+});
+
+describe('experts do not see invoicing', () => {
+  it('invoicing statuses read as finished for experts only', () => {
+    for (const s of ['invoice_submit', 'invoice_approve', 'process_to_bank'] as const) {
+      expect(statusForRole('expert', s)).toBe('finished');
+      expect(statusForRole('founder', s)).toBe(s);
+      expect(statusForRole('associate', s)).toBe(s);
+    }
+    expect(statusForRole('expert', 'confirmed')).toBe('confirmed');
+  });
+  it('stages and status filters', () => {
+    expect(stagesForRole('expert')).toEqual(['scheduling', 'execution']);
+    expect(stagesForRole('manager')).toEqual(['scheduling', 'execution', 'invoicing']);
+    expect(statusFilterForRole('expert', ['finished']).sort()).toEqual(['finished', 'invoice_approve', 'invoice_submit', 'process_to_bank']);
+    expect(statusFilterForRole('expert', ['invoice_submit'])).toEqual([]);
+    expect(statusFilterForRole('founder', ['invoice_submit'])).toEqual(['invoice_submit']);
   });
 });

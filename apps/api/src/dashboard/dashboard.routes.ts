@@ -2,6 +2,7 @@ import {
   BLOCKING_STATUSES,
   CALL_STATUSES,
   displayZoneFor,
+  statusForRole,
   type CallDTO,
   type CallStatus,
   type DashboardSummary,
@@ -133,7 +134,8 @@ dashboardRouter.get('/dashboard', requireAuth, async (req, res) => {
   ]);
 
   const byStatus = emptyCounts();
-  for (const g of grouped) byStatus[g.status] = g._count._all;
+  // Experts count invoiced calls as finished.
+  for (const g of grouped) byStatus[statusForRole(actor.role, g.status)] += g._count._all;
   const body: DashboardSummary = { today, byStatus, ...(tasks ? { tasks } : {}), ...(database ? { database } : {}) };
 
   if (actor.role === 'manager') {

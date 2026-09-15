@@ -151,7 +151,9 @@ function TransitionBar({ call }: { call: CallDTO }) {
   if (!call.allowedTransitions.length) {
     return (
       <Typography variant="body2" color="text.secondary">
-        {call.status === 'process_to_bank' ? 'This call is complete.' : 'No actions for you at this stage.'}
+        {call.status === 'process_to_bank' || (me.role === 'expert' && call.status === 'finished')
+          ? 'This call is complete.'
+          : 'No actions for you at this stage.'}
       </Typography>
     );
   }
@@ -830,7 +832,7 @@ export default function CallDetailPage() {
             </Stack>
           </Stack>
           <Box sx={{ mt: 3 }}>
-            <StatusProgress status={call.status} />
+            <StatusProgress status={call.status} role={me.role} />
           </Box>
         </CardContent>
       </Card>

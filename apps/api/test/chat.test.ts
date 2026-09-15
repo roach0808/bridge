@@ -23,8 +23,6 @@ describe('who can chat with whom', () => {
     ['founder', 'e1'],
     ['founder', 'a3'],
     ['m1', 'm2'],
-    ['a1', 'a3'],
-    ['e1', 'e2'],
     ['a1', 'm2'], // any manager, not only their own
     ['m2', 'a1'],
   ])('%s may chat with %s', async (a, b) => {
@@ -34,6 +32,8 @@ describe('who can chat with whom', () => {
   });
 
   it.each<[keyof Fixtures, keyof Fixtures]>([
+    ['a1', 'a3'],
+    ['e1', 'e2'],
     ['a1', 'e1'],
     ['e1', 'a1'],
     ['m1', 'e2'],
@@ -44,8 +44,9 @@ describe('who can chat with whom', () => {
 
   it('contacts follow the same rules', async () => {
     const nick = async (who: FixtureUser) => (await (await as(who)).get('/chat/contacts')).body.map((u: { nickname: string }) => u.nickname).sort();
-    expect(await nick(fx.e1)).toEqual(['ExpertLondon', 'ExpertNY', 'Founder']);
-    expect(await nick(fx.a1)).toEqual(['AssocFour', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerOne', 'ManagerTwo']);
+    expect(await nick(fx.e1)).toEqual(['Founder']);
+    expect(await nick(fx.a1)).toEqual(['Founder', 'ManagerOne', 'ManagerTwo']);
+    expect(await nick(fx.m1)).toEqual(['AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerTwo']);
     expect(await nick(fx.founder)).toHaveLength(fx.users.length - 1);
   });
 
@@ -57,17 +58,29 @@ describe('who can chat with whom', () => {
   });
 
   it('outsiders cannot read or post; an inactive person closes the chat', async () => {
-    const id = await open(await as(fx.e1), fx.e2);
-    await send(await as(fx.e1), id, 'secret');
-    const e3 = await as(fx.e3);
-    expectError(await e3.get(`/chat/conversations/${id}/messages`), 404);
-    expectError(await send(e3, id, 'hi'), 404);
+    const id = await open(await as(fx.m1), fx.m2);
+    await send(await as(fx.m1), id, 'secret');
+    const a1 = await as(fx.a1);
+    expectError(await a1.get(`/chat/conversations/${id}/messages`), 404);
+    expectError(await send(a1, id, 'hi'), 404);
     expectError(await (await as(fx.founder)).get(`/chat/conversations/${id}`), 404);
 
-    await prisma.user.update({ where: { id: fx.e2.id }, data: { isActive: false } });
-    const e1 = await as(fx.e1);
-    expect((await e1.get(`/chat/conversations/${id}`)).body.canSend).toBe(false);
-    expectError(await send(e1, id, 'still there?'), 403);
+    await prisma.user.update({ where: { id: fx.m2.id }, data: { isActive: false } });
+    const m1 = await as(fx.m1);
+    expect((await m1.get(`/chat/conversations/${id}`)).body.canSend).toBe(false);
+    expectError(await send(m1, id, 'still there?'), 403);
+  });
+
+  it('chats from before the rule changed (associate ↔ associate, expert ↔ expert) are read-only', async () => {
+    for (const [a, b] of [[fx.a1, fx.a3], [fx.e1, fx.e2]] as const) {
+      const [userAId, userBId] = [a.id, b.id].sort() as [string, string];
+      const c = await prisma.conversation.create({ data: { userAId, userBId, lastMessageAt: new Date() } });
+      await prisma.chatMessage.create({ data: { conversationId: c.id, senderId: a.id, body: 'old message' } });
+      const client = await as(a);
+      expect((await client.get('/chat/conversations')).body[0]).toMatchObject({ id: c.id, canSend: false });
+      expect((await client.get(`/chat/conversations/${c.id}/messages`)).body.items).toHaveLength(1);
+      expectError(await send(client, c.id, 'hello again'), 403);
+    }
   });
 });
 
@@ -94,7 +107,7 @@ describe('messages, unread counts and read receipts', () => {
 
   it('pages messages newest page first, oldest-to-newest inside a page', async () => {
     const e1 = await as(fx.e1);
-    const id = await open(e1, fx.e2);
+    const id = await open(e1, fx.founder);
     const base = Date.parse('2027-01-01T00:00:00Z');
     for (let i = 1; i <= 5; i++) {
       await prisma.chatMessage.create({ data: { conversationId: id, senderId: fx.e1.id, body: `m${i}`, createdAt: new Date(base + i * 1000) } });

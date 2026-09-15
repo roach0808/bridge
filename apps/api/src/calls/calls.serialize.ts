@@ -1,4 +1,4 @@
-import type { CallDTO, CallStatus, Role } from '@god/shared';
+import { statusForRole, type CallDTO, type CallStatus, type Role } from '@god/shared';
 import type { Prisma } from '@prisma/client';
 import type { Actor } from '../auth/middleware';
 import { iso } from '../http';
@@ -15,10 +15,12 @@ export const callInclude = {
 
 export type CallRow = Prisma.CallGetPayload<{ include: typeof callInclude }>;
 
+/** Experts see invoiced calls as finished, without invoice figures. */
 export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallDTO {
+  const hideInvoicing = viewer.role === 'expert';
   return {
     id: call.id,
-    status: call.status as CallStatus,
+    status: statusForRole(viewer.role, call.status as CallStatus),
     platform: call.platform,
     profile: call.profile,
     associate: toUserRef(call.associate),
@@ -30,8 +32,8 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
     notes: call.notes,
     projectDetails: call.projectDetails,
     platformAssociateName: call.platformAssociateName,
-    invoiceAmount: call.invoiceAmount ? call.invoiceAmount.toFixed(2) : null,
-    invoiceCurrency: call.invoiceCurrency,
+    invoiceAmount: !hideInvoicing && call.invoiceAmount ? call.invoiceAmount.toFixed(2) : null,
+    invoiceCurrency: hideInvoicing ? null : call.invoiceCurrency,
     ninjaLink: call.ninjaLink,
     actualDurationMinutes: call.actualDurationMinutes,
     rating: call.rating,
