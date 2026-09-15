@@ -24,11 +24,12 @@ interface ProfileForm {
   location: string;
   education: string;
   careerHistory: string;
+  currentAddress: string;
 }
 
 const PROFILE_FIELDS = [
   'name', 'linkedinUrl', 'briefExperience', 'avatarId',
-  'dateOfBirth', 'gender', 'nationality', 'location', 'education', 'careerHistory',
+  'dateOfBirth', 'gender', 'nationality', 'location', 'education', 'careerHistory', 'currentAddress',
 ];
 
 const emptyForm = (): ProfileForm => ({
@@ -42,6 +43,7 @@ const emptyForm = (): ProfileForm => ({
   location: '',
   education: '',
   careerHistory: '',
+  currentAddress: '',
 });
 
 /**
@@ -86,6 +88,7 @@ export function ProfileDialog({
             location: profile.location ?? '',
             education: profile.education ?? '',
             careerHistory: profile.careerHistory ?? '',
+            currentAddress: profile.currentAddress ?? '',
           }
         : emptyForm(),
     );
@@ -105,6 +108,7 @@ export function ProfileDialog({
         location: blankToNull(body.location),
         education: blankToNull(body.education),
         careerHistory: blankToNull(body.careerHistory),
+        currentAddress: blankToNull(body.currentAddress),
       };
       if (profile) return api.profiles.update(profile.id, payload);
       return api.profiles.create(payload).then(async (created) =>
@@ -256,6 +260,22 @@ export function ProfileDialog({
         minRows={2}
         maxRows={6}
       />
+      {isFounder && (
+        <FormSection label="Private — Founder only" hint="Not shown to Managers, Associates or Experts. Bank details are managed from the profile's details.">
+          <TextField
+            label="Current address"
+            value={form.currentAddress}
+            onChange={(e) => set('currentAddress', e.target.value)}
+            error={Boolean(errors.currentAddress)}
+            helperText={errors.currentAddress}
+            multiline
+            minRows={2}
+            maxRows={5}
+            fullWidth
+            autoComplete="off"
+          />
+        </FormSection>
+      )}
       {isFounder && (
         <FormSection label="Photo" hint="Optional. Shown instead of the illustration.">
           <PhotoUpload

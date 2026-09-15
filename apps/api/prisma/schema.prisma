@@ -22,6 +22,7 @@ enum Role {
 enum CallStatus {
   on_scheduling
   scheduled
+  confirmed
   on_rescheduling
   ongoing
   finished
@@ -151,6 +152,8 @@ model Profile {
   location        String?
   education       String?
   careerHistory   String?       @map("career_history")
+  /// Founder only: where the person currently lives.
+  currentAddress  String?       @map("current_address")
   avatarId        String        @map("avatar_id")
   photoId         String?       @unique @map("photo_id") @db.Uuid
   status          ProfileStatus @default(approved)

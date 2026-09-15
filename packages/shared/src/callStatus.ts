@@ -1,6 +1,7 @@
 export const CALL_STATUSES = [
   'on_scheduling',
   'scheduled',
+  'confirmed',
   'on_rescheduling',
   'ongoing',
   'finished',
@@ -16,6 +17,7 @@ export type Stage = (typeof STAGES)[number];
 export const STATUS_STAGE: Record<CallStatus, Stage> = {
   on_scheduling: 'scheduling',
   scheduled: 'scheduling',
+  confirmed: 'scheduling',
   on_rescheduling: 'scheduling',
   ongoing: 'execution',
   finished: 'execution',
@@ -27,6 +29,7 @@ export const STATUS_STAGE: Record<CallStatus, Stage> = {
 export const STATUS_LABELS: Record<CallStatus, string> = {
   on_scheduling: 'On scheduling',
   scheduled: 'Scheduled',
+  confirmed: 'Confirmed',
   on_rescheduling: 'On rescheduling',
   ongoing: 'Ongoing',
   finished: 'Finished',
@@ -42,7 +45,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
 };
 
 export const STAGE_STATUSES: Record<Stage, CallStatus[]> = {
-  scheduling: ['on_scheduling', 'scheduled', 'on_rescheduling'],
+  scheduling: ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'],
   execution: ['ongoing', 'finished'],
   invoicing: ['invoice_submit', 'invoice_approve', 'process_to_bank'],
 };
@@ -50,6 +53,7 @@ export const STAGE_STATUSES: Record<Stage, CallStatus[]> = {
 /** Statuses in which a call occupies the Expert's time (§3.3). */
 export const BLOCKING_STATUSES: readonly CallStatus[] = [
   'scheduled',
+  'confirmed',
   'on_rescheduling',
   'ongoing',
   'finished',

@@ -1,6 +1,7 @@
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import EditOutlined from '@mui/icons-material/EditOutlined';
 import LinkedIn from '@mui/icons-material/LinkedIn';
+import LockOutlined from '@mui/icons-material/LockOutlined';
 import {
   Box,
   Button,
@@ -25,8 +26,9 @@ import {
 } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useMe } from '@/auth/AuthProvider';
+import { BanksDialog } from '@/components/BanksDialog';
 import { ErrorState, Field } from '@/components/common';
 import { UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
@@ -129,6 +131,7 @@ function TextBlock({ label, text }: { label: string; text: string | null }) {
 
 function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
   const isFounder = useMe().role === 'founder';
+  const [banksOpen, setBanksOpen] = useState(false);
   const dash = <Typography component="span" variant="body2" color="text.disabled">—</Typography>;
   return (
     <Stack spacing={2.5}>
@@ -143,6 +146,29 @@ function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
       <TextBlock label="Brief experience" text={p.briefExperience} />
       <TextBlock label="Career history" text={p.careerHistory} />
       <TextBlock label="Education" text={p.education} />
+
+      {isFounder && (
+        <Box sx={{ p: 1.75, borderRadius: 2, bgcolor: 'background.subtle', border: 1, borderColor: 'divider' }}>
+          <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 1.25 }}>
+            <LockOutlined sx={{ fontSize: 15, color: 'text.secondary' }} />
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              Private — only Founders see this
+            </Typography>
+          </Stack>
+          <Stack spacing={1.75}>
+            <TextBlock label="Current address" text={p.currentAddress} />
+            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
+              <Field label="Bank details">
+                {p.bankCount ? `${p.bankCount} bank account${p.bankCount === 1 ? '' : 's'}` : 'None added'}
+              </Field>
+              <Button size="small" variant="outlined" onClick={() => setBanksOpen(true)}>
+                {p.bankCount ? 'View & edit' : 'Add bank'}
+              </Button>
+            </Stack>
+          </Stack>
+          <BanksDialog profile={p} open={banksOpen} onClose={() => setBanksOpen(false)} startAdding={!p.bankCount} />
+        </Box>
+      )}
 
       {p.platformStatuses && (
         <>

@@ -228,7 +228,7 @@ describe('double booking', () => {
     expectError(await schedule(await as(fx.a1), b.id), 409, 'expert_busy');
   });
 
-  it.each(['on_rescheduling', 'finished', 'process_to_bank'] as const)('an existing %s call blocks', async (status) => {
+  it.each(['confirmed', 'on_rescheduling', 'finished', 'process_to_bank'] as const)('an existing %s call blocks', async (status) => {
     await makeCall(fx, { associate: fx.a1, expert: fx.e1, status, scheduledAt: '2027-02-01T09:00:00Z' });
     const b = await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: '2027-02-01T09:30:00Z' });
     expectError(await schedule(await as(fx.a1), b.id), 409, 'expert_busy');

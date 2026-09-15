@@ -72,6 +72,9 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
   // 2. Expert finishes.
   const expert = await signIn(browser, 'quill@god.local');
   await expert.goto(url);
+  // The expert confirms the time first; only a confirmed call can be finished.
+  await transition(expert, 'Confirm time');
+  await expect(observed).toHaveAttribute('data-status', 'confirmed', { timeout: 5_000 });
   // Finishing asks for the real duration (prefilled with the booking) and a rating.
   await expert.getByRole('button', { name: 'Mark finished' }).click();
   await expect(expert.getByRole('dialog').getByRole('button', { name: 'Confirm' })).toBeDisabled();
@@ -103,6 +106,7 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
   expect(history.map((h: { toStatus: string }) => h.toStatus)).toEqual([
     'on_scheduling',
     'scheduled',
+    'confirmed',
     'finished',
     'invoice_submit',
     'invoice_approve',

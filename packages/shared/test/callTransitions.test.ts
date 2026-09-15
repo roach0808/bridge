@@ -6,6 +6,7 @@ import {
   allowedTransitions,
   canTransition,
   edgeOwner,
+  edgeOwners,
   findTransition,
   isOverride,
   isValidEdge,
@@ -17,10 +18,12 @@ import {
 /** The spec table, written out independently of the implementation. */
 const SPEC: Array<[CallStatus, CallStatus, Role[]]> = [
   ['on_scheduling', 'scheduled', ['associate', 'manager', 'founder']],
-  ['scheduled', 'on_rescheduling', ['associate', 'manager', 'founder']],
+  ['scheduled', 'confirmed', ['expert', 'founder']],
+  ['scheduled', 'on_rescheduling', ['associate', 'manager', 'expert', 'founder']],
+  ['confirmed', 'on_rescheduling', ['associate', 'manager', 'expert', 'founder']],
   ['on_rescheduling', 'scheduled', ['associate', 'manager', 'founder']],
-  ['scheduled', 'ongoing', ['expert', 'founder']],
-  ['scheduled', 'finished', ['expert', 'founder']],
+  ['confirmed', 'ongoing', ['expert', 'founder']],
+  ['confirmed', 'finished', ['expert', 'founder']],
   ['ongoing', 'finished', ['expert', 'founder']],
   ['finished', 'invoice_submit', ['founder']],
   ['invoice_submit', 'invoice_approve', ['founder']],
@@ -124,16 +127,29 @@ describe('allowedTransitions', () => {
     expect([...allowedTransitions(role, from, NONE)].sort()).toEqual([...expected].sort());
   });
 
-  it('founder from scheduled can go to on_rescheduling, ongoing and finished', () => {
-    expect([...allowedTransitions('founder', 'scheduled', NONE)].sort()).toEqual(
-      ['finished', 'ongoing', 'on_rescheduling'].sort(),
-    );
+  it('a call must be confirmed before it can start or finish', () => {
+    expect([...allowedTransitions('expert', 'scheduled', ctxFor('expert'))].sort()).toEqual(['confirmed', 'on_rescheduling']);
+    expect([...allowedTransitions('expert', 'confirmed', ctxFor('expert'))].sort()).toEqual(['finished', 'on_rescheduling', 'ongoing']);
+    expect(isValidEdge('scheduled', 'ongoing')).toBe(false);
+    expect(isValidEdge('scheduled', 'finished')).toBe(false);
   });
 });
 
 describe('isOverride and edgeOwner', () => {
-  const associateEdges = SPEC.filter(([, , r]) => r.includes('associate'));
-  const expertEdges = SPEC.filter(([, , r]) => r.includes('expert'));
+  const RESCHEDULE = (f: CallStatus, t: CallStatus) => t === 'on_rescheduling';
+  const associateEdges = SPEC.filter(([f, t, r]) => r.includes('associate') && !RESCHEDULE(f, t));
+  const expertEdges = SPEC.filter(([f, t, r]) => r.includes('expert') && !RESCHEDULE(f, t));
+
+  it.each(SPEC.filter(([f, t]) => RESCHEDULE(f, t)).map(([f, t]) => [f, t] as const))(
+    'rescheduling %s → %s belongs to the associate and the expert',
+    (from, to) => {
+      expect(edgeOwners(from, to)).toEqual(['associate', 'expert']);
+      expect(isOverride('associate', from, to)).toBe(false);
+      expect(isOverride('expert', from, to)).toBe(false);
+      expect(isOverride('manager', from, to)).toBe(true);
+      expect(isOverride('founder', from, to)).toBe(true);
+    },
+  );
   const founderEdges = SPEC.filter(([, , r]) => r.length === 1 && r[0] === 'founder');
 
   it.each(associateEdges.map(([f, t]) => [f, t] as const))('associate edge %s → %s', (from, to) => {

@@ -118,7 +118,7 @@ profilesRouter.post('/profiles', requireRole('founder', 'associate'), async (req
         name: input.name,
         linkedinUrl: input.linkedinUrl ?? null,
         briefExperience: input.briefExperience,
-        ...personalDetails(input),
+        ...personalDetails(input, actor),
         avatarId: input.avatarId,
         createdById: actor.id,
         ...(isFounder
@@ -134,8 +134,9 @@ profilesRouter.post('/profiles', requireRole('founder', 'associate'), async (req
   res.status(201).json(toProfileDTO(profile, await platformRefs()));
 });
 
-function personalDetails(input: Partial<z.output<typeof profileSchema>>) {
+function personalDetails(input: Partial<z.output<typeof profileSchema>>, actor: Pick<Actor, 'role'>) {
   return {
+    currentAddress: actor.role === 'founder' ? input.currentAddress : undefined,
     dateOfBirth: input.dateOfBirth === undefined ? undefined : input.dateOfBirth && fromDateOnly(input.dateOfBirth),
     gender: input.gender,
     nationality: input.nationality,
@@ -165,7 +166,7 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
         name: input.name,
         linkedinUrl: input.linkedinUrl === undefined ? undefined : input.linkedinUrl,
         briefExperience: input.briefExperience,
-        ...personalDetails(input),
+        ...personalDetails(input, actor),
         avatarId: input.avatarId,
         // An author's edit sends their submission back for review.
         ...(isFounder ? {} : { status: 'pending', reviewedById: null, reviewedAt: null, rejectionReason: null }),

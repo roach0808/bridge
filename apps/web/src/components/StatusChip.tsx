@@ -1,6 +1,7 @@
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
+import HowToRegRounded from '@mui/icons-material/HowToRegRounded';
 import PendingActionsRounded from '@mui/icons-material/PendingActionsRounded';
 import PlayCircleRounded from '@mui/icons-material/PlayCircleRounded';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
@@ -14,6 +15,7 @@ import { STAGE_COLORS } from '@/theme/theme';
 export const STATUS_ICONS: Record<CallStatus, ComponentType<SvgIconProps>> = {
   on_scheduling: PendingActionsRounded,
   scheduled: EventAvailableRounded,
+  confirmed: HowToRegRounded,
   on_rescheduling: EventRepeatRounded,
   ongoing: PlayCircleRounded,
   finished: TaskAltRounded,
@@ -25,6 +27,7 @@ export const STATUS_ICONS: Record<CallStatus, ComponentType<SvgIconProps>> = {
 export const STATUS_COLORS: Record<CallStatus, string> = {
   on_scheduling: '#a1a1aa',
   scheduled: '#4a8cf0',
+  confirmed: '#3b6fd8',
   on_rescheduling: '#e0913a',
   ongoing: '#2fb37a',
   finished: '#8d6cf0',

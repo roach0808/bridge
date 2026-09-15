@@ -19,7 +19,7 @@ const emptyCounts = (): Record<CallStatus, number> =>
   Object.fromEntries(CALL_STATUSES.map((s) => [s, 0])) as Record<CallStatus, number>;
 
 const FINISHED: CallStatus[] = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
-const COMING: CallStatus[] = ['scheduled', 'on_rescheduling'];
+const COMING: CallStatus[] = ['scheduled', 'confirmed', 'on_rescheduling'];
 
 /** Today's booked calls in the viewer's zone (§9.3), plus anything ongoing right now. */
 async function todayFor(actor: Actor): Promise<DashboardSummary['today']> {

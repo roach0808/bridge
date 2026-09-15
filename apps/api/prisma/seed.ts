@@ -194,7 +194,7 @@ async function main() {
     { status: 'on_scheduling', associate: pixel, expert: null, when: at(2, 10), duration: 60, platform: 0, profile: 0, details: 'Consumer electronics OEM evaluating second-source suppliers in Vietnam.', contact: 'Rachel (Northwind)' },
     { status: 'on_scheduling', associate: sprout, expert: ember, when: at(3, 20), duration: 30, platform: 2, profile: 2, details: 'HBM capacity outlook for 2027 and packaging bottlenecks.', contact: 'Min-seo (Hanbit)', notes: 'Client prefers Korean-speaking expert.' },
     { status: 'scheduled', associate: pixel, expert: quill, when: at(1, 11), duration: 45, platform: 0, profile: 1, details: 'Real-time payments adoption among mid-size US banks.', contact: 'Rachel (Northwind)', messages: [[pixel, 'Client confirmed. Dial-in link is in the platform portal.'], [quill, 'Thanks — I will join 5 minutes early.']] },
-    { status: 'scheduled', associate: mango, expert: flint, when: at(1, 9), duration: 60, platform: 1, profile: 5, details: 'EU EV battery pack supplier landscape, focus on Poland and Hungary.', contact: 'Oliver (Meridian)' },
+    { status: 'confirmed', associate: mango, expert: flint, when: at(1, 9), duration: 60, platform: 1, profile: 5, details: 'EU EV battery pack supplier landscape, focus on Poland and Hungary.', contact: 'Oliver (Meridian)' },
     { status: 'scheduled', associate: comet, expert: ember, when: at(0, 21), duration: 30, platform: 4, profile: 6, details: 'Seller advertising tools in Japanese marketplaces.', contact: 'Wei Ling (Harbor)' },
     { status: 'on_rescheduling', associate: sprout, expert: quill, when: at(4, 14), duration: 30, platform: 3, profile: 7, details: 'Hospital revenue cycle outsourcing trends.', contact: 'Jonas (Kestrel)', messages: [[sprout, 'Client asked to move this by a couple of days — working on a new slot.']] },
     { status: 'ongoing', associate: mango, expert: quill, when: at(0, DateTime.now().setZone(TEAM_TIME_ZONE).hour), duration: 60, platform: 1, profile: 9, details: 'Multi-cloud cost optimisation at large retailers.', contact: 'Oliver (Meridian)' },
@@ -221,7 +221,7 @@ async function main() {
         notes: c.notes ?? null,
         invoiceAmount: c.invoice?.[0],
         invoiceCurrency: c.invoice?.[1],
-        ninjaLink: ['on_scheduling', 'scheduled', 'on_rescheduling'].includes(c.status)
+        ninjaLink: ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'].includes(c.status)
           ? null
           : `https://vdo.ninja/?room=god-${Math.random().toString(36).slice(2, 10)}`,
         actualDurationMinutes: c.report?.[0],

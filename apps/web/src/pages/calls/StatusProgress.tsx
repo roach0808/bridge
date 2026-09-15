@@ -3,7 +3,7 @@ import { STAGE_LABELS, STATUS_LABELS, STATUS_STAGE, STAGES, type CallStatus } fr
 import { STATUS_COLORS } from '@/components/StatusChip';
 
 /** The happy path; `on_rescheduling` is shown as a detour on `scheduled`. */
-const TRACK: CallStatus[] = ['on_scheduling', 'scheduled', 'ongoing', 'finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
+const TRACK: CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'ongoing', 'finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
 
 export function StatusProgress({ status }: { status: CallStatus }) {
   const position = TRACK.indexOf(status === 'on_rescheduling' ? 'scheduled' : status);

@@ -7,30 +7,41 @@ export interface Transition {
   roles: Role[];
 }
 
-/** The single source of truth for the Call workflow (§4.3). */
+/**
+ * The single source of truth for the Call workflow (§4.3). The Expert confirms
+ * a scheduled time before the call can start, and either side can send a
+ * scheduled or confirmed call back for rescheduling.
+ */
 export const TRANSITIONS: Transition[] = [
   { from: 'on_scheduling',   to: 'scheduled',       roles: ['associate', 'manager', 'founder'] },
-  { from: 'scheduled',       to: 'on_rescheduling', roles: ['associate', 'manager', 'founder'] },
+  { from: 'scheduled',       to: 'confirmed',       roles: ['expert', 'founder'] },
+  { from: 'scheduled',       to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
+  { from: 'confirmed',       to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
   { from: 'on_rescheduling', to: 'scheduled',       roles: ['associate', 'manager', 'founder'] },
-  { from: 'scheduled',       to: 'ongoing',         roles: ['expert', 'founder'] },
-  { from: 'scheduled',       to: 'finished',        roles: ['expert', 'founder'] },
+  { from: 'confirmed',       to: 'ongoing',         roles: ['expert', 'founder'] },
+  { from: 'confirmed',       to: 'finished',        roles: ['expert', 'founder'] },
   { from: 'ongoing',         to: 'finished',        roles: ['expert', 'founder'] },
   { from: 'finished',        to: 'invoice_submit',  roles: ['founder'] },
   { from: 'invoice_submit',  to: 'invoice_approve', roles: ['founder'] },
   { from: 'invoice_approve', to: 'process_to_bank', roles: ['founder'] },
 ];
 
-/** The role that normally owns each edge; anyone else allowed is an override. */
-const EDGE_OWNER: Record<string, Role> = {
-  'on_scheduling>scheduled': 'associate',
-  'scheduled>on_rescheduling': 'associate',
-  'on_rescheduling>scheduled': 'associate',
-  'scheduled>ongoing': 'expert',
-  'scheduled>finished': 'expert',
-  'ongoing>finished': 'expert',
-  'finished>invoice_submit': 'founder',
-  'invoice_submit>invoice_approve': 'founder',
-  'invoice_approve>process_to_bank': 'founder',
+/**
+ * The roles that normally own each edge (first = primary); anyone else allowed
+ * is an override. Rescheduling belongs to both the Associate and the Expert.
+ */
+const EDGE_OWNERS: Record<string, Role[]> = {
+  'on_scheduling>scheduled': ['associate'],
+  'scheduled>confirmed': ['expert'],
+  'scheduled>on_rescheduling': ['associate', 'expert'],
+  'confirmed>on_rescheduling': ['associate', 'expert'],
+  'on_rescheduling>scheduled': ['associate'],
+  'confirmed>ongoing': ['expert'],
+  'confirmed>finished': ['expert'],
+  'ongoing>finished': ['expert'],
+  'finished>invoice_submit': ['founder'],
+  'invoice_submit>invoice_approve': ['founder'],
+  'invoice_approve>process_to_bank': ['founder'],
 };
 
 /**
@@ -93,10 +104,16 @@ export function allowedTransitions(
 
 /** True when the actor is not the edge's normal owner. */
 export function isOverride(role: Role, from: CallStatus, to: CallStatus): boolean {
-  const owner = EDGE_OWNER[`${from}>${to}`];
-  return owner !== undefined && owner !== role;
+  const owners = EDGE_OWNERS[`${from}>${to}`];
+  return owners !== undefined && !owners.includes(role);
 }
 
+/** The primary owner of an edge. */
 export function edgeOwner(from: CallStatus, to: CallStatus): Role | undefined {
-  return EDGE_OWNER[`${from}>${to}`];
+  return EDGE_OWNERS[`${from}>${to}`]?.[0];
+}
+
+/** Every role that normally owns an edge. */
+export function edgeOwners(from: CallStatus, to: CallStatus): Role[] {
+  return EDGE_OWNERS[`${from}>${to}`] ?? [];
 }

@@ -227,3 +227,22 @@ describe('platform statuses', () => {
     expectError(await f.put(`/profiles/00000000-0000-4000-8000-000000000000/platforms/${fx.platform.id}`, { status: 'registered' }), 404);
   });
 });
+
+describe('current address is founder-only', () => {
+  it('only the founder can set and see it', async () => {
+    const f = await as(fx.founder);
+    const created = await f.post('/profiles', profileBody({ currentAddress: '12 Harbour Rd, Busan' }));
+    expect(created.body.currentAddress).toBe('12 Harbour Rd, Busan');
+    expect((await f.get(`/profiles/${created.body.id}`)).body.currentAddress).toBe('12 Harbour Rd, Busan');
+
+    for (const who of ['m1', 'a1'] as const) {
+      const res = await (await as(fx[who])).get(`/profiles/${created.body.id}`);
+      expect(res.status).toBe(200);
+      expect(res.body.currentAddress, who).toBeNull();
+    }
+    // An associate's submission cannot set it.
+    const submitted = await (await as(fx.a1)).post('/profiles', profileBody({ name: 'Sam Submit', currentAddress: 'Somewhere' }));
+    expect(submitted.status).toBe(201);
+    expect((await prisma.profile.findUniqueOrThrow({ where: { id: submitted.body.id } })).currentAddress).toBeNull();
+  });
+});

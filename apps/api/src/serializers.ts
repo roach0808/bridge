@@ -106,6 +106,8 @@ export const toProfileDTO = (p: ProfileRow & ProfileCounts, platforms: PlatformR
   location: p.location,
   education: p.education,
   careerHistory: p.careerHistory,
+  // `_count` is only loaded for the Founder (see profileFounderCounts).
+  currentAddress: p._count ? p.currentAddress : null,
   avatarId: p.avatarId,
   photoId: p.photoId,
   status: p.status,

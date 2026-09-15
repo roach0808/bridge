@@ -37,6 +37,7 @@ import {
   MAX_ACTUAL_DURATION_MINUTES,
   STATUS_LABELS,
   edgeOwner,
+  isOverride,
   type CallDetailDTO,
   type CallDTO,
   type CallStatus,
@@ -124,8 +125,16 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const minutes = Number(actualMinutes);
   const minutesValid = Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_ACTUAL_DURATION_MINUTES;
   const linkValid = /^https?:\/\/\S+$/i.test(ninjaLink.trim());
+  // An Expert asking to reschedule must say why, so the Associate knows what to arrange.
+  const expertReschedule = target === 'on_rescheduling' && me.role === 'expert';
   const ready =
-    target === 'ongoing' ? linkValid : target === 'finished' ? minutesValid && rating !== null : true;
+    target === 'ongoing'
+      ? linkValid
+      : target === 'finished'
+        ? minutesValid && rating !== null
+        : expertReschedule
+          ? comment.trim() !== ''
+          : true;
 
   const confirm = () => {
     if (!target || !ready) return;
@@ -151,7 +160,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
     <>
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent={{ md: 'flex-end' }}>
         {call.allowedTransitions.map((to) => {
-          const override = edgeOwner(call.status, to) !== me.role;
+          const override = isOverride(me.role, call.status, to);
           const backwards = to === 'on_rescheduling';
           // One primary action: the first forward move. Everything else stays quiet.
           const primary = !backwards && to === call.allowedTransitions.find((t) => t !== 'on_rescheduling');
@@ -165,7 +174,13 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   disabled={transition.isPending}
                   onClick={() => open(to)}
                 >
-                  {backwards ? 'Needs rescheduling' : `Mark ${STATUS_LABELS[to].toLowerCase()}`}
+                  {backwards
+                    ? me.role === 'expert'
+                      ? 'Request rescheduling'
+                      : 'Needs rescheduling'
+                    : to === 'confirmed'
+                      ? 'Confirm time'
+                      : `Mark ${STATUS_LABELS[to].toLowerCase()}`}
                   {override && (
                     <Box component="span" sx={{ ml: 0.75, fontSize: 11, fontWeight: 500, opacity: 0.7 }}>
                       override
@@ -180,14 +195,41 @@ function TransitionBar({ call }: { call: CallDTO }) {
       <Dialog open={Boolean(target)} onClose={() => !transition.isPending && setTarget(null)} maxWidth="xs" fullWidth>
         {target && (
           <>
-            <DialogTitle>Move to {STATUS_LABELS[target]}?</DialogTitle>
+            <DialogTitle>
+              {target === 'confirmed'
+                ? 'Confirm this call?'
+                : expertReschedule
+                  ? 'Request rescheduling?'
+                  : `Move to ${STATUS_LABELS[target]}?`}
+            </DialogTitle>
             <DialogContent>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
                 <StatusChip status={call.status} />
                 <Typography color="text.secondary">→</Typography>
                 <StatusChip status={target} />
               </Stack>
-              {edgeOwner(call.status, target) !== me.role && (
+              {target === 'confirmed' && (
+                <Alert severity="info" sx={{ mb: 2 }}>
+                  You confirm that {me.role === 'expert' ? 'you are' : 'the Expert is'} available on{' '}
+                  <strong>{formatDateTime(call.scheduledAt, call.expert?.timeZone ?? me.timeZone)}</strong> for{' '}
+                  {call.durationMinutes} minutes and can take the call.
+                </Alert>
+              )}
+              {expertReschedule && (
+                <Alert
+                  severity="warning"
+                  sx={{ mb: 2 }}
+                  action={
+                    <Button color="inherit" size="small" href="/calendar" target="_blank" rel="noopener">
+                      Calendar
+                    </Button>
+                  }
+                >
+                  <strong>Update your calendar first.</strong> Mark the times you can no longer make as unavailable and
+                  add your new availability, so the Associate can find a slot that works.
+                </Alert>
+              )}
+              {isOverride(me.role, call.status, target) && (
                 <Alert severity="warning" sx={{ mb: 2 }}>
                   You are acting on behalf of the {edgeOwner(call.status, target)}. This is recorded as an override.
                 </Alert>
@@ -255,7 +297,9 @@ function TransitionBar({ call }: { call: CallDTO }) {
                 )}
                 {target !== 'finished' && (
                   <TextField
-                    label="Comment (optional)"
+                    label={expertReschedule ? 'Reason for rescheduling' : 'Comment (optional)'}
+                    required={expertReschedule}
+                    placeholder={expertReschedule ? 'e.g. A conflict came up — I can do Thursday afternoon instead.' : undefined}
                     multiline
                     minRows={2}
                     value={comment}

@@ -262,12 +262,19 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     if (!exists) throw badRequest('Choose a platform', { issues: [{ path: 'platformId', message: 'Unknown platform' }] });
   }
 
+  // The Expert confirmed a specific time: moving it needs their confirmation again.
+  const timeChanged =
+    (input.scheduledAt !== undefined && new Date(input.scheduledAt).getTime() !== current.scheduledAt.getTime()) ||
+    (input.durationMinutes !== undefined && input.durationMinutes !== current.durationMinutes);
+  const unconfirm = current.status === 'confirmed' && timeChanged;
+
   const { call, delivers } = await prisma.$transaction(async (tx) => {
     await lockCall(tx, current.id);
     const updated = await tx.call
       .update({
         where: { id: current.id },
         data: {
+          status: unconfirm ? 'scheduled' : undefined,
           scheduledAt: input.scheduledAt ? new Date(input.scheduledAt) : undefined,
           durationMinutes: input.durationMinutes,
           projectDetails: input.projectDetails,
@@ -282,6 +289,18 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
         include: callInclude,
       })
       .catch(rethrowOverlap);
+    if (unconfirm) {
+      await tx.callStatusHistory.create({
+        data: {
+          callId: current.id,
+          fromStatus: 'confirmed',
+          toStatus: 'scheduled',
+          actorId: actor.id,
+          isOverride: false,
+          comment: 'Time changed — the Expert needs to confirm again',
+        },
+      });
+    }
 
     const before = new Set(await participantIds(tx, current));
     const after = await participantIds(tx, updated);
@@ -292,7 +311,9 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     const payload = {
       callId: updated.id,
       actor: actorRef(actor),
-      summary: `Call with ${updated.profile.name} was updated`,
+      summary: unconfirm
+        ? `Call with ${updated.profile.name} moved to a new time — please confirm again`
+        : `Call with ${updated.profile.name} was updated`,
     };
     const delivers = [
       await notify(tx, newlyAssigned, 'call.assigned', { ...payload, summary: `You were assigned a call with ${updated.profile.name}` }),
@@ -323,6 +344,11 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     }
     if (!canTransition(actor.role, from, to, transitionContext(actor, current))) {
       throw forbidden(`You cannot move this call to ${STATUS_LABELS[to]}`);
+    }
+    if (to === 'on_rescheduling' && actor.role === 'expert' && !comment) {
+      throw badRequest('Tell the Associate why the call needs rescheduling', {
+        issues: [{ path: 'comment', message: 'Add a reason for rescheduling' }],
+      });
     }
     if (to === 'scheduled' && !current.expertId) {
       throw conflict('Assign an Expert before scheduling the call', ERROR_CODES.expertRequired);

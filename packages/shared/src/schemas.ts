@@ -136,6 +136,8 @@ export const profileSchema = z.object({
   location: optionalShortText(160),
   education: optionalText(4000),
   careerHistory: optionalText(8000),
+  /** Founder only; ignored from anyone else. */
+  currentAddress: optionalText(1000),
 });
 export const updateProfileSchema = profileSchema.partial();
 export const profilePlatformStatusSchema = z.object({ status: z.enum(PLATFORM_REGISTRATIONS) });

@@ -74,6 +74,8 @@ export interface ProfileDTO {
   location: string | null;
   education: string | null;
   careerHistory: string | null;
+  /** Founder only (null for others). */
+  currentAddress: string | null;
   avatarId: string;
   photoId: string | null;
   status: ProfileStatus;
