@@ -1,0 +1,266 @@
+import type { CallStatus } from '@god/shared';
+import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { as, clientsFor, expectError, makeCall, prisma, seedFixtures, type Client, type FixtureUser, type Fixtures } from './helpers';
+
+let fx: Fixtures;
+beforeEach(async () => {
+  fx = await seedFixtures();
+});
+afterAll(async () => {
+  await prisma.$disconnect();
+});
+
+/** What the Expert must supply when starting / finishing a call. */
+const REQUIRED_EXTRAS: Partial<Record<CallStatus, Record<string, unknown>>> = {
+  ongoing: { ninjaLink: 'https://vdo.ninja/?room=test' },
+  finished: { actualDurationMinutes: 50, rating: 4 },
+};
+
+const transition = (client: Client, callId: string, to: CallStatus, comment?: string) =>
+  client.post(`/calls/${callId}/transition`, { to, ...REQUIRED_EXTRAS[to], ...(comment ? { comment } : {}) });
+
+async function lastHistory(callId: string) {
+  return prisma.callStatusHistory.findFirstOrThrow({ where: { callId }, orderBy: { createdAt: 'desc' } });
+}
+
+async function expectMoved(client: Client, actor: FixtureUser, callId: string, from: CallStatus, to: CallStatus, isOverride: boolean) {
+  const res = await transition(client, callId, to, `moving to ${to}`);
+  expect(res.status, res.text).toBe(200);
+  expect(res.body.status).toBe(to);
+  const h = await lastHistory(callId);
+  expect(h).toMatchObject({ fromStatus: from, toStatus: to, actorId: actor.id, isOverride, comment: `moving to ${to}` });
+  expect((await prisma.call.findUniqueOrThrow({ where: { id: callId } })).status).toBe(to);
+}
+
+describe('valid moves record history with the right is_override', () => {
+  it('associate schedules, reschedules and re-schedules their own call (no override)', async () => {
+    const c = await as(fx.a1);
+    const call = await makeCall(fx, { associate: fx.a1 });
+    await expectMoved(c, fx.a1, call.id, 'on_scheduling', 'scheduled', false);
+    await expectMoved(c, fx.a1, call.id, 'scheduled', 'on_rescheduling', false);
+    await expectMoved(c, fx.a1, call.id, 'on_rescheduling', 'scheduled', false);
+    expect(await prisma.callStatusHistory.count({ where: { callId: call.id } })).toBe(4);
+  });
+
+  it('manager of the associate overrides associate edges', async () => {
+    const c = await as(fx.m1);
+    const call = await makeCall(fx, { associate: fx.a2 });
+    await expectMoved(c, fx.m1, call.id, 'on_scheduling', 'scheduled', true);
+    await expectMoved(c, fx.m1, call.id, 'scheduled', 'on_rescheduling', true);
+  });
+
+  it('founder overrides associate edges', async () => {
+    const c = await as(fx.founder);
+    const call = await makeCall(fx, { associate: fx.a3, status: 'on_rescheduling' });
+    await expectMoved(c, fx.founder, call.id, 'on_rescheduling', 'scheduled', true);
+  });
+
+  it('expert starts and finishes their call (no override)', async () => {
+    const c = await as(fx.e1);
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    await expectMoved(c, fx.e1, call.id, 'scheduled', 'ongoing', false);
+    await expectMoved(c, fx.e1, call.id, 'ongoing', 'finished', false);
+  });
+
+  it('expert may finish directly from scheduled', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    await expectMoved(await as(fx.e1), fx.e1, call.id, 'scheduled', 'finished', false);
+  });
+
+  it('founder overrides expert edges', async () => {
+    const c = await as(fx.founder);
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    await expectMoved(c, fx.founder, call.id, 'scheduled', 'ongoing', true);
+    await expectMoved(c, fx.founder, call.id, 'ongoing', 'finished', true);
+  });
+
+  it('founder runs the invoice chain (no override)', async () => {
+    const c = await as(fx.founder);
+    const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    await expectMoved(c, fx.founder, call.id, 'finished', 'invoice_submit', false);
+    await expectMoved(c, fx.founder, call.id, 'invoice_submit', 'invoice_approve', false);
+    await expectMoved(c, fx.founder, call.id, 'invoice_approve', 'process_to_bank', false);
+    const detail = await c.get(`/calls/${call.id}`);
+    expect(detail.body.allowedTransitions).toEqual([]);
+    expect(detail.body.history.map((h: { toStatus: string }) => h.toStatus)).toEqual([
+      'finished', 'invoice_submit', 'invoice_approve', 'process_to_bank',
+    ]);
+  });
+
+  it('GET /calls/:id/history returns the rows with actor refs and overrides', async () => {
+    const call = await makeCall(fx, { associate: fx.a1 });
+    await transition(await as(fx.m1), call.id, 'scheduled');
+    const res = await (await as(fx.a1)).get(`/calls/${call.id}/history`);
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveLength(2);
+    expect(res.body[1]).toMatchObject({ fromStatus: 'on_scheduling', toStatus: 'scheduled', isOverride: true, actor: { id: fx.m1.id, role: 'manager', nickname: 'ManagerOne' } });
+    expect(Object.keys(res.body[1].actor).sort()).toEqual(['avatarId', 'id', 'nickname', 'photoId', 'role']);
+  });
+});
+
+describe('starting and finishing need the Expert’s input', () => {
+  const post = (client: Client, callId: string, body: Record<string, unknown>) => client.post(`/calls/${callId}/transition`, body);
+
+  it('ongoing requires a valid Ninja link, which is stored on the call', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    const e1 = await as(fx.e1);
+    const missing = await post(e1, call.id, { to: 'ongoing' });
+    expectError(missing, 400, 'validation_error');
+    expect(missing.body.error.details.issues).toContainEqual(expect.objectContaining({ path: 'ninjaLink' }));
+    expectError(await post(e1, call.id, { to: 'ongoing', ninjaLink: 'not a link' }), 400, 'validation_error');
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('scheduled');
+
+    const res = await post(e1, call.id, { to: 'ongoing', ninjaLink: 'https://vdo.ninja/?room=abc' });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toMatchObject({ status: 'ongoing', ninjaLink: 'https://vdo.ninja/?room=abc' });
+    // The associate sees it too.
+    expect((await (await as(fx.a1)).get(`/calls/${call.id}`)).body.ninjaLink).toBe('https://vdo.ninja/?room=abc');
+  });
+
+  it('finished requires the actual duration and a 1–5 rating; feedback is optional', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'ongoing' });
+    const e1 = await as(fx.e1);
+    const missing = await post(e1, call.id, { to: 'finished' });
+    expectError(missing, 400, 'validation_error');
+    expect(missing.body.error.details.issues.map((i: { path: string }) => i.path).sort()).toEqual(['actualDurationMinutes', 'rating']);
+    for (const bad of [
+      { actualDurationMinutes: 0, rating: 3 },
+      { actualDurationMinutes: 601, rating: 3 },
+      { actualDurationMinutes: 30.5, rating: 3 },
+      { actualDurationMinutes: 30, rating: 0 },
+      { actualDurationMinutes: 30, rating: 6 },
+    ]) {
+      expectError(await post(e1, call.id, { to: 'finished', ...bad }), 400, 'validation_error');
+    }
+    const res = await post(e1, call.id, { to: 'finished', actualDurationMinutes: 42, rating: 5, feedback: 'Call went well' });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toMatchObject({ status: 'finished', actualDurationMinutes: 42, rating: 5, feedback: 'Call went well' });
+    // The booked duration (and so the calendar slot) is untouched.
+    expect(res.body.durationMinutes).toBe(60);
+  });
+
+  it('the rating range is enforced by the database too', async () => {
+    const call = await makeCall(fx, { associate: fx.a1 });
+    await expect(prisma.call.update({ where: { id: call.id }, data: { rating: 9 } })).rejects.toThrow(/calls_rating_range/);
+  });
+});
+
+describe('403 for the wrong role on a valid edge', () => {
+  it.each<[keyof Fixtures, CallStatus, CallStatus]>([
+    ['e1', 'on_scheduling', 'scheduled'],
+    ['e1', 'scheduled', 'on_rescheduling'],
+    ['a1', 'scheduled', 'ongoing'],
+    ['a1', 'scheduled', 'finished'],
+    ['m1', 'ongoing', 'finished'],
+    ['a1', 'finished', 'invoice_submit'],
+    ['m1', 'finished', 'invoice_submit'],
+    ['e1', 'invoice_submit', 'invoice_approve'],
+  ])('%s cannot move %s → %s', async (who, from, to) => {
+    const call = await makeCall(fx, { associate: fx.a1, status: from });
+    expectError(await transition(await as(fx[who] as FixtureUser), call.id, to), 403, 'forbidden');
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe(from);
+    expect(await prisma.callStatusHistory.count({ where: { callId: call.id } })).toBe(1);
+  });
+});
+
+describe('409 for an invalid edge', () => {
+  it.each<[CallStatus, CallStatus]>([
+    ['on_scheduling', 'finished'],
+    ['on_scheduling', 'on_scheduling'],
+    ['scheduled', 'invoice_submit'],
+    ['finished', 'scheduled'],
+    ['process_to_bank', 'on_scheduling'],
+  ])('%s → %s', async (from, to) => {
+    const call = await makeCall(fx, { associate: fx.a1, status: from });
+    const res = await transition(await as(fx.founder), call.id, to);
+    expectError(res, 409, 'invalid_transition');
+    expect(res.body.error.details).toEqual({ from, to });
+  });
+
+  it('rejects an unknown status name with 400', async () => {
+    const call = await makeCall(fx, { associate: fx.a1 });
+    expectError(await (await as(fx.founder)).post(`/calls/${call.id}/transition`, { to: 'cancelled' }), 400, 'validation_error');
+  });
+});
+
+describe('404 for a call the user cannot see', () => {
+  it.each<keyof Fixtures>(['a2', 'a3', 'm2', 'e2'])('%s gets 404 on a1’s call', async (who) => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    const client = await as(fx[who] as FixtureUser);
+    expectError(await transition(client, call.id, 'on_rescheduling'), 404, 'not_found');
+    expectError(await client.get(`/calls/${call.id}`), 404, 'not_found');
+  });
+
+  it('unknown and malformed ids are 404', async () => {
+    const c = await as(fx.founder);
+    expectError(await transition(c, '00000000-0000-4000-8000-000000000000', 'scheduled'), 404);
+    expectError(await transition(c, 'not-a-uuid', 'scheduled'), 404);
+  });
+});
+
+describe('expert_required', () => {
+  it('scheduling without an expert is 409 expert_required', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: null });
+    expectError(await transition(await as(fx.a1), call.id, 'scheduled'), 409, 'expert_required');
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('on_scheduling');
+  });
+});
+
+describe('notifications on transition', () => {
+  it('everyone else involved gets call.status_changed; the actor does not', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1 });
+    const cs = await clientsFor(fx, ['a1', 'm1', 'e1', 'founder', 'a2', 'm2', 'e2']);
+    expect((await transition(cs.a1, call.id, 'scheduled')).status).toBe(200);
+
+    for (const who of ['m1', 'e1', 'founder'] as const) {
+      const res = await cs[who].get('/notifications');
+      expect(res.status).toBe(200);
+      const n = res.body.items.find((i: { type: string }) => i.type === 'call.status_changed');
+      expect(n, `${who} notification`).toMatchObject({
+        payload: { callId: call.id, from: 'on_scheduling', to: 'scheduled', actor: { nickname: 'AssocOne', role: 'associate' } },
+        readAt: null,
+      });
+      expect(res.body.unreadCount).toBeGreaterThanOrEqual(1);
+      expect(res.headers['x-unread-count']).toBe(String(res.body.unreadCount));
+    }
+    for (const who of ['a1', 'a2', 'm2', 'e2'] as const) {
+      const res = await cs[who].get('/notifications');
+      expect(res.body.items, who).toEqual([]);
+    }
+  });
+
+  it('a second active founder is notified too, an inactive one is not', async () => {
+    const extra = await prisma.user.create({
+      data: { nickname: 'FounderTwo', role: 'founder', email: 'foundertwo@fixtures.test', passwordHash: 'x', avatarId: 'founder-02' },
+    });
+    const gone = await prisma.user.create({
+      data: { nickname: 'FounderGone', role: 'founder', email: 'foundergone@fixtures.test', passwordHash: 'x', avatarId: 'founder-03', isActive: false },
+    });
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    await transition(await as(fx.e1), call.id, 'ongoing');
+    expect(await prisma.notification.count({ where: { userId: extra.id, type: 'call.status_changed' } })).toBe(1);
+    expect(await prisma.notification.count({ where: { userId: gone.id } })).toBe(0);
+  });
+
+  it('marking notifications read updates the unread count', async () => {
+    const call = await makeCall(fx, { associate: fx.a1 });
+    const m1 = await as(fx.m1);
+    await transition(await as(fx.a1), call.id, 'scheduled');
+    const list = await m1.get('/notifications', { unread: 'true' });
+    expect(list.body.items).toHaveLength(1);
+    const read = await m1.post('/notifications/read', { ids: [list.body.items[0].id] });
+    expect(read.body).toEqual({ updated: 1, unreadCount: 0 });
+    expect((await m1.get('/notifications', { unread: 'true' })).body.items).toEqual([]);
+  });
+});
+
+describe('allowedTransitions in the call DTO', () => {
+  it('reflects the viewer', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    const [a1, e1, founder, m1] = await Promise.all([as(fx.a1), as(fx.e1), as(fx.founder), as(fx.m1)]);
+    expect((await a1.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(['on_rescheduling']);
+    expect((await m1.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(['on_rescheduling']);
+    expect([...(await e1.get(`/calls/${call.id}`)).body.allowedTransitions].sort()).toEqual(['finished', 'ongoing']);
+    expect([...(await founder.get(`/calls/${call.id}`)).body.allowedTransitions].sort()).toEqual(['finished', 'on_rescheduling', 'ongoing']);
+  });
+});

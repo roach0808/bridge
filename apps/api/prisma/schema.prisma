@@ -1,0 +1,378 @@
+// God System database schema (§3). Constraints that Prisma cannot express
+// (exclusion constraint, check constraints, ends_at trigger) live in the
+// hand-written SQL of the migrations.
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = []
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  founder
+  manager
+  associate
+  expert
+}
+
+enum CallStatus {
+  on_scheduling
+  scheduled
+  on_rescheduling
+  ongoing
+  finished
+  invoice_submit
+  invoice_approve
+  process_to_bank
+}
+
+enum ProfileStatus {
+  pending
+  approved
+  rejected
+}
+
+/// A profile's standing on one expert network platform; no row = not_registered.
+enum PlatformRegistration {
+  not_registered
+  registered
+  banned
+}
+
+enum AvatarAudience {
+  founder
+  manager
+  associate
+  expert
+  profile
+}
+
+enum BlockKind {
+  available
+  unavailable
+}
+
+enum Frequency {
+  none
+  daily
+  weekly
+  monthly
+  yearly
+}
+
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  nickname     String   @unique
+  role         Role
+  managerId    String?  @map("manager_id") @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  isActive     Boolean  @default(true) @map("is_active")
+  avatarId     String   @map("avatar_id")
+  /// An uploaded picture; shown instead of the catalog avatar when set.
+  photoId      String?  @unique @map("photo_id") @db.Uuid
+  timeZone     String   @default("America/New_York") @map("time_zone")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  manager            User?               @relation("ManagerTeam", fields: [managerId], references: [id], onDelete: Restrict)
+  team               User[]              @relation("ManagerTeam")
+  avatar             Avatar              @relation(fields: [avatarId], references: [id])
+  photo              Photo?              @relation("UserPhoto", fields: [photoId], references: [id], onDelete: SetNull)
+  uploadedPhotos     Photo[]             @relation("PhotoCreatedBy")
+  createdBanks       ProfileBank[]       @relation("BankCreatedBy")
+  associateCalls     Call[]              @relation("CallAssociate")
+  expertCalls        Call[]              @relation("CallExpert")
+  createdCalls       Call[]              @relation("CallCreatedBy")
+  statusChanges      CallStatusHistory[]
+  messages           Message[]
+  notifications      Notification[]
+  deviceTokens       DeviceToken[]
+  refreshTokens      RefreshToken[]
+  createdProfiles    Profile[]           @relation("ProfileCreatedBy")
+  reviewedProfiles   Profile[]           @relation("ProfileReviewedBy")
+  scheduleBlocks     ScheduleBlock[]     @relation("BlockExpert")
+  createdBlocks      ScheduleBlock[]     @relation("BlockCreatedBy")
+
+  @@index([role])
+  @@index([managerId])
+  @@map("users")
+}
+
+model Avatar {
+  id         String         @id
+  audience   AvatarAudience
+  style      String
+  seed       String
+  background String
+  label      String
+  sortOrder  Int            @map("sort_order")
+
+  users    User[]
+  profiles Profile[]
+
+  @@unique([audience, sortOrder])
+  @@map("avatars")
+}
+
+model Platform {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String   @unique
+  url       String
+  priority  Int
+  country   String   @db.Char(2)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  calls             Call[]
+  profileStatuses   ProfilePlatformStatus[]
+
+  @@map("platforms")
+}
+
+model Profile {
+  id              String        @id @default(uuid()) @db.Uuid
+  name            String
+  linkedinUrl     String?       @map("linkedin_url")
+  briefExperience String        @default("") @map("brief_experience")
+  dateOfBirth     DateTime?     @map("date_of_birth") @db.Date
+  gender          String?
+  nationality     String?
+  location        String?
+  education       String?
+  careerHistory   String?       @map("career_history")
+  avatarId        String        @map("avatar_id")
+  photoId         String?       @unique @map("photo_id") @db.Uuid
+  status          ProfileStatus @default(approved)
+  createdById     String        @map("created_by") @db.Uuid
+  reviewedById    String?       @map("reviewed_by") @db.Uuid
+  reviewedAt      DateTime?     @map("reviewed_at") @db.Timestamptz(3)
+  rejectionReason String?       @map("rejection_reason")
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  avatar     Avatar @relation(fields: [avatarId], references: [id])
+  photo      Photo? @relation("ProfilePhoto", fields: [photoId], references: [id], onDelete: SetNull)
+  banks      ProfileBank[]
+  platformStatuses ProfilePlatformStatus[]
+  createdBy  User   @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  reviewedBy User?  @relation("ProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
+  calls      Call[]
+
+  @@index([status])
+  @@index([createdById])
+  @@map("profiles")
+}
+
+model Call {
+  id                    String     @id @default(uuid()) @db.Uuid
+  status                CallStatus @default(on_scheduling)
+  platformId            String     @map("platform_id") @db.Uuid
+  profileId             String     @map("profile_id") @db.Uuid
+  associateId           String     @map("associate_id") @db.Uuid
+  expertId              String?    @map("expert_id") @db.Uuid
+  scheduledAt           DateTime   @map("scheduled_at") @db.Timestamptz(3)
+  durationMinutes       Int        @map("duration_minutes")
+  /// Maintained by trigger calls_set_ends_at: scheduled_at + duration.
+  endsAt                DateTime   @default(now()) @map("ends_at") @db.Timestamptz(3)
+  notes                 String?
+  projectDetails        String     @map("project_details")
+  platformAssociateName String     @map("platform_associate_name")
+  invoiceAmount         Decimal?   @map("invoice_amount") @db.Decimal(12, 2)
+  invoiceCurrency       String?    @map("invoice_currency") @db.Char(3)
+  /// Meeting link the Expert adds when the call starts.
+  ninjaLink             String?    @map("ninja_link")
+  /// Entered by the Expert when finishing: how long the call really took.
+  actualDurationMinutes Int?       @map("actual_duration_minutes")
+  /// Expert's 1–5 rating of how the call went, plus their answer.
+  rating                Int?
+  feedback              String?
+  createdById          String     @map("created_by") @db.Uuid
+  createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  platform  Platform            @relation(fields: [platformId], references: [id], onDelete: Restrict)
+  profile   Profile             @relation(fields: [profileId], references: [id], onDelete: Restrict)
+  associate User                @relation("CallAssociate", fields: [associateId], references: [id], onDelete: Restrict)
+  expert    User?               @relation("CallExpert", fields: [expertId], references: [id], onDelete: Restrict)
+  createdBy User                @relation("CallCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  history   CallStatusHistory[]
+  messages  Message[]
+
+  @@index([status])
+  @@index([associateId])
+  @@index([expertId])
+  @@index([expertId, scheduledAt])
+  @@index([scheduledAt])
+  @@map("calls")
+}
+
+model ScheduleBlock {
+  id              String    @id @default(uuid()) @db.Uuid
+  expertId        String    @map("expert_id") @db.Uuid
+  kind            BlockKind
+  note            String?
+  timeZone        String    @map("time_zone")
+  startDate       DateTime  @map("start_date") @db.Date
+  allDay          Boolean   @default(false) @map("all_day")
+  startMinute     Int       @map("start_minute")
+  durationMinutes Int       @map("duration_minutes")
+  frequency       Frequency @default(none)
+  interval        Int       @default(1)
+  weekdays        Int[]     @default([])
+  monthDay        Int?      @map("month_day")
+  setPosition     Int?      @map("set_position")
+  weekday         Int?
+  month           Int?
+  untilDate       DateTime? @map("until_date") @db.Date
+  exceptionDates  String[]  @default([]) @map("exception_dates")
+  createdById     String    @map("created_by") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  expert    User @relation("BlockExpert", fields: [expertId], references: [id], onDelete: Cascade)
+  createdBy User @relation("BlockCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([expertId, startDate])
+  @@map("schedule_blocks")
+}
+
+model CallStatusHistory {
+  id         String      @id @default(uuid()) @db.Uuid
+  callId     String      @map("call_id") @db.Uuid
+  fromStatus CallStatus? @map("from_status")
+  toStatus   CallStatus  @map("to_status")
+  actorId    String      @map("actor_id") @db.Uuid
+  isOverride Boolean     @default(false) @map("is_override")
+  comment    String?
+  createdAt  DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  call  Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+  actor User @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([callId, createdAt])
+  @@map("call_status_history")
+}
+
+model Message {
+  id        String   @id @default(uuid()) @db.Uuid
+  callId    String   @map("call_id") @db.Uuid
+  senderId  String   @map("sender_id") @db.Uuid
+  body      String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  call   Call @relation(fields: [callId], references: [id], onDelete: Cascade)
+  sender User @relation(fields: [senderId], references: [id], onDelete: Restrict)
+
+  @@index([callId, createdAt])
+  @@map("messages")
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  type      String
+  payload   Json
+  readAt    DateTime? @map("read_at") @db.Timestamptz(3)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+model DeviceToken {
+  id         String         @id @default(uuid()) @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  platform   DevicePlatform
+  token      String         @unique
+  createdAt  DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastSeenAt DateTime       @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+model RefreshToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  familyId   String    @map("family_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash")
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
+  replacedBy String?   @map("replaced_by") @db.Uuid
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+/// Uploaded avatar pictures, resized by the client (≤ 400 KB).
+model Photo {
+  id          String   @id @default(uuid()) @db.Uuid
+  contentType String   @map("content_type")
+  data        Bytes
+  byteSize    Int      @map("byte_size")
+  createdById String   @map("created_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  createdBy User     @relation("PhotoCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  user      User?    @relation("UserPhoto")
+  profile   Profile? @relation("ProfilePhoto")
+
+  @@map("photos")
+}
+
+/// Where a Profile is paid. Optional, but required once the Profile has a booked call.
+model ProfileBank {
+  id            String   @id @default(uuid()) @db.Uuid
+  profileId     String   @map("profile_id") @db.Uuid
+  bankName      String   @map("bank_name")
+  accountHolder String   @map("account_holder")
+  accountNumber String   @map("account_number")
+  swiftBic      String?  @map("swift_bic")
+  routingNumber String?  @map("routing_number")
+  country       String?  @db.Char(2)
+  currency      String?  @db.Char(3)
+  notes         String?
+  isPrimary     Boolean  @default(false) @map("is_primary")
+  createdById   String   @map("created_by") @db.Uuid
+  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  profile   Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdBy User    @relation("BankCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([profileId])
+  @@map("profile_banks")
+}
+
+model ProfilePlatformStatus {
+  profileId  String               @map("profile_id") @db.Uuid
+  platformId String               @map("platform_id") @db.Uuid
+  status     PlatformRegistration @default(not_registered)
+  updatedAt  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  profile  Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  platform Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, platformId])
+  @@map("profile_platform_statuses")
+}

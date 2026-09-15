@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: god
+      POSTGRES_PASSWORD: god
+      POSTGRES_DB: god
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-testdb.sql:/docker-entrypoint-initdb.d/init-testdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U god"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
