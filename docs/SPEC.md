@@ -82,7 +82,7 @@ grouped under Managers; they are assigned per Call.
 | Add Profile | ✓ (approved at once) | | ✓ (pending until a Founder approves) | |
 | Edit Profile | ✓ | | own pending or rejected submission (sends it back for review) | |
 | View Profile details | all | shared + own team's submissions | shared + own submissions | Profiles of assigned Calls, without platform statuses |
-| Set a Profile's status on a platform | ✓ | | | |
+| Set a Profile's status and rate on a platform | ✓ | | | |
 | See / edit a Profile's current address and banks | ✓ | | | |
 | Upload own photo | ✓ | ✓ | ✓ | ✓ |
 | Upload a Profile photo | ✓ | | | |
@@ -213,8 +213,8 @@ A Profile's standing on each expert network platform. A missing row means
 | platform_associate_name | text | Required, never blank. The platform's own staff contact, not our associate |
 | ninja_link | text, nullable | Meeting link the Expert must add when starting the call |
 | actual_duration_minutes | integer, nullable | Entered by the Expert when finishing; the booked `duration_minutes` (and the calendar slot) stay unchanged |
-| rating | integer 1–5, nullable | The Expert's answer to "How did the call go?", required when finishing |
-| feedback | text, nullable | Optional note with the rating, e.g. "Call went well" |
+| rating | integer 1–5, nullable | From an earlier finish form that asked "How did the call go?". No longer asked for; kept for old calls |
+| feedback | text, nullable | The note that went with that rating |
 | invoice_amount | numeric(12,2), nullable | Founder stage. Never shown to Experts |
 | invoice_currency | text (ISO 4217), nullable | |
 | created_by | uuid → User | |
@@ -379,6 +379,13 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | done_message_id | uuid → ChatMessage, nullable, unique | The `todo_done` reply |
 | created_at, updated_at | timestamptz | |
 
+#### ProfilePlatformStatus rates
+
+Each Profile × Platform row also carries `rate`: what that Profile is paid per
+hour on that platform, in USD. It defaults to **1000** (the column default, and
+the value reported for platforms with no row), only a Founder changes it, and
+Experts never receive it (their `platformStatuses` is null).
+
 #### WebPushSubscription
 
 | Field | Type | Notes |
@@ -517,8 +524,9 @@ Rules:
 - Changing the time or duration of a `confirmed` call moves it back to
   `scheduled` (with a history row and notifications): the Expert confirms again.
 - Moving to `ongoing` requires a `ninjaLink` (a URL). Moving to `finished`
-  requires `actualDurationMinutes` (1–600) and `rating` (1–5); `feedback` is
-  optional. Missing or invalid values are 400 with field issues.
+  requires `actualDurationMinutes` (1–600), and nothing else: the Expert only
+  says how long the call took. Missing or invalid values are 400 with field
+  issues.
 - Once `ongoing` or `finished`, the Associate has no transitions. Only the
   Founder may act after `finished`.
 - `process_to_bank` is terminal.
@@ -566,7 +574,7 @@ locked `FOR UPDATE`):
 1. Updates `calls.status`.
 2. Inserts a `call_status_history` row.
 3. Stores the step's extra fields: `ninjaLink` for `ongoing`;
-   `actualDurationMinutes`, `rating`, `feedback` for `finished`.
+   `actualDurationMinutes` for `finished`.
 4. Creates `notifications` for every other participant of the Call
    (associate, expert, associate's manager, founder), except that the Expert
    is not notified about invoicing steps.
@@ -738,10 +746,10 @@ but not shown anywhere else, and are not part of Call payloads.
 | PATCH | /profiles/:id | Founder (no re-approval), or the author of a pending or rejected submission (sends it back to pending and notifies the Founders). Approved profiles: Founder only |
 | POST | /profiles/:id/approve | Founder. Pending only; author is notified |
 | POST | /profiles/:id/reject | Founder. { reason } required; author is notified |
-| PUT | /profiles/:id/platforms/:platformId | Founder. { status: not_registered \| registered \| banned } |
+| PUT | /profiles/:id/platforms/:platformId | Founder. { status?: not_registered \| registered \| banned, rate?: USD per hour, 0–1,000,000, two decimals }. At least one of the two |
 
 Profile responses include the personal details and `platformStatuses`: one
-entry per platform ({ platform: { id, name, priority }, status }) in priority
+entry per platform ({ platform: { id, name, priority }, status, rate }) in priority
 order, `not_registered` when never set. Experts get `platformStatuses: null`.
 `currentAddress`, `bankCount` and `needsBank` are null for everyone except the
 Founder.
@@ -1034,7 +1042,7 @@ HTTP but not WebSocket upgrades.
 | Login | all | Email + password |
 | Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, Profiles that need a bank, with an Add bank shortcut) and the **database size**. Manager: team counts per stage |
 | Call list | all | Table with filters (status, associate, expert, date range, search), live updates; filters live in the URL |
-| Call detail | participants | Header with "View profile details", status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions`, assignment controls, status history and a Call card (Ninja link with "Join call", actual duration, rating and feedback). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks for the real duration and "How did the call go?" (1–5 stars) with an optional note; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
+| Call detail | participants | Header with "View profile details", status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions`, assignment controls, status history and a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
 | New Call | Founder, Manager, Associate | In this order: Profile (approved only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. Saving asks for confirmation when the time is today, in the past, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
 | Profiles | all | Cards with a details window (personal details, history; platform statuses for everyone but Experts; for the Founder a private section with the current address and banks). Founders add profiles (approved at once), review Associate submissions, upload photos, manage banks ("Needs bank" filter) and by default see a table of every Profile against every platform, editable in place. Associates submit profiles for review. Experts see the Profiles of their calls |
@@ -1169,7 +1177,8 @@ four Associates (pixel, sprout, mango, comet), three Experts, five Platforms,
 ten approved Profiles (with personal details and platform statuses, one of
 them banned on a platform) plus one pending and one rejected Associate
 submission, and a dozen Calls in every status with history; started and
-finished calls have Ninja links, real durations and ratings. The Experts live in
+finished calls have Ninja links and real durations. Each Profile has a rate per
+platform (around the 1000 default). The Experts live in
 Seoul (ember), London (flint) and New York (quill), and each has repeating
 availability starting from the current week, plus some time off, so the
 calendar has something to show.
@@ -1181,10 +1190,11 @@ calendar has something to show.
   whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 268 tests): transition endpoint returns 403 for wrong role,
+- API (`apps/api`, 270 tests): transition endpoint returns 403 for wrong role,
   409 for wrong edge, 200 and a history row for valid moves; confirmation,
-  rescheduling requests, Ninja link, duration and rating rules; Experts never
-  seeing invoicing; Profile submissions, personal details, founder-only address
+  rescheduling requests, Ninja link and duration rules; Experts never seeing
+  invoicing, rates, bank data or invoice figures; platform rates (default 1000,
+  Founder-only, validated); Profile submissions, personal details, founder-only address
   and platform statuses; chat rules, unread counts, to-dos and their done
   replies; browser push subscriptions and delivery (push service mocked);
   per-Call messages switched off; anonymity check
@@ -1196,7 +1206,7 @@ calendar has something to show.
   with `prisma migrate deploy` at the start of each run. They refuse to run
   against a non-local host.
 - E2E (web, Playwright): Associate schedules → Expert confirms and finishes
-  (duration and rating) → Founder invoices, with a Manager's browser observing
+  (duration only) → Founder invoices, with a Manager's browser observing
   live updates.
 
 ### 12.5 Deployment
@@ -1317,4 +1327,5 @@ Container alternative:
 | 2026-09-15 | One-to-one chat (Founder with anyone, same role, Associates with Managers) with unread counts and read receipts; Founders turn chat messages into to-dos, and marking one done replies in the chat; Chat and To-dos pages with sidebar badges |
 | 2026-09-15 | Browser push notifications (Web Push + service worker) for chat messages and notifications, with Settings controls and an installable web app manifest |
 | 2026-09-15 | Experts no longer see invoicing: invoiced calls show as finished, without amounts, invoicing history or invoicing notifications |
+| 2026-09-15 | Each Profile has a rate per expert network platform (USD per hour, default 1000), set by the Founder and hidden from Experts; finishing a call now asks the Expert only for the real duration |
 | 2026-09-15 | Chat narrowed: no chats between Associates or between Experts. Experts chat only with Founders; Managers with Founders, Managers and Associates; Associates with Founders and Managers. Older chats that are no longer allowed are read-only |

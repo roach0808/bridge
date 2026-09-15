@@ -13,7 +13,7 @@ afterAll(async () => {
 /** What the Expert must supply when starting / finishing a call. */
 const REQUIRED_EXTRAS: Partial<Record<CallStatus, Record<string, unknown>>> = {
   ongoing: { ninjaLink: 'https://vdo.ninja/?room=test' },
-  finished: { actualDurationMinutes: 50, rating: 4 },
+  finished: { actualDurationMinutes: 50 },
 };
 
 const transition = (client: Client, callId: string, to: CallStatus, comment?: string) =>
@@ -136,24 +136,18 @@ describe('starting and finishing need the Expert’s input', () => {
     expect((await (await as(fx.a1)).get(`/calls/${call.id}`)).body.ninjaLink).toBe('https://vdo.ninja/?room=abc');
   });
 
-  it('finished requires the actual duration and a 1–5 rating; feedback is optional', async () => {
+  it('finished needs only the actual duration', async () => {
     const call = await makeCall(fx, { associate: fx.a1, status: 'ongoing' });
     const e1 = await as(fx.e1);
     const missing = await post(e1, call.id, { to: 'finished' });
     expectError(missing, 400, 'validation_error');
-    expect(missing.body.error.details.issues.map((i: { path: string }) => i.path).sort()).toEqual(['actualDurationMinutes', 'rating']);
-    for (const bad of [
-      { actualDurationMinutes: 0, rating: 3 },
-      { actualDurationMinutes: 601, rating: 3 },
-      { actualDurationMinutes: 30.5, rating: 3 },
-      { actualDurationMinutes: 30, rating: 0 },
-      { actualDurationMinutes: 30, rating: 6 },
-    ]) {
+    expect(missing.body.error.details.issues.map((i: { path: string }) => i.path)).toEqual(['actualDurationMinutes']);
+    for (const bad of [{ actualDurationMinutes: 0 }, { actualDurationMinutes: 601 }, { actualDurationMinutes: 30.5 }]) {
       expectError(await post(e1, call.id, { to: 'finished', ...bad }), 400, 'validation_error');
     }
-    const res = await post(e1, call.id, { to: 'finished', actualDurationMinutes: 42, rating: 5, feedback: 'Call went well' });
+    const res = await post(e1, call.id, { to: 'finished', actualDurationMinutes: 42 });
     expect(res.status, res.text).toBe(200);
-    expect(res.body).toMatchObject({ status: 'finished', actualDurationMinutes: 42, rating: 5, feedback: 'Call went well' });
+    expect(res.body).toMatchObject({ status: 'finished', actualDurationMinutes: 42, rating: null, feedback: null });
     // The booked duration (and so the calendar slot) is untouched.
     expect(res.body.durationMinutes).toBe(60);
   });

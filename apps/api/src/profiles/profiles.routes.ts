@@ -215,11 +215,11 @@ profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder')
   const platformId = idParam(req, 'platformId');
   const platform = platformId && (await prisma.platform.findUnique({ where: { id: platformId }, select: { id: true } }));
   if (!platform) throw notFound('Platform');
-  const { status } = parseBody(profilePlatformStatusSchema, req);
+  const { status, rate } = parseBody(profilePlatformStatusSchema, req);
   await prisma.profilePlatformStatus.upsert({
     where: { profileId_platformId: { profileId: profile.id, platformId: platform.id } },
-    create: { profileId: profile.id, platformId: platform.id, status },
-    update: { status },
+    create: { profileId: profile.id, platformId: platform.id, status, rate },
+    update: { status, rate },
   });
   res.json(toProfileDTO(await loadVisible(actor, profile.id), await platformRefs()));
 });

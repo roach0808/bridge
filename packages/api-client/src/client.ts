@@ -150,8 +150,9 @@ export function createApiClient(options: ClientOptions) {
       setPhoto: (id: string, dataUrl: string) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/photo`, { body: { dataUrl } }),
       removePhoto: (id: string) => del<ProfileDTO>(`/profiles/${enc(id)}/photo`),
-      setPlatformStatus: (id: string, platformId: string, status: PlatformRegistration) =>
-        http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}`, { body: { status } }),
+      /** Founder: a Profile's registration status and/or rate (USD per hour) on one platform. */
+      setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number }) =>
+        http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}`, { body }),
     },
 
     calls: {

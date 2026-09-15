@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { BLOCKING_STATUSES } from '@god/shared';
+import { BLOCKING_STATUSES, DEFAULT_PLATFORM_RATE } from '@god/shared';
 import type {
   MeDTO,
   MessageDTO,
@@ -70,7 +70,7 @@ export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO
 export const profileInclude = {
   createdBy: { select: userRefSelect },
   reviewedBy: { select: userRefSelect },
-  platformStatuses: { select: { platformId: true, status: true } },
+  platformStatuses: { select: { platformId: true, status: true, rate: true } },
 } satisfies Prisma.ProfileInclude;
 
 export const platformRefSelect = { id: true, name: true, priority: true } satisfies Prisma.PlatformSelect;
@@ -115,6 +115,7 @@ export const toProfileDTO = (p: ProfileRow & ProfileCounts, platforms: PlatformR
     ? platforms.map((platform) => ({
         platform,
         status: p.platformStatuses.find((s) => s.platformId === platform.id)?.status ?? 'not_registered',
+        rate: Number(p.platformStatuses.find((s) => s.platformId === platform.id)?.rate ?? DEFAULT_PLATFORM_RATE),
       }))
     : null,
   bankCount: p._count ? p._count.banks : null,

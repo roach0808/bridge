@@ -387,6 +387,8 @@ model ProfilePlatformStatus {
   profileId  String               @map("profile_id") @db.Uuid
   platformId String               @map("platform_id") @db.Uuid
   status     PlatformRegistration @default(not_registered)
+  /// The Profile's rate on this platform (USD per hour), set by the Founder. Never shown to Experts.
+  rate       Decimal              @default(1000) @db.Decimal(12, 2)
   updatedAt  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   profile  Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)

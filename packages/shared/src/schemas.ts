@@ -141,7 +141,24 @@ export const profileSchema = z.object({
   currentAddress: optionalText(1000),
 });
 export const updateProfileSchema = profileSchema.partial();
-export const profilePlatformStatusSchema = z.object({ status: z.enum(PLATFORM_REGISTRATIONS) });
+
+/** A Profile's rate on a platform when the Founder hasn't set one (USD per hour). */
+export const DEFAULT_PLATFORM_RATE = 1000;
+export const MAX_PLATFORM_RATE = 1_000_000;
+
+/** Founder sets a Profile's standing and/or rate on one platform. */
+export const profilePlatformStatusSchema = z
+  .object({
+    status: z.enum(PLATFORM_REGISTRATIONS).optional(),
+    rate: z.coerce
+      .number({ invalid_type_error: 'Enter a number' })
+      .min(0, 'The rate cannot be negative')
+      .max(MAX_PLATFORM_RATE, 'That rate is too high')
+      .multipleOf(0.01, 'Use at most two decimals')
+      .optional(),
+  })
+  .refine((v) => v.status !== undefined || v.rate !== undefined, 'Nothing to update');
+
 export const rejectProfileSchema = z.object({ reason: trimmed('Reason', 1000) });
 export const listProfilesQuerySchema = z.object({
   q: z.string().trim().optional(),
@@ -191,7 +208,8 @@ export const MAX_ACTUAL_DURATION_MINUTES = 600;
 
 /**
  * Moving to `ongoing` needs the Ninja link; moving to `finished` needs the
- * real duration and the Expert's 1–5 rating (§ call feedback).
+ * real duration. `rating` and `feedback` are optional leftovers of an older
+ * finish form and are no longer asked for.
  */
 export const transitionSchema = z
   .object({
@@ -214,9 +232,6 @@ export const transitionSchema = z
     if (v.to === 'finished') {
       if (v.actualDurationMinutes === undefined) {
         ctx.addIssue({ code: 'custom', path: ['actualDurationMinutes'], message: 'Enter how many minutes the call took' });
-      }
-      if (v.rating === undefined) {
-        ctx.addIssue({ code: 'custom', path: ['rating'], message: 'Rate how the call went (1–5)' });
       }
     }
   });

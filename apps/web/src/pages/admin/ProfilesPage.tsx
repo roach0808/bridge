@@ -30,13 +30,13 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { ProfileDTO, ProfileStatus } from '@god/shared';
+import { DEFAULT_PLATFORM_RATE, type ProfileDTO, type ProfileStatus } from '@god/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useMe } from '@/auth/AuthProvider';
 import { EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { BanksDialog } from '@/components/BanksDialog';
-import { DotPill, PlatformStatusSelect, ProfileDetailsDialog } from '@/components/ProfileDetails';
+import { DotPill, PlatformRateField, PlatformStatusSelect, ProfileDetailsDialog } from '@/components/ProfileDetails';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
@@ -475,7 +475,7 @@ function ProfileCard({
 function ProfilesTable({ profiles, onOpen }: { profiles: ProfileDTO[]; onOpen: (p: ProfileDTO) => void }) {
   const platforms = profiles[0]?.platformStatuses?.map((s) => s.platform) ?? [];
   return (
-    <TableSurface minWidth={420 + platforms.length * 150}>
+    <TableSurface minWidth={420 + platforms.length * 170}>
       <Table size="small">
         <TableHead>
           <TableRow>
@@ -502,15 +502,17 @@ function ProfilesTable({ profiles, onOpen }: { profiles: ProfileDTO[]; onOpen: (
               <TableCell>
                 <ProfileStatusChip status={p.status} />
               </TableCell>
-              {platforms.map((pl) => (
-                <TableCell key={pl.id}>
-                  <PlatformStatusSelect
-                    profile={p}
-                    platformId={pl.id}
-                    status={p.platformStatuses?.find((s) => s.platform.id === pl.id)?.status ?? 'not_registered'}
-                  />
-                </TableCell>
-              ))}
+              {platforms.map((pl) => {
+                const entry = p.platformStatuses?.find((s) => s.platform.id === pl.id);
+                return (
+                  <TableCell key={pl.id}>
+                    <Stack spacing={0.5} alignItems="flex-start">
+                      <PlatformStatusSelect profile={p} platformId={pl.id} status={entry?.status ?? 'not_registered'} />
+                      <PlatformRateField profile={p} platformId={pl.id} rate={entry?.rate ?? DEFAULT_PLATFORM_RATE} />
+                    </Stack>
+                  </TableCell>
+                );
+              })}
             </TableRow>
           ))}
         </TableBody>

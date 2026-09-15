@@ -198,12 +198,35 @@ describe('experts and profiles', () => {
 });
 
 describe('platform statuses', () => {
-  it('every platform is listed, defaulting to not_registered', async () => {
+  it('every platform is listed, defaulting to not_registered at a rate of 1000', async () => {
     const res = await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`);
     expect(res.body.platformStatuses).toEqual([
-      { platform: { id: fx.platform.id, name: 'GLG', priority: 1 }, status: 'not_registered' },
-      { platform: { id: fx.platform2.id, name: 'AlphaSights', priority: 2 }, status: 'not_registered' },
+      { platform: { id: fx.platform.id, name: 'GLG', priority: 1 }, status: 'not_registered', rate: 1000 },
+      { platform: { id: fx.platform2.id, name: 'AlphaSights', priority: 2 }, status: 'not_registered', rate: 1000 },
     ]);
+  });
+
+  it('the founder sets a rate per platform without touching the status, and back', async () => {
+    const f = await as(fx.founder);
+    const url = (platformId: string) => `/profiles/${fx.approvedProfile.id}/platforms/${platformId}`;
+    let res = await f.put(url(fx.platform.id), { rate: 1250.5 });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.platformStatuses).toEqual([
+      expect.objectContaining({ status: 'not_registered', rate: 1250.5 }),
+      expect.objectContaining({ status: 'not_registered', rate: 1000 }),
+    ]);
+    res = await f.put(url(fx.platform.id), { status: 'registered' });
+    expect(res.body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1250.5 });
+    res = await f.put(url(fx.platform2.id), { status: 'banned', rate: 0 });
+    expect(res.body.platformStatuses[1]).toMatchObject({ status: 'banned', rate: 0 });
+
+    // Managers and associates see the rates; only the founder changes them.
+    expect((await (await as(fx.m1)).get(`/profiles/${fx.approvedProfile.id}`)).body.platformStatuses[0].rate).toBe(1250.5);
+    expectError(await (await as(fx.a1)).put(url(fx.platform.id), { rate: 1 }), 403);
+
+    for (const bad of [{}, { rate: -1 }, { rate: 'abc' }, { rate: 12.345 }, { rate: 2_000_000 }]) {
+      expectError(await f.put(url(fx.platform.id), bad), 400);
+    }
   });
 
   it('the founder sets a status; managers and associates see it but cannot change it', async () => {

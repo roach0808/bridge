@@ -75,16 +75,15 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
   // The expert confirms the time first; only a confirmed call can be finished.
   await transition(expert, 'Confirm time');
   await expect(observed).toHaveAttribute('data-status', 'confirmed', { timeout: 5_000 });
-  // Finishing asks for the real duration (prefilled with the booking) and a rating.
+  // Finishing asks only for the real duration (prefilled with the booking).
   await expert.getByRole('button', { name: 'Mark finished' }).click();
+  await expert.getByRole('dialog').getByLabel('Actual duration (minutes)').fill('');
   await expect(expert.getByRole('dialog').getByRole('button', { name: 'Confirm' })).toBeDisabled();
   await expert.getByRole('button', { name: 'Cancel' }).click();
   await transition(expert, 'Mark finished', async (dialog) => {
     await dialog.getByLabel('Actual duration (minutes)').fill('14');
-    await dialog.getByRole('radio', { name: '4 Stars' }).check({ force: true });
-    await dialog.getByLabel('Anything to add? (optional)').fill('Call went well');
   });
-  await expect(expert.getByText('“Call went well”')).toBeVisible();
+  await expect(expert.getByText('14 minutes')).toBeVisible();
   await expect(observed).toHaveAttribute('data-status', 'finished', { timeout: 5_000 });
   // The Associate's open screen updates too, and no longer offers actions.
   await expect(associate.getByTestId('call-status')).toHaveAttribute('data-status', 'finished');

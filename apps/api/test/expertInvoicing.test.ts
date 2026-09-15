@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
+import { as, expectError, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -62,5 +62,29 @@ describe('experts do not see invoicing', () => {
     expect(await prisma.notification.count({ where: { userId: fx.e1.id } })).toBe(0);
     // The associate still hears about both.
     expect(await prisma.notification.count({ where: { userId: fx.a1.id } })).toBe(2);
+  });
+
+  it('nothing about money reaches an expert: no invoice figures, rates or bank data', async () => {
+    const call = await invoicedCall();
+    await (await as(fx.founder)).put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { rate: 1500 });
+    await prisma.profileBank.create({
+      data: { profileId: fx.approvedProfile.id, bankName: 'Bank', accountHolder: 'Dana', accountNumber: 'GB00', isPrimary: true, createdById: fx.founder.id },
+    });
+    const e1 = await as(fx.e1);
+    const responses = [
+      await e1.get(`/calls/${call.id}`),
+      await e1.get('/calls'),
+      await e1.get('/dashboard'),
+      await e1.get('/profiles'),
+      await e1.get(`/profiles/${fx.approvedProfile.id}`),
+      await e1.get('/calendar', { from: '2027-01-31T00:00:00Z', to: '2027-02-03T00:00:00Z' }),
+    ];
+    for (const res of responses) {
+      expect(res.status, res.text).toBe(200);
+      expect(res.text).not.toMatch(/"rate"|"bankCount":\d|"needsBank":(true|false)|"invoiceAmount":"|"invoiceCurrency":"|1500|450/);
+    }
+    const profile = responses[4]!.body;
+    expect(profile).toMatchObject({ platformStatuses: null, bankCount: null, needsBank: null, currentAddress: null });
+    expectError(await e1.get(`/profiles/${fx.approvedProfile.id}/banks`), 403);
   });
 });

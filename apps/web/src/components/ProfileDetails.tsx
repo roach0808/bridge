@@ -11,14 +11,17 @@ import {
   DialogContent,
   Divider,
   IconButton,
+  InputAdornment,
   MenuItem,
   Select,
+  TextField,
   Skeleton,
   Stack,
   Tooltip,
   Typography,
 } from '@mui/material';
 import {
+  MAX_PLATFORM_RATE,
   PLATFORM_REGISTRATIONS,
   PLATFORM_REGISTRATION_LABELS,
   type PlatformRegistration,
@@ -26,7 +29,7 @@ import {
 } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useMe } from '@/auth/AuthProvider';
 import { BanksDialog } from '@/components/BanksDialog';
 import { ErrorState, Field } from '@/components/common';
@@ -69,7 +72,24 @@ export function PlatformStatusChip({ status }: { status: PlatformRegistration })
   return <DotPill color={PLATFORM_REGISTRATION_COLORS[status]}>{PLATFORM_REGISTRATION_LABELS[status]}</DotPill>;
 }
 
-/** Founder-only inline editor for one profile × platform cell. */
+const rateFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 });
+/** A platform rate for display, e.g. "$1,000/h". */
+export const formatRate = (rate: number) => `${rateFormat.format(rate).replace(/\.00$/, '')}/h`;
+
+function useSetPlatform(profileId: string, platformId: string) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  return useMutation({
+    mutationFn: (body: { status?: PlatformRegistration; rate?: number }) => api.profiles.setPlatform(profileId, platformId, body),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(qk.profiles.detail(saved.id), saved);
+      void queryClient.invalidateQueries({ queryKey: qk.profiles.all });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+}
+
+/** Founder-only inline editor for one profile × platform status. */
 export function PlatformStatusSelect({
   profile,
   platformId,
@@ -79,17 +99,8 @@ export function PlatformStatusSelect({
   platformId: string;
   status: PlatformRegistration;
 }) {
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  const mutation = useMutation({
-    mutationFn: (next: PlatformRegistration) => api.profiles.setPlatformStatus(profile.id, platformId, next),
-    onSuccess: (saved) => {
-      queryClient.setQueryData(qk.profiles.detail(saved.id), saved);
-      void queryClient.invalidateQueries({ queryKey: qk.profiles.all });
-    },
-    onError: (err) => toast.error(errorMessage(err)),
-  });
-  const value = mutation.isPending && mutation.variables ? mutation.variables : status;
+  const mutation = useSetPlatform(profile.id, platformId);
+  const value = mutation.isPending && mutation.variables?.status ? mutation.variables.status : status;
   return (
     <Select
       size="small"
@@ -97,7 +108,7 @@ export function PlatformStatusSelect({
       disableUnderline
       value={value}
       disabled={mutation.isPending}
-      onChange={(e) => mutation.mutate(e.target.value as PlatformRegistration)}
+      onChange={(e) => mutation.mutate({ status: e.target.value as PlatformRegistration })}
       renderValue={(v) => <PlatformStatusChip status={v} />}
       inputProps={{ 'aria-label': `${profile.name} platform status` }}
       sx={{ '& .MuiSelect-select': { py: 0.25, display: 'flex', alignItems: 'center' } }}
@@ -108,6 +119,54 @@ export function PlatformStatusSelect({
         </MenuItem>
       ))}
     </Select>
+  );
+}
+
+/** Founder-only inline editor for a Profile's rate on one platform; saves on Enter or when leaving the field. */
+export function PlatformRateField({
+  profile,
+  platformId,
+  rate,
+}: {
+  profile: Pick<ProfileDTO, 'id' | 'name'>;
+  platformId: string;
+  rate: number;
+}) {
+  const mutation = useSetPlatform(profile.id, platformId);
+  const [draft, setDraft] = useState(String(rate));
+  useEffect(() => setDraft(String(rate)), [rate]);
+  const value = Number(draft);
+  const valid = draft.trim() !== '' && Number.isFinite(value) && value >= 0 && value <= MAX_PLATFORM_RATE;
+
+  const save = () => {
+    if (!valid) return setDraft(String(rate));
+    const rounded = Math.round(value * 100) / 100;
+    if (rounded !== rate) mutation.mutate({ rate: rounded });
+  };
+
+  return (
+    <TextField
+      size="small"
+      variant="standard"
+      type="number"
+      value={draft}
+      error={!valid}
+      disabled={mutation.isPending}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={save}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+        if (e.key === 'Escape') setDraft(String(rate));
+      }}
+      slotProps={{
+        input: {
+          disableUnderline: false,
+          startAdornment: <InputAdornment position="start">$</InputAdornment>,
+          endAdornment: <InputAdornment position="end">/h</InputAdornment>,
+        },
+        htmlInput: { min: 0, step: 50, 'aria-label': `${profile.name} rate`, style: { width: 64 } },
+      }}
+    />
   );
 }
 
@@ -177,19 +236,32 @@ function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
             <Typography variant="subtitle2" sx={{ mb: 1 }}>
               Expert network platforms
             </Typography>
+            <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
+              Rate per hour on each platform{isFounder ? ' (default $1,000)' : ''}. Not shown to Experts.
+            </Typography>
             {p.platformStatuses.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
                 No platforms yet.
               </Typography>
             ) : (
               <Stack divider={<Divider flexItem />}>
-                {p.platformStatuses.map(({ platform, status }) => (
-                  <Stack key={platform.id} direction="row" alignItems="center" justifyContent="space-between" sx={{ py: 0.75, minHeight: 40 }}>
-                    <Typography variant="body2">{platform.name}</Typography>
+                {p.platformStatuses.map(({ platform, status, rate }) => (
+                  <Stack key={platform.id} direction="row" alignItems="center" spacing={2} sx={{ py: 0.75, minHeight: 40 }}>
+                    <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                      {platform.name}
+                    </Typography>
                     {isFounder ? (
-                      <PlatformStatusSelect profile={p} platformId={platform.id} status={status} />
+                      <>
+                        <PlatformRateField profile={p} platformId={platform.id} rate={rate} />
+                        <PlatformStatusSelect profile={p} platformId={platform.id} status={status} />
+                      </>
                     ) : (
-                      <PlatformStatusChip status={status} />
+                      <>
+                        <Typography variant="body2" color="text.secondary">
+                          {formatRate(rate)}
+                        </Typography>
+                        <PlatformStatusChip status={status} />
+                      </>
                     )}
                   </Stack>
                 ))}

@@ -128,12 +128,20 @@ async function main() {
       }),
     );
   }
+  // Hourly rates (USD) per platform, before the small per-profile variation below.
+  const RATES = [1000, 1200, 900, 1500, 1100];
   // Platform registrations: most profiles are on a couple of networks; one is banned somewhere.
   for (const [i, profile] of profiles.entries()) {
     for (const [j, platform] of platforms.entries()) {
       if ((i + j) % 3 === 0) continue; // not registered
       await prisma.profilePlatformStatus.create({
-        data: { profileId: profile.id, platformId: platform.id, status: i === 7 && j === 1 ? 'banned' : 'registered' },
+        data: {
+          profileId: profile.id,
+          platformId: platform.id,
+          status: i === 7 && j === 1 ? 'banned' : 'registered',
+          // Rates vary a little by platform and profile; 1000 is the default.
+          rate: RATES[j]! + (i % 3) * 50,
+        },
       });
     }
   }

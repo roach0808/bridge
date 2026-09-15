@@ -88,20 +88,15 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<CallStatus | null>(null);
   const [comment, setComment] = useState('');
-  // Starting needs the Ninja link; finishing needs the real duration and a rating.
+  // Starting needs the Ninja link; finishing needs how long the call really took.
   const [ninjaLink, setNinjaLink] = useState('');
   const [actualMinutes, setActualMinutes] = useState('');
-  const [rating, setRating] = useState<number | null>(null);
-  const [ratingHover, setRatingHover] = useState(-1);
-  const [feedback, setFeedback] = useState('');
 
   const open = (to: CallStatus) => {
     setTarget(to);
     setComment('');
     setNinjaLink(call.ninjaLink ?? '');
     setActualMinutes(String(call.durationMinutes));
-    setRating(null);
-    setFeedback('');
     transition.reset();
   };
 
@@ -131,7 +126,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
     target === 'ongoing'
       ? linkValid
       : target === 'finished'
-        ? minutesValid && rating !== null
+        ? minutesValid
         : expertReschedule
           ? comment.trim() !== ''
           : true;
@@ -142,9 +137,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
       to: target,
       comment: comment.trim() || undefined,
       ...(target === 'ongoing' ? { ninjaLink: ninjaLink.trim() } : {}),
-      ...(target === 'finished'
-        ? { actualDurationMinutes: minutes, rating: rating ?? undefined, feedback: feedback.trim() || undefined }
-        : {}),
+      ...(target === 'finished' ? { actualDurationMinutes: minutes } : {}),
     });
   };
 
@@ -251,51 +244,17 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   />
                 )}
                 {target === 'finished' && (
-                  <>
-                    <TextField
-                      label="Actual duration (minutes)"
-                      required
-                      type="number"
-                      value={actualMinutes}
-                      onChange={(e) => setActualMinutes(e.target.value)}
-                      error={Boolean(errors.actualDurationMinutes) || (actualMinutes !== '' && !minutesValid)}
-                      helperText={errors.actualDurationMinutes ?? `Booked for ${call.durationMinutes} min`}
-                      slotProps={{ htmlInput: { min: 1, max: MAX_ACTUAL_DURATION_MINUTES, step: 1 } }}
-                      autoFocus
-                    />
-                    <Box>
-                      <Typography variant="body2" fontWeight={500} id="call-rating-label">
-                        How did the call go? *
-                      </Typography>
-                      <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 0.5 }}>
-                        <Rating
-                          name="call-rating"
-                          aria-labelledby="call-rating-label"
-                          value={rating}
-                          max={5}
-                          size="large"
-                          onChange={(_, v) => setRating(v)}
-                          onChangeActive={(_, v) => setRatingHover(v)}
-                        />
-                        <Typography variant="body2" color="text.secondary">
-                          {RATING_LABELS[ratingHover !== -1 ? ratingHover : (rating ?? 0)] ?? ''}
-                        </Typography>
-                      </Stack>
-                      {errors.rating && (
-                        <Typography variant="caption" color="error">
-                          {errors.rating}
-                        </Typography>
-                      )}
-                    </Box>
-                    <TextField
-                      label="Anything to add? (optional)"
-                      placeholder="e.g. The call went well — the client wants a follow-up next month."
-                      multiline
-                      minRows={2}
-                      value={feedback}
-                      onChange={(e) => setFeedback(e.target.value)}
-                    />
-                  </>
+                  <TextField
+                    label="Actual duration (minutes)"
+                    required
+                    type="number"
+                    value={actualMinutes}
+                    onChange={(e) => setActualMinutes(e.target.value)}
+                    error={Boolean(errors.actualDurationMinutes) || (actualMinutes !== '' && !minutesValid)}
+                    helperText={errors.actualDurationMinutes ?? `Booked for ${call.durationMinutes} min`}
+                    slotProps={{ htmlInput: { min: 1, max: MAX_ACTUAL_DURATION_MINUTES, step: 1 } }}
+                    autoFocus
+                  />
                 )}
                 {target !== 'finished' && (
                   <TextField

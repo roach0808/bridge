@@ -61,6 +61,8 @@ export type ProfileStatus = 'pending' | 'approved' | 'rejected';
 export interface ProfilePlatformStatusDTO {
   platform: Pick<PlatformDTO, 'id' | 'name' | 'priority'>;
   status: PlatformRegistration;
+  /** USD per hour; 1000 until the Founder sets it. */
+  rate: number;
 }
 
 export interface ProfileDTO {
