@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { hashToken } from '../src/auth/tokens';
-import { Client, PASSWORD, anon, app, as, assertNoEmails, expectError, loginRaw, prisma, seedFixtures, type Fixtures } from './helpers';
+import { Client, PASSWORD, anon, app, as, assertNoEmails, expectError, loginRaw, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -191,5 +191,20 @@ describe('PATCH /me/time-zone', () => {
   it.each(['Mars/Base', '+09:00', 'UTC+9', ''])('is 400 for an invalid zone %j', async (timeZone) => {
     const client = await as(fx.e1);
     expectError(await client.patch('/me/time-zone', { timeZone }), 400, 'validation_error');
+  });
+});
+
+describe('links can only be http(s)', () => {
+  it('a javascript: link is refused wherever the app renders a link', async () => {
+    const fx2 = await seedFixtures();
+    const f = await as(fx2.founder);
+    const evil = 'javascript:alert(document.cookie)';
+    expectError(await f.post('/platforms', { name: 'Evil', url: evil, priority: 9, country: 'US' }), 400);
+    expectError(await f.post('/profiles', { name: 'Evil', avatarId: 'profile-01', linkedinUrl: evil }), 400);
+    const call = await makeCall(fx2, { associate: fx2.a1, status: 'confirmed' });
+    expectError(await f.patch(`/calls/${call.id}`, { gptLink: evil }), 400);
+    expectError(await (await as(fx2.e1)).post(`/calls/${call.id}/transition`, { to: 'ongoing', ninjaLink: evil }), 400);
+    // Ordinary links still work.
+    expect((await f.post('/platforms', { name: 'Fine', url: 'https://ok.example.com', priority: 9, country: 'US' })).status).toBe(201);
   });
 });

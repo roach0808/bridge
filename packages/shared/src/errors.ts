@@ -10,6 +10,7 @@ export const ERROR_CODES = {
   expertRequired: 'expert_required',
   expertBusy: 'expert_busy',
   profileNotApproved: 'profile_not_approved',
+  rateRequired: 'rate_required',
   rateLimited: 'rate_limited',
   inactive: 'user_inactive',
   internal: 'internal_error',

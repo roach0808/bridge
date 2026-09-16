@@ -1,5 +1,6 @@
 import {
   ERROR_CODES,
+  type SessionDTO,
   avatarSchema,
   changePasswordSchema,
   isAvatarForAudience,
@@ -13,9 +14,10 @@ import rateLimit from 'express-rate-limit';
 import { config, cookieSecure } from '../config';
 import { prisma } from '../db';
 import { HttpError, badRequest, forbidden, unauthenticated } from '../errors';
-import { parseBody } from '../http';
+import { iso, param, parseBody } from '../http';
 import { meSelect, toMeDTO } from '../serializers';
-import { actorOf, requireAuth } from './middleware';
+import { deviceOf } from './device';
+import { actorOf, requireAuth, requireRole } from './middleware';
 import { hashToken, issueRefreshToken, refreshTokenTtlMs, signAccessToken } from './tokens';
 
 export const REFRESH_COOKIE = 'god_rt';
@@ -69,10 +71,10 @@ authRouter.post('/auth/login', loginLimiter, async (req, res) => {
   if (!user.isActive) throw new HttpError(401, ERROR_CODES.inactive, 'This account has been deactivated');
 
   const { passwordHash: _hash, ...me } = user;
-  const refresh = await issueRefreshToken(prisma, user.id);
+  const refresh = await issueRefreshToken(prisma, user.id, undefined, deviceOf(req));
   setRefreshCookie(res, refresh.token);
   res.json({
-    accessToken: signAccessToken(user.id, user.role),
+    accessToken: signAccessToken(user.id, user.role, refresh.familyId),
     refreshToken: refresh.token,
     user: toMeDTO(me),
   });
@@ -99,7 +101,15 @@ authRouter.post('/auth/refresh', async (req, res) => {
       await tx.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date() } });
       return { error: 'This account has been deactivated', code: ERROR_CODES.inactive } as const;
     }
-    const next = await issueRefreshToken(tx, row.userId, row.familyId);
+    // The session keeps the device it signed in on; the address can change.
+    const device = deviceOf(req);
+    const next = await issueRefreshToken(tx, row.userId, row.familyId, {
+      deviceType: row.deviceType ?? device.deviceType,
+      browser: row.browser ?? device.browser,
+      os: row.os ?? device.os,
+      ip: device.ip,
+      country: device.country ?? row.country,
+    });
     await tx.refreshToken.update({ where: { id: row.id }, data: { revokedAt: new Date(), replacedBy: next.id } });
     return { user, next } as const;
   });
@@ -110,7 +120,7 @@ authRouter.post('/auth/refresh', async (req, res) => {
   }
   setRefreshCookie(res, result.next.token);
   res.json({
-    accessToken: signAccessToken(result.user.id, result.user.role),
+    accessToken: signAccessToken(result.user.id, result.user.role, result.next.familyId),
     refreshToken: result.next.token,
     user: toMeDTO(result.user),
   });
@@ -129,6 +139,59 @@ authRouter.post('/auth/logout', async (req, res) => {
   }
   res.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
   res.status(204).end();
+});
+
+/** One row per signed-in session (a refresh-token family), newest first. */
+async function sessionsOf(userId: string, currentSessionId?: string): Promise<SessionDTO[]> {
+  const rows = await prisma.refreshToken.findMany({
+    where: { userId, revokedAt: null },
+    orderBy: { lastUsedAt: 'desc' },
+  });
+  // A family rotates through many rows; the live one is what the user sees.
+  const byFamily = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) if (!byFamily.has(row.familyId)) byFamily.set(row.familyId, row);
+  return [...byFamily.values()].map((row) => ({
+    id: row.familyId,
+    deviceType: row.deviceType ?? 'unknown',
+    browser: row.browser,
+    os: row.os,
+    country: row.country,
+    ip: row.ip,
+    current: row.familyId === currentSessionId,
+    signedInAt: iso(row.createdAt),
+    lastUsedAt: iso(row.lastUsedAt),
+  }));
+}
+
+authRouter.get('/me/sessions', requireAuth, async (req, res) => {
+  const actor = actorOf(req);
+  res.json(await sessionsOf(actor.id, actor.sessionId));
+});
+
+/** Signs out one session; `all` leaves only the one making the request. */
+authRouter.delete('/me/sessions/:id', requireAuth, async (req, res) => {
+  const actor = actorOf(req);
+  const id = param(req, 'id');
+  const where =
+    id === 'all'
+      ? { userId: actor.id, revokedAt: null, ...(actor.sessionId ? { familyId: { not: actor.sessionId } } : {}) }
+      : { userId: actor.id, revokedAt: null, familyId: id };
+  // Count sessions, not the rotated tokens inside them.
+  const families = await prisma.refreshToken.findMany({ where, select: { familyId: true }, distinct: ['familyId'] });
+  await prisma.refreshToken.updateMany({ where, data: { revokedAt: new Date() } });
+  res.json({ signedOut: families.length });
+});
+
+/** Founders can see and end anyone's sessions. */
+authRouter.get('/users/:id/sessions', requireAuth, requireRole('founder'), async (req, res) => {
+  res.json(await sessionsOf(param(req, 'id')));
+});
+
+authRouter.delete('/users/:id/sessions', requireAuth, requireRole('founder'), async (req, res) => {
+  const where = { userId: param(req, 'id'), revokedAt: null };
+  const families = await prisma.refreshToken.findMany({ where, select: { familyId: true }, distinct: ['familyId'] });
+  await prisma.refreshToken.updateMany({ where, data: { revokedAt: new Date() } });
+  res.json({ signedOut: families.length });
 });
 
 authRouter.get('/me', requireAuth, async (req, res) => {

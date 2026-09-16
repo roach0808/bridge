@@ -339,7 +339,16 @@ model RefreshToken {
   userId     String    @map("user_id") @db.Uuid
   familyId   String    @map("family_id") @db.Uuid
   tokenHash  String    @unique @map("token_hash")
+  /// Sessions do not expire on their own; this is a far-future date unless REFRESH_TOKEN_TTL says otherwise.
   expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  /// Where this session signed in from, for the "signed-in devices" list.
+  deviceType String?   @map("device_type")
+  browser    String?
+  os         String?
+  ip         String?
+  /// Two-letter country from the proxy (Vercel / Cloudflare), when it tells us.
+  country    String?   @db.Char(2)
+  lastUsedAt DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(3)
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(3)
   replacedBy String?   @map("replaced_by") @db.Uuid
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)

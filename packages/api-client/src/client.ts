@@ -33,6 +33,7 @@ import type {
   ProfileStatus,
   Role,
   ScheduleBlockDTO,
+  SessionDTO,
   StatusHistoryDTO,
   TransitionInput,
   UpdateCallInput,
@@ -110,6 +111,10 @@ export function createApiClient(options: ClientOptions) {
       /** `dataUrl` is a client-resized image (see `resizeImageFile` in the web app). */
       setPhoto: (dataUrl: string) => http.request<MeDTO>('PUT', '/me/photo', { body: { dataUrl } }),
       removePhoto: () => del<MeDTO>('/me/photo'),
+      /** Signed-in sessions of the caller (device, country, last used). */
+      sessions: () => get<SessionDTO[]>('/me/sessions'),
+      /** Ends one session, or every other one with `'all'`. */
+      signOutSession: (id: string) => del<{ signedOut: number }>(`/me/sessions/${enc(id)}`),
     },
 
     avatars: {
@@ -210,6 +215,12 @@ export function createApiClient(options: ClientOptions) {
       list: () => get<DbDumpDTO[]>('/db-dumps'),
       run: () => post<DbDumpDTO>('/db-dumps'),
       download: (id: string) => http.download(`/db-dumps/${enc(id)}/download`),
+    },
+
+    sessions: {
+      /** Founder: anyone's signed-in sessions. */
+      ofUser: (userId: string) => get<SessionDTO[]>(`/users/${enc(userId)}/sessions`),
+      signOutUser: (userId: string) => del<{ signedOut: number }>(`/users/${enc(userId)}/sessions`),
     },
 
     notifications: {

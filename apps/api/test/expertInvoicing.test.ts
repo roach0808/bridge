@@ -57,6 +57,7 @@ describe('experts do not see invoicing', () => {
   it('experts are not notified about invoicing steps or invoice edits', async () => {
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
     const founder = await as(fx.founder);
+    await founder.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { rate: 1000 });
     expect((await founder.post(`/calls/${call.id}/transition`, { to: 'invoice_submit' })).status).toBe(200);
     expect((await founder.patch(`/calls/${call.id}`, { invoiceAmount: 300, invoiceCurrency: 'EUR' })).status).toBe(200);
     expect(await prisma.notification.count({ where: { userId: fx.e1.id } })).toBe(0);

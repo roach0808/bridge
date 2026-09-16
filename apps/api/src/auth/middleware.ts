@@ -8,6 +8,8 @@ import { verifyAccessToken } from './tokens';
 
 export interface Actor {
   id: string;
+  /** The session this request came from, when the token carries one. */
+  sessionId?: string;
   role: Role;
   nickname: string;
   managerId: string | null;
@@ -42,8 +44,11 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) throw unauthenticated();
   let userId: string;
+  let sessionId: string | undefined;
   try {
-    userId = verifyAccessToken(header.slice(7)).sub;
+    const claims = verifyAccessToken(header.slice(7));
+    userId = claims.sub;
+    sessionId = claims.sid;
   } catch (err) {
     if (err instanceof jwt.TokenExpiredError) {
       throw unauthenticated('Your session expired', ERROR_CODES.tokenExpired);
@@ -52,7 +57,7 @@ export const requireAuth: RequestHandler = async (req, _res, next) => {
   }
   const actor = await loadActiveActor(userId);
   if (!actor) throw unauthenticated('This account is not active', ERROR_CODES.inactive);
-  req.actor = actor;
+  req.actor = { ...actor, sessionId };
   next();
 };
 

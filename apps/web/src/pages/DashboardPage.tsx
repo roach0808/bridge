@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { STAGE_LABELS, STAGE_STATUSES, STAGES, type CallDTO, type CallStatus, type DashboardSummary, type ProfileNeedingBank } from '@god/shared';
+import { STAGE_LABELS, STAGE_STATUSES, STAGES, type CallDTO, type CallStatus, type DashboardSummary, type ProfileNeedingBank, type ProfileNeedingRate } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useState, type ReactNode } from 'react';
@@ -172,9 +172,26 @@ function BankTaskLine({ item, zone, onAdd }: { item: ProfileNeedingBank; zone: s
   );
 }
 
+/** A finished call cannot be invoiced until the Profile has a rate on its platform. */
+function RateTaskLine({ item }: { item: ProfileNeedingRate }) {
+  return (
+    <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 1, py: 0.75, borderRadius: 2, '&:hover': { bgcolor: 'action.hover' } }}>
+      <UserAvatar avatarId={item.profile.avatarId} photoId={item.profile.photoId} label={item.profile.name} size={26} />
+      <Box sx={{ flex: 1, minWidth: 0 }}>
+        <Typography variant="body2" noWrap>
+          {item.profile.name}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" noWrap>
+          {item.platform.name} · {item.finishedCalls} finished call{item.finishedCalls === 1 ? '' : 's'} waiting
+        </Typography>
+      </Box>
+    </Stack>
+  );
+}
+
 function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['tasks']>; zone: string }) {
   const [bankFor, setBankFor] = useState<ProfileNeedingBank['profile'] | null>(null);
-  const total = tasks.invoicesToSubmit.length + tasks.profilesNeedingBank.length;
+  const total = tasks.invoicesToSubmit.length + tasks.profilesNeedingBank.length + tasks.profilesNeedingRate.length;
   return (
     <>
       <Panel title="Pending tasks" count={total}>
@@ -211,6 +228,21 @@ function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['ta
                 tasks.profilesNeedingBank.slice(0, 8).map((p) => (
                   <BankTaskLine key={p.profile.id} item={p} zone={zone} onAdd={() => setBankFor(p.profile)} />
                 ))
+              )}
+              {tasks.profilesNeedingRate.length > 0 && (
+                <>
+                  <Stack direction="row" alignItems="center" sx={{ px: 1, py: 0.5, mt: 1 }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ flex: 1 }}>
+                      Set hourly rate · {tasks.profilesNeedingRate.length}
+                    </Typography>
+                    <Button size="small" component={RouterLink} to="/profiles" endIcon={<ChevronRightRounded />} sx={{ minHeight: 26 }}>
+                      Profiles
+                    </Button>
+                  </Stack>
+                  {tasks.profilesNeedingRate.slice(0, 8).map((r) => (
+                    <RateTaskLine key={`${r.profile.id}-${r.platform.id}`} item={r} />
+                  ))}
+                </>
               )}
             </Box>
           </Box>

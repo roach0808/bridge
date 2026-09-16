@@ -9,7 +9,11 @@ const schema = z.object({
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
   ACCESS_TOKEN_TTL: duration.default('15m'),
-  REFRESH_TOKEN_TTL: duration.default('30d'),
+  /**
+   * How long a signed-in session lasts. `never` (the default) means it lasts
+   * until the user signs out, or is deactivated.
+   */
+  REFRESH_TOKEN_TTL: z.union([z.literal('never'), duration]).default('never'),
   CORS_ORIGINS: z
     .string()
     .default('http://localhost:5173')

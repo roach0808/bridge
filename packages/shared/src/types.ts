@@ -279,6 +279,22 @@ export interface ExpertsCalendarResponse {
   experts: ExpertColumn[];
 }
 
+/** A signed-in session: one browser or app, until the user signs out. */
+export interface SessionDTO {
+  id: string;
+  /** desktop, mobile, tablet or unknown. */
+  deviceType: string;
+  browser: string | null;
+  os: string | null;
+  /** Two-letter country, when the proxy reports it. */
+  country: string | null;
+  ip: string | null;
+  /** True for the session making the request. */
+  current: boolean;
+  signedInAt: string;
+  lastUsedAt: string;
+}
+
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
@@ -297,6 +313,14 @@ export interface BankDTO {
   isPrimary: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** A finished call whose Profile has no rate on the platform it was booked through. */
+export interface ProfileNeedingRate {
+  profile: Pick<ProfileDTO, 'id' | 'name' | 'avatarId' | 'photoId'>;
+  platform: Pick<PlatformDTO, 'id' | 'name'>;
+  /** Finished (or later) calls waiting on this rate. */
+  finishedCalls: number;
 }
 
 export interface ProfileNeedingBank {
@@ -321,6 +345,7 @@ export interface DashboardSummary {
   tasks?: {
     invoicesToSubmit: CallDTO[];
     profilesNeedingBank: ProfileNeedingBank[];
+    profilesNeedingRate: ProfileNeedingRate[];
   };
   /** Founder only. */
   database?: {

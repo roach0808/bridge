@@ -34,7 +34,7 @@ export function testEnv(): Record<string, string> {
     DATABASE_URL: resolveTestDatabaseUrl(),
     JWT_SECRET: 'test-only-secret-0123456789abcdef-0123456789abcdef',
     ACCESS_TOKEN_TTL: '15m',
-    REFRESH_TOKEN_TTL: '30d',
+    REFRESH_TOKEN_TTL: 'never',
     LOGIN_RATE_LIMIT: '10000',
     LOG_LEVEL: 'silent',
     PUSH_ENABLED: 'false',

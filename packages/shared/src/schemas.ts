@@ -26,6 +26,20 @@ const optionalText = (max = 10000) =>
     .transform((v) => (v == null || v.trim() === '' ? null : v));
 
 export const uuid = z.string().uuid('Must be a valid id');
+
+/**
+ * A link the app will render as clickable. Only http(s): a `javascript:` URL
+ * passes a plain URL check and would run code in the reader's browser.
+ */
+const isWebUrl = (value: string) => {
+  try {
+    return ['http:', 'https:'].includes(new URL(value).protocol);
+  } catch {
+    return false;
+  }
+};
+export const webUrl = (message = 'Enter a link starting with https://') =>
+  z.string().trim().url(message).refine(isWebUrl, message);
 export const isoDateTime = z.string().datetime({ offset: true, message: 'Must be an ISO-8601 date-time' });
 export const isoDate = z.string().refine(isIsoDate, 'Must be a date in yyyy-mm-dd form');
 export const timeZone = z.string().refine(isValidTimeZone, 'Must be an IANA time zone such as Asia/Seoul');
@@ -85,7 +99,7 @@ export const listUsersQuerySchema = z.object({
 
 export const platformSchema = z.object({
   name: trimmed('Name', 120),
-  url: z.string().trim().url('Enter a valid URL'),
+  url: webUrl('Enter a valid URL starting with https://'),
   priority: z.coerce.number().int().min(0).max(1000),
   country: z
     .string()
@@ -120,10 +134,7 @@ const optionalShortText = (max: number) =>
 
 export const profileSchema = z.object({
   name: trimmed('Name', 160),
-  linkedinUrl: z
-    .string()
-    .trim()
-    .url('Enter a valid URL')
+  linkedinUrl: webUrl('Enter a valid URL starting with https://')
     .nullish()
     .or(z.literal('').transform(() => null)),
   briefExperience: optionalText(4000).transform((v) => v ?? ''),
@@ -206,7 +217,7 @@ export const updateCallSchema = z
     gptLink: z
       .string()
       .trim()
-      .url('Enter a valid link')
+      .refine(isWebUrl, 'Enter a link starting with https://')
       .nullable()
       .optional()
       .or(z.literal('').transform(() => null)),
@@ -226,7 +237,7 @@ export const transitionSchema = z
   .object({
     to: z.enum(CALL_STATUSES),
     comment: optionalText(2000).optional(),
-    ninjaLink: z.string().trim().url('Enter a valid link').optional(),
+    ninjaLink: webUrl('Enter a link starting with https://').optional(),
     actualDurationMinutes: z.coerce
       .number()
       .int('Enter whole minutes')

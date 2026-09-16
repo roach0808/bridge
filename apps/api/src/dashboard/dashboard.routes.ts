@@ -6,6 +6,7 @@ import {
   type CallDTO,
   type CallStatus,
   type DashboardSummary,
+  type ProfileNeedingRate,
 } from '@god/shared';
 import { Router } from 'express';
 import { DateTime } from 'luxon';
@@ -56,6 +57,32 @@ async function todayFor(actor: Actor): Promise<DashboardSummary['today']> {
   };
 }
 
+/**
+ * Profile × platform pairs with a finished (or later) call but no rate, so the
+ * Founder knows what blocks invoicing.
+ */
+async function profilesNeedingRate(): Promise<ProfileNeedingRate[]> {
+  const rows = await prisma.$queryRaw<
+    Array<{ profile_id: string; name: string; avatar_id: string; photo_id: string | null; platform_id: string; platform_name: string; finished: bigint }>
+  >`
+    SELECT p.id AS profile_id, p.name, p.avatar_id, p.photo_id,
+           pl.id AS platform_id, pl.name AS platform_name, count(c.id) AS finished
+    FROM calls c
+    JOIN profiles p ON p.id = c.profile_id
+    JOIN platforms pl ON pl.id = c.platform_id
+    LEFT JOIN profile_platform_statuses s ON s.profile_id = c.profile_id AND s.platform_id = c.platform_id
+    WHERE c.status IN ('finished', 'invoice_submit', 'invoice_approve', 'process_to_bank')
+      AND c.rate_override IS NULL
+      AND s.rate IS NULL
+    GROUP BY p.id, p.name, p.avatar_id, p.photo_id, pl.id, pl.name
+    ORDER BY count(c.id) DESC, p.name ASC`;
+  return rows.map((r) => ({
+    profile: { id: r.profile_id, name: r.name, avatarId: r.avatar_id, photoId: r.photo_id },
+    platform: { id: r.platform_id, name: r.platform_name },
+    finishedCalls: Number(r.finished),
+  }));
+}
+
 async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary['tasks']>> {
   const booked = { status: { in: [...BLOCKING_STATUSES] } };
   const [invoices, profiles] = await Promise.all([
@@ -88,6 +115,7 @@ async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary[
 
   return {
     invoicesToSubmit: invoices.map((c) => toCallDTO(c, actor)),
+    profilesNeedingRate: await profilesNeedingRate(),
     profilesNeedingBank: profiles
       .map((p) => {
         const nextAt = nextBy.get(p.id);

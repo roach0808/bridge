@@ -96,6 +96,8 @@ describe('valid moves record history with the right is_override', () => {
   it('founder runs the invoice chain (no override)', async () => {
     const c = await as(fx.founder);
     const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    // Invoicing needs the Profile's rate on the call's platform.
+    await c.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { rate: 1000 });
     await expectMoved(c, fx.founder, call.id, 'finished', 'invoice_submit', false);
     await expectMoved(c, fx.founder, call.id, 'invoice_submit', 'invoice_approve', false);
     await expectMoved(c, fx.founder, call.id, 'invoice_approve', 'process_to_bank', false);
@@ -315,5 +317,37 @@ describe('expert confirmation and rescheduling rules', () => {
     await expect(
       makeCall(fx, { associate: fx.a3, expert: fx.e1, status: 'scheduled', scheduledAt: '2027-02-01T09:30:00Z' }),
     ).rejects.toThrow(/calls_expert_no_overlap/);
+  });
+});
+
+describe('a finished call cannot be invoiced without a rate', () => {
+  const rateUrl = (profileId: string, platformId: string) => `/profiles/${profileId}/platforms/${platformId}`;
+
+  it('blocks invoice_submit until the Profile has a rate on the call’s platform', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    const founder = await as(fx.founder);
+
+    const blocked = await transition(founder, call.id, 'invoice_submit');
+    expectError(blocked, 409, 'rate_required');
+    expect(blocked.body.error.message).toMatch(/hourly rate/i);
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('finished');
+
+    // It shows up in the Founder's pending tasks meanwhile.
+    const tasks = (await founder.get('/dashboard')).body.tasks;
+    expect(tasks.profilesNeedingRate).toEqual([
+      { profile: expect.objectContaining({ id: fx.approvedProfile.id }), platform: { id: fx.platform.id, name: 'GLG' }, finishedCalls: 1 },
+    ]);
+
+    await founder.put(rateUrl(fx.approvedProfile.id, fx.platform.id), { rate: 1200 });
+    expect((await transition(founder, call.id, 'invoice_submit')).status).toBe(200);
+    expect((await founder.get('/dashboard')).body.tasks.profilesNeedingRate).toEqual([]);
+  });
+
+  it('a rate set on the call itself is enough', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    const founder = await as(fx.founder);
+    expect((await founder.patch(`/calls/${call.id}`, { rateOverride: 900 })).status).toBe(200);
+    expect((await transition(founder, call.id, 'invoice_submit')).status).toBe(200);
+    expect((await founder.get('/dashboard')).body.tasks.profilesNeedingRate).toEqual([]);
   });
 });

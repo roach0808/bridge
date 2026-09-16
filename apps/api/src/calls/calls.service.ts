@@ -371,6 +371,20 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     if (to === 'scheduled' && !current.expertId) {
       throw conflict('Assign an Expert before scheduling the call', ERROR_CODES.expertRequired);
     }
+    // Money has to be known before a finished call can be invoiced (§ rates).
+    if (to === 'invoice_submit' && current.rateOverride === null) {
+      const platformRate = await tx.profilePlatformStatus.findUnique({
+        where: { profileId_platformId: { profileId: current.profileId, platformId: current.platformId } },
+        select: { rate: true },
+      });
+      if (!platformRate?.rate) {
+        throw conflict(
+          `Set ${current.profile.name}'s hourly rate on ${current.platform.name} before invoicing this call`,
+          ERROR_CODES.rateRequired,
+          { profileId: current.profileId, platformId: current.platformId },
+        );
+      }
+    }
 
     // The schema already requires these for `ongoing` / `finished`.
     const data: Prisma.CallUpdateInput = { status: to };
