@@ -242,6 +242,13 @@ function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
         <Field label="Nationality">{p.nationality ?? dash}</Field>
         <Field label="Location">{p.location ?? dash}</Field>
       </Box>
+      {p.platformStatuses && (
+        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr 1fr', sm: 'repeat(4, 1fr)' } }}>
+          <Field label="Email">{p.email ?? dash}</Field>
+          <Field label="Phone">{p.phone ?? dash}</Field>
+          <Field label="Onboarded">{p.onboardedAt ? DateTime.fromISO(p.onboardedAt).toFormat('LLL d, yyyy') : dash}</Field>
+        </Box>
+      )}
       <TextBlock label="Brief experience" text={p.briefExperience} />
       <TextBlock label="Career history" text={p.careerHistory} />
       <TextBlock label="Education" text={p.education} />
@@ -255,7 +262,26 @@ function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
             </Typography>
           </Stack>
           <Stack spacing={1.75}>
-            <TextBlock label="Current address" text={p.currentAddress} />
+            <Field label={p.addresses?.length === 1 ? 'Address' : 'Addresses'}>
+              {p.addresses?.length ? (
+                <Stack spacing={0.75}>
+                  {p.addresses.map((a) => (
+                    <Box key={a.id}>
+                      <Typography variant="caption" color="text.secondary" fontWeight={600} component="div">
+                        {a.label}
+                      </Typography>
+                      <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
+                        {a.address}
+                      </Typography>
+                    </Box>
+                  ))}
+                </Stack>
+              ) : (
+                <Typography variant="body2" color="text.disabled" fontStyle="italic">
+                  Not provided
+                </Typography>
+              )}
+            </Field>
             <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
               <Field label="Bank details">
                 {p.bankCount ? `${p.bankCount} bank account${p.bankCount === 1 ? '' : 's'}` : 'None added'}

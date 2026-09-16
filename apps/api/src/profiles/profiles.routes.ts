@@ -1,4 +1,5 @@
 import {
+  TEAM_TIME_ZONE,
   isAvatarForAudience,
   listProfilesQuerySchema,
   profileActiveSchema,
@@ -10,6 +11,7 @@ import {
 import type { Prisma } from '@prisma/client';
 import type { z } from 'zod';
 import { Router } from 'express';
+import { DateTime } from 'luxon';
 import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
 import { prisma, type Tx } from '../db';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
@@ -97,6 +99,12 @@ profilesRouter.get('/profiles/:id', async (req, res) => {
   res.json(toProfileDTO(await loadVisible(actor, idParam(req)), await platformsFor(actor)));
 });
 
+const addressRows = (list: Array<{ label: string; address: string }>) =>
+  list.map((a, i) => ({ label: a.label, address: a.address, sortOrder: i }));
+
+/** Today's date in team time, as a date-only value. */
+const teamToday = () => fromDateOnly(DateTime.now().setZone(TEAM_TIME_ZONE).toISODate()!);
+
 /** Tells every active Founder that a profile is waiting for review. */
 async function notifyFounders(tx: Tx, actor: Actor, profile: { id: string; name: string }, resubmitted: boolean) {
   const founders = await tx.user.findMany({ where: { role: 'founder', isActive: true }, select: { id: true } });
@@ -124,7 +132,13 @@ profilesRouter.post('/profiles', requireRole('founder', 'associate'), async (req
         avatarId: input.avatarId,
         createdById: actor.id,
         ...(isFounder
-          ? { status: 'approved', reviewedById: actor.id, reviewedAt: now }
+          ? {
+              status: 'approved',
+              reviewedById: actor.id,
+              reviewedAt: now,
+              onboardedAt: input.onboardedAt ? fromDateOnly(input.onboardedAt) : teamToday(),
+              ...(input.addresses ? { addresses: { create: addressRows(input.addresses) } } : {}),
+            }
           : { status: 'pending' }),
       },
       include: includeFor(actor),
@@ -137,8 +151,12 @@ profilesRouter.post('/profiles', requireRole('founder', 'associate'), async (req
 });
 
 function personalDetails(input: Partial<z.output<typeof profileSchema>>, actor: Pick<Actor, 'role'>) {
+  const founder = actor.role === 'founder';
   return {
-    currentAddress: actor.role === 'founder' ? input.currentAddress : undefined,
+    email: input.email,
+    phone: input.phone,
+    // Only the Founder decides the onboard date; anyone else's value is ignored.
+    onboardedAt: !founder || input.onboardedAt === undefined ? undefined : input.onboardedAt && fromDateOnly(input.onboardedAt),
     dateOfBirth: input.dateOfBirth === undefined ? undefined : input.dateOfBirth && fromDateOnly(input.dateOfBirth),
     gender: input.gender,
     nationality: input.nationality,
@@ -162,6 +180,11 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
     throw forbidden('Only the Founder edits approved profiles');
   }
   const { updated, deliver } = await prisma.$transaction(async (tx) => {
+    // The list is replaced as a whole, keeping the order it was sent in.
+    if (isFounder && input.addresses) {
+      await tx.profileAddress.deleteMany({ where: { profileId: profile.id } });
+      await tx.profileAddress.createMany({ data: addressRows(input.addresses).map((a) => ({ ...a, profileId: profile.id })) });
+    }
     const updated = await tx.profile.update({
       where: { id: profile.id },
       data: {
@@ -193,6 +216,8 @@ async function review(actor: Actor, id: string | null, decision: 'approved' | 'r
         reviewedById: actor.id,
         reviewedAt: new Date(),
         rejectionReason: decision === 'rejected' ? reason : null,
+        // Approval is when a Profile is onboarded, unless the Founder already set a date.
+        ...(decision === 'approved' && !profile.onboardedAt ? { onboardedAt: teamToday() } : {}),
       },
       include: includeFor(actor),
     });

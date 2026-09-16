@@ -148,8 +148,28 @@ export const profileSchema = z.object({
   location: optionalShortText(160),
   education: optionalText(4000),
   careerHistory: optionalText(8000),
-  /** Founder only; ignored from anyone else. */
-  currentAddress: optionalText(1000),
+  /** The Profile's own email; anyone who may edit the Profile can set it. */
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .email('Enter a valid email')
+    .max(254)
+    .nullish()
+    .or(z.literal('').transform(() => null)),
+  phone: z
+    .string()
+    .trim()
+    .regex(/^\+?[0-9][0-9 ()./-]{4,28}[0-9]$/, 'Enter a phone number, e.g. +44 20 7946 0958')
+    .nullish()
+    .or(z.literal('').transform(() => null)),
+  /** Founder only: when the Profile started working with us. */
+  onboardedAt: isoDate.nullish().or(z.literal('').transform(() => null)),
+  /** Founder only: replaces the whole list, in order. */
+  addresses: z
+    .array(z.object({ label: trimmed('Label', 60), address: trimmed('Address', 1000) }))
+    .max(10, 'At most 10 addresses')
+    .optional(),
 });
 export const updateProfileSchema = profileSchema.partial();
 

@@ -1,7 +1,9 @@
 import BlockRounded from '@mui/icons-material/BlockRounded';
 import PersonAddAlt1Rounded from '@mui/icons-material/PersonAddAlt1Rounded';
 import EditRounded from '@mui/icons-material/EditRounded';
-import { Alert, Box, MenuItem, TextField } from '@mui/material';
+import AddRounded from '@mui/icons-material/AddRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import { Alert, Box, Button, IconButton, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import { GENDERS, profileSchema, rejectProfileSchema, type ProfileDTO } from '@god/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
@@ -24,12 +26,16 @@ interface ProfileForm {
   location: string;
   education: string;
   careerHistory: string;
-  currentAddress: string;
+  email: string;
+  phone: string;
+  onboardedAt: string;
+  addresses: Array<{ label: string; address: string }>;
 }
 
 const PROFILE_FIELDS = [
   'name', 'linkedinUrl', 'briefExperience', 'avatarId',
-  'dateOfBirth', 'gender', 'nationality', 'location', 'education', 'careerHistory', 'currentAddress',
+  'dateOfBirth', 'gender', 'nationality', 'location', 'education', 'careerHistory',
+  'email', 'phone', 'onboardedAt', 'addresses',
 ];
 
 const emptyForm = (): ProfileForm => ({
@@ -43,7 +49,10 @@ const emptyForm = (): ProfileForm => ({
   location: '',
   education: '',
   careerHistory: '',
-  currentAddress: '',
+  email: '',
+  phone: '',
+  onboardedAt: '',
+  addresses: [],
 });
 
 /**
@@ -88,7 +97,10 @@ export function ProfileDialog({
             location: profile.location ?? '',
             education: profile.education ?? '',
             careerHistory: profile.careerHistory ?? '',
-            currentAddress: profile.currentAddress ?? '',
+            email: profile.email ?? '',
+            phone: profile.phone ?? '',
+            onboardedAt: profile.onboardedAt ?? '',
+            addresses: (profile.addresses ?? []).map((a) => ({ label: a.label, address: a.address })),
           }
         : emptyForm(),
     );
@@ -108,7 +120,13 @@ export function ProfileDialog({
         location: blankToNull(body.location),
         education: blankToNull(body.education),
         careerHistory: blankToNull(body.careerHistory),
-        currentAddress: blankToNull(body.currentAddress),
+        email: blankToNull(body.email),
+        phone: blankToNull(body.phone),
+        // Founder-only fields are left out for everyone else.
+        onboardedAt: isFounder ? blankToNull(body.onboardedAt) : undefined,
+        addresses: isFounder
+          ? body.addresses.filter((a) => a.label.trim() || a.address.trim()).map((a) => ({ label: a.label.trim(), address: a.address.trim() }))
+          : undefined,
       };
       if (profile) return api.profiles.update(profile.id, payload);
       return api.profiles.create(payload).then(async (created) =>
@@ -260,20 +278,77 @@ export function ProfileDialog({
         minRows={2}
         maxRows={6}
       />
+      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
+        <TextField
+          label="Email"
+          type="email"
+          value={form.email}
+          onChange={(e) => set('email', e.target.value)}
+          error={Boolean(errors.email)}
+          helperText={errors.email ?? 'The profile’s own address, used on the platforms'}
+          autoComplete="off"
+        />
+        <TextField
+          label="Phone"
+          type="tel"
+          value={form.phone}
+          onChange={(e) => set('phone', e.target.value)}
+          error={Boolean(errors.phone)}
+          helperText={errors.phone ?? 'With country code, e.g. +44 20 7946 0958'}
+          autoComplete="off"
+        />
+      </Box>
       {isFounder && (
         <FormSection label="Private — Founder only" hint="Not shown to Managers, Associates or Experts. Bank details are managed from the profile's details.">
-          <TextField
-            label="Current address"
-            value={form.currentAddress}
-            onChange={(e) => set('currentAddress', e.target.value)}
-            error={Boolean(errors.currentAddress)}
-            helperText={errors.currentAddress}
-            multiline
-            minRows={2}
-            maxRows={5}
-            fullWidth
-            autoComplete="off"
-          />
+          <Stack spacing={1.5}>
+            <TextField
+              label="Onboard date"
+              type="date"
+              value={form.onboardedAt}
+              onChange={(e) => set('onboardedAt', e.target.value)}
+              error={Boolean(errors.onboardedAt)}
+              helperText={errors.onboardedAt ?? 'Set automatically on approval; change it if needed'}
+              slotProps={{ inputLabel: { shrink: true } }}
+              sx={{ maxWidth: 240 }}
+            />
+            {form.addresses.map((a, i) => (
+              <Stack key={i} direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'flex-start' }}>
+                <TextField
+                  label="Label"
+                  placeholder="Home"
+                  value={a.label}
+                  onChange={(e) => set('addresses', form.addresses.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                  sx={{ width: { sm: 150 } }}
+                />
+                <TextField
+                  label="Address"
+                  value={a.address}
+                  onChange={(e) => set('addresses', form.addresses.map((x, j) => (j === i ? { ...x, address: e.target.value } : x)))}
+                  multiline
+                  maxRows={4}
+                  fullWidth
+                />
+                <IconButton aria-label={`Remove ${a.label || 'address'}`} onClick={() => set('addresses', form.addresses.filter((_, j) => j !== i))} sx={{ mt: { sm: 1 } }}>
+                  <DeleteOutlineRounded fontSize="small" />
+                </IconButton>
+              </Stack>
+            ))}
+            {errors.addresses && (
+              <Typography variant="caption" color="error">
+                {errors.addresses}
+              </Typography>
+            )}
+            <Box>
+              <Button
+                size="small"
+                startIcon={<AddRounded />}
+                disabled={form.addresses.length >= 10}
+                onClick={() => set('addresses', [...form.addresses, { label: form.addresses.length ? '' : 'Home', address: '' }])}
+              >
+                Add address
+              </Button>
+            </Box>
+          </Stack>
         </FormSection>
       )}
       {isFounder && (

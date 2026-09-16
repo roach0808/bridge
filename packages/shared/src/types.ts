@@ -66,6 +66,12 @@ export interface ProfilePlatformStatusDTO {
   rate: number | null;
 }
 
+export interface ProfileAddressDTO {
+  id: string;
+  label: string;
+  address: string;
+}
+
 export interface ProfileDTO {
   id: string;
   name: string;
@@ -78,8 +84,13 @@ export interface ProfileDTO {
   location: string | null;
   education: string | null;
   careerHistory: string | null;
-  /** Founder only (null for others). */
-  currentAddress: string | null;
+  /** The Profile's own email and phone. Null for Experts. */
+  email: string | null;
+  phone: string | null;
+  /** yyyy-mm-dd: when the Profile was onboarded. Null for Experts. */
+  onboardedAt: string | null;
+  /** Founder only (null for everyone else). */
+  addresses: ProfileAddressDTO[] | null;
   avatarId: string;
   photoId: string | null;
   status: ProfileStatus;

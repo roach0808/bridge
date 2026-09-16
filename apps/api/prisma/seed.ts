@@ -119,6 +119,11 @@ async function main() {
           location,
           education,
           careerHistory,
+          // The persona's own contact details, and one address on file.
+          email: `${name.toLowerCase().normalize('NFD').replace(/[^a-z ]/g, '').trim().replace(/ +/g, '.')}@example.com`,
+          phone: `+1 555 01${String(i).padStart(2, '0')}`,
+          onboardedAt: new Date(Date.UTC(2026, i % 12, 3 + i)),
+          addresses: { create: [{ label: 'Home', address: `${10 + i} Market Street, ${location}`, sortOrder: 0 }] },
           avatarId: `profile-${String(i + 1).padStart(2, '0')}`,
           status: 'approved',
           createdById: founder.id,

@@ -81,6 +81,7 @@ export type ProfileRow = Prisma.ProfileGetPayload<{ include: typeof profileInclu
 
 /** Relation counts only the Founder receives (bank data is Founder-only). */
 export const profileFounderCounts = {
+  addresses: { select: { id: true, label: true, address: true }, orderBy: { sortOrder: 'asc' } },
   _count: {
     select: {
       banks: true,
@@ -89,7 +90,10 @@ export const profileFounderCounts = {
   },
 } satisfies Prisma.ProfileInclude;
 
-type ProfileCounts = { _count?: { banks: number; calls: number } };
+type ProfileCounts = {
+  _count?: { banks: number; calls: number };
+  addresses?: Array<{ id: string; label: string; address: string }>;
+};
 
 /**
  * `platforms` lists every platform for viewers who may see platform statuses;
@@ -106,8 +110,12 @@ export const toProfileDTO = (p: ProfileRow & ProfileCounts, platforms: PlatformR
   location: p.location,
   education: p.education,
   careerHistory: p.careerHistory,
-  // `_count` is only loaded for the Founder (see profileFounderCounts).
-  currentAddress: p._count ? p.currentAddress : null,
+  // Experts get no platforms, and no contact details either.
+  email: platforms ? p.email : null,
+  phone: platforms ? p.phone : null,
+  onboardedAt: platforms && p.onboardedAt ? dateOnly(p.onboardedAt) : null,
+  // Addresses are only loaded for the Founder (see profileFounderCounts).
+  addresses: p.addresses ?? null,
   avatarId: p.avatarId,
   photoId: p.photoId,
   status: p.status,

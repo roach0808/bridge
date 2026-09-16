@@ -86,7 +86,7 @@ describe('experts do not see invoicing', () => {
       expect(res.text).not.toMatch(/"(rate|platformRate|rateOverride|expectedPrice|realIncome)":\d|"bankCount":\d|"needsBank":(true|false)|437\.25/);
     }
     const profile = responses[4]!.body;
-    expect(profile).toMatchObject({ platformStatuses: null, bankCount: null, needsBank: null, currentAddress: null });
+    expect(profile).toMatchObject({ platformStatuses: null, bankCount: null, needsBank: null, addresses: null, email: null });
     expectError(await e1.get(`/profiles/${fx.approvedProfile.id}/banks`), 403);
   });
 });

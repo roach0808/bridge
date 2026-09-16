@@ -171,8 +171,13 @@ model Profile {
   location        String?
   education       String?
   careerHistory   String?       @map("career_history")
-  /// Founder only: where the person currently lives.
+  /// Superseded by `addresses`; kept until the running API no longer reads it.
   currentAddress  String?       @map("current_address")
+  /// The Profile's own email (the one used on the platforms). Not shown to Experts.
+  email           String?
+  phone           String?
+  /// When the Profile started working with us; set to the approval date, editable by the Founder.
+  onboardedAt     DateTime?     @map("onboarded_at") @db.Date
   avatarId        String        @map("avatar_id")
   photoId         String?       @unique @map("photo_id") @db.Uuid
   status          ProfileStatus @default(approved)
@@ -189,6 +194,7 @@ model Profile {
   photo      Photo? @relation("ProfilePhoto", fields: [photoId], references: [id], onDelete: SetNull)
   banks      ProfileBank[]
   platformStatuses ProfilePlatformStatus[]
+  addresses  ProfileAddress[]
   createdBy  User   @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   reviewedBy User?  @relation("ProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
   calls      Call[]
@@ -551,4 +557,20 @@ model DbDump {
 
   @@index([createdAt])
   @@map("db_dumps")
+}
+
+/// A Profile's postal addresses, each with a label (Home, Mailing…). Founder only.
+model ProfileAddress {
+  id        String   @id @default(uuid()) @db.Uuid
+  profileId String   @map("profile_id") @db.Uuid
+  label     String
+  address   String
+  sortOrder Int      @default(0) @map("sort_order")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, sortOrder])
+  @@map("profile_addresses")
 }

@@ -271,22 +271,69 @@ describe('platform statuses', () => {
   });
 });
 
-describe('current address is founder-only', () => {
-  it('only the founder can set and see it', async () => {
+describe('addresses are founder-only', () => {
+  it('only the founder can set and see them, as an ordered, labelled list', async () => {
     const f = await as(fx.founder);
-    const created = await f.post('/profiles', profileBody({ currentAddress: '12 Harbour Rd, Busan' }));
-    expect(created.body.currentAddress).toBe('12 Harbour Rd, Busan');
-    expect((await f.get(`/profiles/${created.body.id}`)).body.currentAddress).toBe('12 Harbour Rd, Busan');
+    const created = await f.post(
+      '/profiles',
+      profileBody({ addresses: [{ label: 'Home', address: '12 Harbour Rd, Busan' }, { label: 'Mailing', address: 'PO Box 7, Seoul' }] }),
+    );
+    expect(created.status, created.text).toBe(201);
+    expect(created.body.addresses).toEqual([
+      { id: expect.any(String), label: 'Home', address: '12 Harbour Rd, Busan' },
+      { id: expect.any(String), label: 'Mailing', address: 'PO Box 7, Seoul' },
+    ]);
+
+    // Replacing the list keeps the new order and drops what is left out.
+    const patched = await f.patch(`/profiles/${created.body.id}`, { addresses: [{ label: 'Mailing', address: 'PO Box 9, Seoul' }] });
+    expect(patched.body.addresses.map((a: { label: string; address: string }) => [a.label, a.address])).toEqual([['Mailing', 'PO Box 9, Seoul']]);
 
     for (const who of ['m1', 'a1'] as const) {
       const res = await (await as(fx[who])).get(`/profiles/${created.body.id}`);
       expect(res.status).toBe(200);
-      expect(res.body.currentAddress, who).toBeNull();
+      expect(res.body.addresses, who).toBeNull();
     }
-    // An associate's submission cannot set it.
-    const submitted = await (await as(fx.a1)).post('/profiles', profileBody({ name: 'Sam Submit', currentAddress: 'Somewhere' }));
+    // An associate's submission cannot set them.
+    const submitted = await (await as(fx.a1)).post('/profiles', profileBody({ name: 'Sam Submit', addresses: [{ label: 'Home', address: 'x' }] }));
     expect(submitted.status).toBe(201);
-    expect((await prisma.profile.findUniqueOrThrow({ where: { id: submitted.body.id } })).currentAddress).toBeNull();
+    expect(await prisma.profileAddress.count({ where: { profileId: submitted.body.id } })).toBe(0);
+    expectError(await f.patch(`/profiles/${created.body.id}`, { addresses: [{ label: '', address: 'x' }] }), 400);
+  });
+});
+
+describe('profile email, phone and onboard date', () => {
+  it('email and phone are for everyone but experts', async () => {
+    const f = await as(fx.founder);
+    const res = await f.post('/profiles', profileBody({ email: 'Dana.Morgan@Example.com', phone: '+44 20 7946 0958' }));
+    expect(res.status, res.text).toBe(201);
+    expect(res.body).toMatchObject({ email: 'dana.morgan@example.com', phone: '+44 20 7946 0958' });
+    expect((await (await as(fx.a1)).get(`/profiles/${res.body.id}`)).body).toMatchObject({ email: 'dana.morgan@example.com' });
+
+    await prisma.call.create({
+      data: {
+        platformId: fx.platform.id, profileId: res.body.id, associateId: fx.a1.id, expertId: fx.e1.id,
+        scheduledAt: new Date('2027-02-01T09:00:00Z'), durationMinutes: 30, projectDetails: 'x', platformAssociateName: 'y', createdById: fx.a1.id,
+      },
+    });
+    expect((await (await as(fx.e1)).get(`/profiles/${res.body.id}`)).body).toMatchObject({ email: null, phone: null, onboardedAt: null, addresses: null });
+
+    expectError(await f.post('/profiles', profileBody({ email: 'not an email' })), 400);
+    expectError(await f.post('/profiles', profileBody({ phone: 'call me' })), 400);
+  });
+
+  it('a profile is onboarded when approved, and the founder can change the date', async () => {
+    const f = await as(fx.founder);
+    const created = await f.post('/profiles', profileBody());
+    expect(created.body.onboardedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    // An associate's pending submission is onboarded on approval, and cannot set its own date.
+    const submitted = await (await as(fx.a1)).post('/profiles', profileBody({ name: 'Pending Pat', onboardedAt: '2020-01-01' }));
+    expect((await prisma.profile.findUniqueOrThrow({ where: { id: submitted.body.id } })).onboardedAt).toBeNull();
+    const approved = await f.post(`/profiles/${submitted.body.id}/approve`);
+    expect(approved.body.onboardedAt).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+
+    const moved = await f.patch(`/profiles/${created.body.id}`, { onboardedAt: '2026-03-15' });
+    expect(moved.body.onboardedAt).toBe('2026-03-15');
   });
 });
 
