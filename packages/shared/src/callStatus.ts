@@ -98,3 +98,12 @@ export function statusFilterForRole(role: Role, statuses: CallStatus[]): CallSta
   const visible = statuses.filter((s) => !INVOICING_STATUSES.includes(s));
   return visible.includes('finished') ? [...visible, ...INVOICING_STATUSES] : visible;
 }
+
+/**
+ * What a call should earn: the hourly rate for the minutes it actually took,
+ * rounded to cents. Null until both the rate and the real duration are known.
+ */
+export function expectedPrice(ratePerHour: number | null, actualMinutes: number | null): number | null {
+  if (ratePerHour === null || actualMinutes === null) return null;
+  return Math.round(ratePerHour * actualMinutes * 100 / 60) / 100;
+}

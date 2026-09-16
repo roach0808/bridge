@@ -60,12 +60,11 @@ import { api, socket } from '@/lib/api';
 import { errorMessage, fieldErrors, isApiError } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { patchCallInCache } from '@/realtime/RealtimeProvider';
-import { formatDateTime, formatMoney, inZone, relativeTime, zoneAbbr, zoneCity } from '@/lib/time';
+import { formatDateTime, formatUsd, inZone, relativeTime, zoneAbbr, zoneCity } from '@/lib/time';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertAvailability';
 import { MessageThread } from './MessageThread';
 import { StatusProgress } from './StatusProgress';
 
-const CURRENCIES = ['USD', 'EUR', 'GBP', 'KRW', 'JPY', 'SGD', 'CNY', 'AUD', 'CAD'];
 
 function useUpdateCall(call: CallDTO) {
   const queryClient = useQueryClient();
@@ -89,15 +88,19 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const queryClient = useQueryClient();
   const [target, setTarget] = useState<CallStatus | null>(null);
   const [comment, setComment] = useState('');
-  // Starting needs the Ninja link; finishing needs how long the call really took.
+  // Starting needs the Ninja link; finishing needs how long the call really took;
+  // paying needs what actually reached the bank.
   const [ninjaLink, setNinjaLink] = useState('');
   const [actualMinutes, setActualMinutes] = useState('');
+  const [income, setIncome] = useState('');
 
   const open = (to: CallStatus) => {
     setTarget(to);
     setComment('');
     setNinjaLink(call.ninjaLink ?? '');
     setActualMinutes(String(call.durationMinutes));
+    // Start from the expected price; the bank usually pays a little less.
+    setIncome(call.expectedPrice === null ? '' : String(call.expectedPrice));
     transition.reset();
   };
 
@@ -121,6 +124,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const minutes = Number(actualMinutes);
   const minutesValid = Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_ACTUAL_DURATION_MINUTES;
   const linkValid = /^https?:\/\/\S+$/i.test(ninjaLink.trim());
+  const incomeValue = Number(income);
+  const incomeValid = income.trim() !== '' && Number.isFinite(incomeValue) && incomeValue >= 0 && Math.round(incomeValue * 100) === incomeValue * 100;
   // An Expert asking to reschedule must say why, so the Associate knows what to arrange.
   const expertReschedule = target === 'on_rescheduling' && me.role === 'expert';
   const ready =
@@ -128,7 +133,9 @@ function TransitionBar({ call }: { call: CallDTO }) {
       ? linkValid
       : target === 'finished'
         ? minutesValid
-        : expertReschedule
+        : target === 'process_to_bank'
+          ? incomeValid
+          : expertReschedule
           ? comment.trim() !== ''
           : true;
 
@@ -139,6 +146,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
       comment: comment.trim() || undefined,
       ...(target === 'ongoing' ? { ninjaLink: ninjaLink.trim() } : {}),
       ...(target === 'finished' ? { actualDurationMinutes: minutes } : {}),
+      ...(target === 'process_to_bank' ? { realIncome: incomeValue } : {}),
     });
   };
 
@@ -254,6 +262,22 @@ function TransitionBar({ call }: { call: CallDTO }) {
                     error={Boolean(errors.actualDurationMinutes) || (actualMinutes !== '' && !minutesValid)}
                     helperText={errors.actualDurationMinutes ?? `Booked for ${call.durationMinutes} min`}
                     slotProps={{ htmlInput: { min: 1, max: MAX_ACTUAL_DURATION_MINUTES, step: 1 } }}
+                    autoFocus
+                  />
+                )}
+                {target === 'process_to_bank' && (
+                  <TextField
+                    label="Real income (USD)"
+                    required
+                    type="number"
+                    value={income}
+                    onChange={(e) => setIncome(e.target.value)}
+                    error={Boolean(errors.realIncome) || (income !== '' && !incomeValid)}
+                    helperText={
+                      errors.realIncome ??
+                      `What reached the bank. Expected ${formatUsd(call.expectedPrice)} (rate × ${call.actualDurationMinutes ?? '—'} min).`
+                    }
+                    slotProps={{ htmlInput: { min: 0, step: '0.01' } }}
                     autoFocus
                   />
                 )}
@@ -542,53 +566,38 @@ function ReassignDialog({
   );
 }
 
-function InvoiceCard({ call }: { call: CallDTO }) {
+/** Founder: correct what reached the bank after the call was processed. */
+function RealIncomeEditor({ call }: { call: CallDTO }) {
   const toast = useToast();
   const update = useUpdateCall(call);
-  const [amount, setAmount] = useState(call.invoiceAmount ?? '');
-  const [currency, setCurrency] = useState(call.invoiceCurrency ?? 'USD');
-  useEffect(() => {
-    setAmount(call.invoiceAmount ?? '');
-    setCurrency(call.invoiceCurrency ?? 'USD');
-  }, [call.invoiceAmount, call.invoiceCurrency]);
-  const dirty = amount !== (call.invoiceAmount ?? '') || (amount !== '' && currency !== (call.invoiceCurrency ?? 'USD'));
-
+  const text = (n: number | null) => (n === null ? '' : String(n));
+  const [value, setValue] = useState(text(call.realIncome));
+  useEffect(() => setValue(text(call.realIncome)), [call.realIncome]);
+  const n = Number(value);
+  const valid = value.trim() !== '' && Number.isFinite(n) && n >= 0 && Math.round(n * 100) === n * 100;
+  const dirty = valid && n !== call.realIncome;
   return (
-    <SectionCard title="Invoice">
-      <Stack spacing={2}>
-        <Stack direction="row" spacing={1}>
-          <TextField
-            label="Amount"
-            type="number"
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            slotProps={{ htmlInput: { min: 0, step: '0.01' } }}
-          />
-          <TextField select label="Currency" value={currency} onChange={(e) => setCurrency(e.target.value)} sx={{ width: 120 }}>
-            {CURRENCIES.map((c) => (
-              <MenuItem key={c} value={c}>
-                {c}
-              </MenuItem>
-            ))}
-          </TextField>
-        </Stack>
-        <Button
-          variant="outlined"
-          disabled={!dirty || update.isPending}
-          onClick={() =>
-            update.mutate(
-              { invoiceAmount: amount === '' ? null : Number(amount), invoiceCurrency: amount === '' ? null : currency },
-              { onSuccess: () => toast.success('Invoice saved'), onError: (e) => toast.error(errorMessage(e)) },
-            )
-          }
-        >
-          {update.isPending ? <CircularProgress size={18} /> : 'Save invoice'}
-        </Button>
-        <Typography variant="caption" color="text.secondary">
-          Current: {formatMoney(call.invoiceAmount, call.invoiceCurrency)}
-        </Typography>
-      </Stack>
-    </SectionCard>
+    <Stack direction="row" spacing={1.5} alignItems="flex-start">
+      <TextField
+        label="Correct real income (USD)"
+        type="number"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        error={value !== '' && !valid}
+        slotProps={{ htmlInput: { min: 0, step: '0.01' } }}
+        sx={{ maxWidth: 260 }}
+      />
+      <Button
+        variant="outlined"
+        sx={{ mt: 1 }}
+        disabled={!dirty || update.isPending}
+        onClick={() =>
+          update.mutate({ realIncome: n }, { onSuccess: () => toast.success('Real income saved'), onError: (e) => toast.error(errorMessage(e)) })
+        }
+      >
+        {update.isPending ? <CircularProgress size={18} /> : 'Save'}
+      </Button>
+    </Stack>
   );
 }
 
@@ -667,7 +676,7 @@ function RateCard({ call }: { call: CallDTO }) {
   const effective = call.rateOverride ?? call.platformRate;
 
   return (
-    <SectionCard title="Rate">
+    <SectionCard title="Rate & payment">
       <Stack spacing={1.5}>
         <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: '1fr 1fr' }}>
           <Field label={`${call.platform.name} rate`}>
@@ -691,6 +700,38 @@ function RateCard({ call }: { call: CallDTO }) {
             )}
           </Field>
         </Box>
+        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: '1fr 1fr', pt: 1, borderTop: 1, borderColor: 'divider' }}>
+          <Field label="Expected price">
+            {call.expectedPrice === null ? (
+              <Typography variant="body2" color="text.disabled">
+                {effective === null ? 'Needs a rate' : 'After the call (rate × real duration)'}
+              </Typography>
+            ) : (
+              <Tooltip title={`$${effective}/h × ${call.actualDurationMinutes} min`}>
+                <Typography variant="body2" fontWeight={600}>
+                  {formatUsd(call.expectedPrice)}
+                </Typography>
+              </Tooltip>
+            )}
+          </Field>
+          <Field label="Real income">
+            {call.realIncome === null ? (
+              <Typography variant="body2" color="text.disabled">
+                Entered when paid to bank
+              </Typography>
+            ) : (
+              <Typography variant="body2" fontWeight={600}>
+                {formatUsd(call.realIncome)}
+                {call.expectedPrice !== null && call.realIncome !== call.expectedPrice && (
+                  <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.75 }}>
+                    ({formatUsd(call.realIncome - call.expectedPrice)})
+                  </Typography>
+                )}
+              </Typography>
+            )}
+          </Field>
+        </Box>
+        {call.permissions.editIncome && call.status === 'process_to_bank' && <RealIncomeEditor call={call} />}
         {call.permissions.editRate && (
           <Stack direction="row" spacing={1.5} alignItems="flex-start">
             <TextField
@@ -1011,14 +1052,6 @@ export default function CallDetailPage() {
           {(me.role === 'founder' || me.role === 'expert') && <GptLinkCard call={call} />}
           {me.role !== 'expert' && <RateCard call={call} />}
 
-          {me.role === 'founder' && ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'].includes(call.status) && (
-            <InvoiceCard call={call} />
-          )}
-          {me.role !== 'founder' && call.invoiceAmount && (
-            <SectionCard title="Invoice">
-              <Typography variant="h5">{formatMoney(call.invoiceAmount, call.invoiceCurrency)}</Typography>
-            </SectionCard>
-          )}
 
           {FEATURES.messages && (
             <>

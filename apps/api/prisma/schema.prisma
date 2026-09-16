@@ -212,8 +212,8 @@ model Call {
   notes                 String?
   projectDetails        String     @map("project_details")
   platformAssociateName String     @map("platform_associate_name")
-  invoiceAmount         Decimal?   @map("invoice_amount") @db.Decimal(12, 2)
-  invoiceCurrency       String?    @map("invoice_currency") @db.Char(3)
+  /// What actually reached the bank (USD), entered by the Founder when the call is processed to bank.
+  realIncome            Decimal?   @map("real_income") @db.Decimal(12, 2)
   /// Meeting link the Expert adds when the call starts.
   ninjaLink             String?    @map("ninja_link")
   /// Research link set by the Founder; only the Founder and the Expert may read it.

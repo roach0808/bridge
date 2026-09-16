@@ -118,8 +118,10 @@ export interface CallDTO {
   notes: string | null;
   projectDetails: string;
   platformAssociateName: string;
-  invoiceAmount: string | null;
-  invoiceCurrency: string | null;
+  /** Rate x actual duration (USD). Null until both are known, and always null for Experts. */
+  expectedPrice: number | null;
+  /** What reached the bank (USD), entered when processed to bank. Null for Experts. */
+  realIncome: number | null;
   /** Added by the Expert when the call starts. */
   ninjaLink: string | null;
   /** Research link. Only the Founder (who sets it) and the Expert receive it. */
@@ -144,7 +146,8 @@ export interface CallPermissions {
   edit: boolean;
   reassignAssociate: boolean;
   reassignExpert: boolean;
-  editInvoice: boolean;
+  /** Founder only: correct the real income of a paid call. */
+  editIncome: boolean;
   /** Founder only. */
   editGptLink: boolean;
   /** The call's Associate, their Manager, or the Founder. */

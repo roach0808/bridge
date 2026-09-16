@@ -84,7 +84,7 @@ export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAcc
     reassignAssociate: supervises,
     // The Associate may swap the Expert for as long as they own the scheduling stage.
     reassignExpert: (supervises || (actor.role === 'associate' && call.associateId === actor.id)) && scheduling,
-    editInvoice: actor.role === 'founder',
+    editIncome: actor.role === 'founder',
     editGptLink: actor.role === 'founder',
     editRate: ownsScheduling,
   };

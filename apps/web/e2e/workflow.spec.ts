@@ -89,14 +89,24 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
   await expect(associate.getByTestId('call-status')).toHaveAttribute('data-status', 'finished');
   await expect(associate.getByText('No actions for you at this stage.')).toBeVisible();
 
-  // 3. Founder invoices through to the bank.
+  // 3. Founder invoices through to the bank. Invoicing needs the Profile's rate on the platform.
+  const founderApi = await apiLogin('founder@god.local');
+  const rateSet = await founderApi.ctx.put(`${API}/profiles/${profiles[0].id}/platforms/${platforms[0].id}`, {
+    headers: { Authorization: `Bearer ${founderApi.token}` },
+    data: { status: 'registered', rate: 1000 },
+  });
+  expect(rateSet.ok()).toBeTruthy();
   const founder = await signIn(browser, 'founder@god.local');
   await founder.goto(url);
   await transition(founder, 'Mark invoice submitted');
   await expect(observed).toHaveAttribute('data-status', 'invoice_submit', { timeout: 5_000 });
   await transition(founder, 'Mark invoice approved');
   await expect(observed).toHaveAttribute('data-status', 'invoice_approve', { timeout: 5_000 });
-  await transition(founder, 'Mark processed to bank');
+  // Paying records what reached the bank: prefilled with the expected price (1000/h × 14 min), a little less arrives.
+  await transition(founder, 'Mark processed to bank', async (dialog) => {
+    await expect(dialog.getByLabel('Real income (USD)')).toHaveValue('233.33');
+    await dialog.getByLabel('Real income (USD)').fill('229.10');
+  });
   await expect(observed).toHaveAttribute('data-status', 'process_to_bank', { timeout: 5_000 });
   await expect(founder.getByText('This call is complete.')).toBeVisible();
 

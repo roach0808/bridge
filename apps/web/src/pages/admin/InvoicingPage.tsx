@@ -8,6 +8,10 @@ import {
   Button,
   Checkbox,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
   IconButton,
   Paper,
@@ -18,25 +22,25 @@ import {
   TableCell,
   TableHead,
   TableRow,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
 import { STATUS_LABELS, type CallDTO, type CallStatus } from '@god/shared';
 import type { ListCallsParams } from '@god/api-client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { useAuth } from '@/auth/AuthProvider';
-import { ConfirmDialog, EmptyState, ErrorState, PageHeader } from '@/components/common';
+import { EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
-import { formatDateTime, formatMoney } from '@/lib/time';
+import { formatDateTime, formatUsd } from '@/lib/time';
 import { SR_ONLY, SearchField, StatTile, runWithConcurrency } from './adminShared';
-import { InvoiceAmountCell } from './InvoiceAmountCell';
 
 type InvoiceStatus = Extract<CallStatus, 'finished' | 'invoice_submit' | 'invoice_approve' | 'process_to_bank'>;
 
@@ -53,18 +57,19 @@ const LIST_PARAMS: ListCallsParams = {
   sort: '-scheduledAt',
 };
 
-function totalsByCurrency(calls: CallDTO[]) {
-  const totals = new Map<string, number>();
+/**
+ * The money in a stage: what reached the bank for paid calls, what is expected
+ * for the rest. Calls whose expected price is still unknown (no rate) are counted apart.
+ */
+function stageTotal(calls: CallDTO[], paid: boolean) {
+  let total = 0;
   let missing = 0;
   for (const c of calls) {
-    if (c.invoiceAmount == null) {
-      missing++;
-      continue;
-    }
-    const cur = c.invoiceCurrency ?? 'USD';
-    totals.set(cur, (totals.get(cur) ?? 0) + Number(c.invoiceAmount));
+    const amount = paid ? c.realIncome : c.expectedPrice;
+    if (amount === null) missing++;
+    else total += amount;
   }
-  return { totals: [...totals.entries()].sort((a, b) => b[1] - a[1]), missing };
+  return { total: Math.round(total * 100) / 100, missing };
 }
 
 export default function InvoicingPage() {
@@ -75,7 +80,8 @@ export default function InvoicingPage() {
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moving, setMoving] = useState<{ done: number; total: number } | null>(null);
-  const [confirmMissing, setConfirmMissing] = useState(false);
+  // Paying asks for what reached the bank, per call.
+  const [paying, setPaying] = useState<CallDTO[] | null>(null);
 
   const query = useQuery({ queryKey: qk.calls.list(LIST_PARAMS), queryFn: () => api.calls.list(LIST_PARAMS) });
   const calls = useMemo(() => query.data?.items ?? [], [query.data]);
@@ -102,7 +108,8 @@ export default function InvoicingPage() {
   const selectedRows = rows.filter((c) => selected.has(c.id));
   const next = stage.next;
   const eligible = next ? selectedRows.filter((c) => c.allowedTransitions.includes(next)) : [];
-  const withoutAmount = next === 'invoice_submit' ? eligible.filter((c) => c.invoiceAmount == null) : [];
+  // The API refuses to invoice a call whose Profile has no rate yet.
+  const withoutRate = next === 'invoice_submit' ? eligible.filter((c) => c.expectedPrice === null) : [];
 
   const changeTab = (status: InvoiceStatus) => {
     setTab(status);
@@ -120,16 +127,16 @@ export default function InvoicingPage() {
   const allChecked = rows.length > 0 && selectedRows.length === rows.length;
   const someChecked = selectedRows.length > 0 && !allChecked;
 
-  const runMove = async () => {
+  const runMove = async (incomes?: Map<string, number>) => {
     if (!next || eligible.length === 0) return;
-    const targets = eligible;
+    const targets = incomes ? eligible.filter((c) => incomes.has(c.id)) : eligible;
     const skipped = selectedRows.length - targets.length;
     setMoving({ done: 0, total: targets.length });
     try {
       let done = 0;
       const results = await runWithConcurrency(targets, 3, async (c) => {
         try {
-          return await api.calls.transition(c.id, next);
+          return await api.calls.transition(c.id, next, incomes ? { realIncome: incomes.get(c.id)! } : undefined);
         } finally {
           done++;
           setMoving({ done, total: targets.length });
@@ -165,18 +172,19 @@ export default function InvoicingPage() {
   };
 
   const requestMove = () => {
-    if (withoutAmount.length > 0) setConfirmMissing(true);
+    if (next === 'process_to_bank') setPaying(eligible);
     else void runMove();
   };
 
   return (
     <Box>
-      <PageHeader title="Invoicing" subtitle="Record amounts and move finished calls through to payment." />
+      <PageHeader title="Invoicing" subtitle="Move finished calls through to payment, and record what reached the bank." />
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {STAGES.map((s) => {
           const list = byStatus[s.status];
-          const { totals, missing } = totalsByCurrency(list);
+          const paid = s.status === 'process_to_bank';
+          const { total, missing } = stageTotal(list, paid);
           const color = STATUS_COLORS[s.status];
           return (
             <Grid key={s.status} size={{ xs: 6, lg: 3 }}>
@@ -202,24 +210,17 @@ export default function InvoicingPage() {
                     <Skeleton width="70%" />
                   ) : (
                     <Stack spacing={0.25}>
-                      {totals.length === 0 ? (
-                        <Typography variant="body2" color="text.disabled">
-                          No amounts yet
+                      <Typography variant="body2" fontWeight={500} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {formatUsd(total)}
+                        <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.75 }}>
+                          {paid ? 'received' : 'expected'}
                         </Typography>
-                      ) : (
-                        <Stack direction="row" spacing={1.5} useFlexGap flexWrap="wrap">
-                          {totals.map(([cur, sum]) => (
-                            <Typography key={cur} variant="body2" fontWeight={500} sx={{ fontVariantNumeric: 'tabular-nums' }}>
-                              {formatMoney(sum.toFixed(2), cur)}
-                            </Typography>
-                          ))}
-                        </Stack>
-                      )}
-                      {missing > 0 && (
+                      </Typography>
+                      {missing > 0 && !paid && (
                         <Stack direction="row" spacing={0.75} alignItems="center">
                           <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main', flexShrink: 0 }} />
                           <Typography variant="caption" color="text.secondary">
-                            {missing} without amount
+                            {missing} without a rate
                           </Typography>
                         </Stack>
                       )}
@@ -259,12 +260,12 @@ export default function InvoicingPage() {
               </Stack>
               {next ? (
                 <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="flex-end" useFlexGap flexWrap="wrap">
-                  {withoutAmount.length > 0 && (
-                    <Tooltip title="These calls have no invoice amount yet">
+                  {withoutRate.length > 0 && (
+                    <Tooltip title="Set the profile's hourly rate on the platform first; these will be refused">
                       <Stack direction="row" spacing={0.75} alignItems="center">
                         <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }} />
                         <Typography variant="caption" color="text.secondary">
-                          {withoutAmount.length} without amount
+                          {withoutRate.length} without a rate
                         </Typography>
                       </Stack>
                     </Tooltip>
@@ -375,20 +376,13 @@ export default function InvoicingPage() {
         </Alert>
       )}
 
-      <ConfirmDialog
-        open={confirmMissing}
-        title="Submit invoices without amounts?"
-        description={
-          <>
-            {withoutAmount.length} of the {eligible.length} selected call{eligible.length === 1 ? ' has' : 's have'} no invoice
-            amount. You can still submit and add amounts later.
-          </>
-        }
-        confirmLabel={`Move ${eligible.length} anyway`}
-        onConfirm={() => {
-          void runMove();
+      <PayDialog
+        calls={paying}
+        onClose={() => setPaying(null)}
+        onConfirm={(incomes) => {
+          setPaying(null);
+          void runMove(incomes);
         }}
-        onClose={() => setConfirmMissing(false)}
       />
     </Box>
   );
@@ -431,7 +425,8 @@ function InvoiceTable({
             <TableCell>Expert</TableCell>
             <TableCell>Associate</TableCell>
             <TableCell>Scheduled</TableCell>
-            <TableCell>Amount</TableCell>
+            <TableCell align="right">Expected</TableCell>
+            <TableCell align="right">Real income</TableCell>
             <TableCell>Status</TableCell>
             <TableCell width={48}>
               <Box component="span" sx={SR_ONLY}>
@@ -489,8 +484,21 @@ function InvoiceTable({
                     {c.durationMinutes} min
                   </Typography>
                 </TableCell>
-                <TableCell>
-                  <InvoiceAmountCell call={c} />
+                <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {c.expectedPrice === null ? (
+                    <Tooltip title="No hourly rate for this profile on this platform yet">
+                      <Typography variant="body2" color="warning.main">
+                        No rate
+                      </Typography>
+                    </Tooltip>
+                  ) : (
+                    <Typography variant="body2">{formatUsd(c.expectedPrice)}</Typography>
+                  )}
+                </TableCell>
+                <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                  <Typography variant="body2" color={c.realIncome === null ? 'text.disabled' : 'text.primary'}>
+                    {formatUsd(c.realIncome)}
+                  </Typography>
                 </TableCell>
                 <TableCell>
                   <StatusChip status={c.status} />
@@ -514,4 +522,76 @@ function InvoiceTable({
 /** Horizontal scroll container without an extra border (the Paper provides it). */
 function TableSurfaceInner({ children }: { children: ReactNode }) {
   return <Box sx={{ overflowX: 'auto', '& table': { minWidth: 980 } }}>{children}</Box>;
+}
+
+/**
+ * Processing to bank records what actually arrived for each call: it starts at
+ * the expected price, which the bank usually pays a little under.
+ */
+function PayDialog({
+  calls,
+  onClose,
+  onConfirm,
+}: {
+  calls: CallDTO[] | null;
+  onClose: () => void;
+  onConfirm: (incomes: Map<string, number>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  useEffect(() => {
+    if (calls) setValues(Object.fromEntries(calls.map((c) => [c.id, c.expectedPrice === null ? '' : String(c.expectedPrice)])));
+  }, [calls]);
+
+  const parse = (v: string | undefined) => {
+    const n = Number(v);
+    return v !== undefined && v.trim() !== '' && Number.isFinite(n) && n >= 0 && Math.round(n * 100) === n * 100 ? n : null;
+  };
+  const ready = (calls ?? []).every((c) => parse(values[c.id]) !== null);
+
+  return (
+    <Dialog open={Boolean(calls)} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>Record what reached the bank</DialogTitle>
+      <DialogContent>
+        <Stack spacing={1.5} sx={{ pt: 1 }}>
+          {(calls ?? []).map((c) => {
+            const value = values[c.id] ?? '';
+            return (
+              <Stack key={c.id} direction="row" spacing={1.5} alignItems="center">
+                <Box sx={{ flex: 1, minWidth: 0 }}>
+                  <Typography variant="body2" fontWeight={550} noWrap>
+                    {c.profile.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap component="div">
+                    {c.platform.name} · expected {formatUsd(c.expectedPrice)}
+                  </Typography>
+                </Box>
+                <TextField
+                  size="small"
+                  type="number"
+                  label="Real income (USD)"
+                  value={value}
+                  error={value !== '' && parse(value) === null}
+                  onChange={(e) => setValues((v) => ({ ...v, [c.id]: e.target.value }))}
+                  slotProps={{ htmlInput: { min: 0, step: '0.01' } }}
+                  sx={{ width: 170 }}
+                />
+              </Stack>
+            );
+          })}
+        </Stack>
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button color="inherit" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          disabled={!ready}
+          onClick={() => onConfirm(new Map((calls ?? []).map((c) => [c.id, parse(values[c.id])!])))}
+        >
+          Mark {calls?.length ?? 0} paid
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
 }

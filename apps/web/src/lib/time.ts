@@ -55,3 +55,9 @@ export function formatMoney(amount: string | null, currency: string | null): str
     return `${n.toFixed(2)} ${currency ?? ''}`.trim();
   }
 }
+
+const usdWhole = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 });
+const usdCents = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/** A USD amount: `$1,250` when whole, `$942.50` otherwise; an em dash when unknown. */
+export const formatUsd = (amount: number | null | undefined) =>
+  amount == null ? '—' : (Number.isInteger(amount) ? usdWhole : usdCents).format(amount);

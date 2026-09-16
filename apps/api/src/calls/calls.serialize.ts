@@ -1,4 +1,4 @@
-import { statusForRole, type CallDTO, type CallStatus, type Role } from '@god/shared';
+import { expectedPrice, statusForRole, type CallDTO, type CallStatus, type Role } from '@god/shared';
 import type { Prisma } from '@prisma/client';
 import type { Actor } from '../auth/middleware';
 import { iso } from '../http';
@@ -30,9 +30,10 @@ export type CallRow = Prisma.CallGetPayload<{ include: typeof callInclude }>;
 export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallDTO {
   // Experts see no money at all, and only the Founder and the Expert see the GPT link.
   const hideMoney = viewer.role === 'expert';
-  const hideInvoicing = hideMoney;
   const { platformStatuses, ...profile } = call.profile;
   const platformRate = platformStatuses.find((s) => s.platformId === call.platformId)?.rate ?? null;
+  // A special rate on the call wins over the Profile's rate on the platform.
+  const rate = call.rateOverride ?? platformRate;
   return {
     id: call.id,
     status: statusForRole(viewer.role, call.status as CallStatus),
@@ -47,8 +48,8 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
     notes: call.notes,
     projectDetails: call.projectDetails,
     platformAssociateName: call.platformAssociateName,
-    invoiceAmount: !hideInvoicing && call.invoiceAmount ? call.invoiceAmount.toFixed(2) : null,
-    invoiceCurrency: hideInvoicing ? null : call.invoiceCurrency,
+    expectedPrice: hideMoney ? null : expectedPrice(rate === null ? null : Number(rate), call.actualDurationMinutes),
+    realIncome: hideMoney || call.realIncome === null ? null : Number(call.realIncome),
     ninjaLink: call.ninjaLink,
     gptLink: viewer.role === 'founder' || viewer.role === 'expert' ? call.gptLink : null,
     platformRate: hideMoney || platformRate === null ? null : Number(platformRate),

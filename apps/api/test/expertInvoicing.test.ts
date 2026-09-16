@@ -9,16 +9,18 @@ afterAll(async () => {
   await prisma.$disconnect();
 });
 
-/** A call that went all the way to invoicing, with its history and an amount. */
+/** A call that went all the way to the bank: 60 minutes at 450/h, of which 437.25 arrived. */
 async function invoicedCall() {
   const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'invoice_approve', scheduledAt: '2027-02-01T09:00:00Z' });
-  await prisma.call.update({ where: { id: call.id }, data: { invoiceAmount: 450, invoiceCurrency: 'USD' } });
+  await prisma.profilePlatformStatus.create({ data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 450 } });
+  await prisma.call.update({ where: { id: call.id }, data: { actualDurationMinutes: 60, status: 'process_to_bank', realIncome: 437.25 } });
   const at = (h: number) => new Date(Date.UTC(2027, 1, 1, h));
   await prisma.callStatusHistory.createMany({
     data: [
       { callId: call.id, fromStatus: 'confirmed', toStatus: 'finished', actorId: fx.e1.id, createdAt: at(10) },
       { callId: call.id, fromStatus: 'finished', toStatus: 'invoice_submit', actorId: fx.founder.id, createdAt: at(11) },
       { callId: call.id, fromStatus: 'invoice_submit', toStatus: 'invoice_approve', actorId: fx.founder.id, createdAt: at(12) },
+      { callId: call.id, fromStatus: 'invoice_approve', toStatus: 'process_to_bank', actorId: fx.founder.id, createdAt: at(13) },
     ],
   });
   return call;
@@ -29,15 +31,15 @@ describe('experts do not see invoicing', () => {
     const call = await invoicedCall();
     const e1 = await as(fx.e1);
     const detail = (await e1.get(`/calls/${call.id}`)).body;
-    expect(detail).toMatchObject({ status: 'finished', invoiceAmount: null, invoiceCurrency: null, allowedTransitions: [] });
+    expect(detail).toMatchObject({ status: 'finished', expectedPrice: null, realIncome: null, allowedTransitions: [] });
     expect(detail.history.map((h: { toStatus: string }) => h.toStatus)).not.toContain('invoice_submit');
     expect(detail.history.map((h: { toStatus: string }) => h.toStatus)).not.toContain('invoice_approve');
     expect((await e1.get(`/calls/${call.id}/history`)).body.every((h: { toStatus: string }) => !h.toStatus.startsWith('invoice'))).toBe(true);
-    expect(JSON.stringify(detail)).not.toMatch(/invoice_(submit|approve)|process_to_bank|"invoiceAmount":"|450\.00/);
+    expect(JSON.stringify(detail)).not.toMatch(/invoice_(submit|approve)|process_to_bank|"(expectedPrice|realIncome)":\d|437\.25/);
 
-    // Everyone else still sees the real status and amount.
+    // Everyone else still sees the real status and both payment figures.
     const a1 = (await (await as(fx.a1)).get(`/calls/${call.id}`)).body;
-    expect(a1).toMatchObject({ status: 'invoice_approve', invoiceAmount: '450.00' });
+    expect(a1).toMatchObject({ status: 'process_to_bank', expectedPrice: 450, realIncome: 437.25 });
   });
 
   it('list, filters, calendar and dashboard counts', async () => {
@@ -54,12 +56,11 @@ describe('experts do not see invoicing', () => {
     expect(dash.byStatus).toMatchObject({ finished: 1, invoice_submit: 0, invoice_approve: 0, process_to_bank: 0 });
   });
 
-  it('experts are not notified about invoicing steps or invoice edits', async () => {
-    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
+  it('experts are not notified about invoicing steps or income corrections', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'invoice_approve' });
     const founder = await as(fx.founder);
-    await founder.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { rate: 1000 });
-    expect((await founder.post(`/calls/${call.id}/transition`, { to: 'invoice_submit' })).status).toBe(200);
-    expect((await founder.patch(`/calls/${call.id}`, { invoiceAmount: 300, invoiceCurrency: 'EUR' })).status).toBe(200);
+    expect((await founder.post(`/calls/${call.id}/transition`, { to: 'process_to_bank', realIncome: 910 })).status).toBe(200);
+    expect((await founder.patch(`/calls/${call.id}`, { realIncome: 905.5 })).status).toBe(200);
     expect(await prisma.notification.count({ where: { userId: fx.e1.id } })).toBe(0);
     // The associate still hears about both.
     expect(await prisma.notification.count({ where: { userId: fx.a1.id } })).toBe(2);
@@ -82,7 +83,7 @@ describe('experts do not see invoicing', () => {
     ];
     for (const res of responses) {
       expect(res.status, res.text).toBe(200);
-      expect(res.text).not.toMatch(/"(rate|platformRate|rateOverride)":\d|"bankCount":\d|"needsBank":(true|false)|"invoiceAmount":"|"invoiceCurrency":"|1500\.00|450\.00/);
+      expect(res.text).not.toMatch(/"(rate|platformRate|rateOverride|expectedPrice|realIncome)":\d|"bankCount":\d|"needsBank":(true|false)|437\.25/);
     }
     const profile = responses[4]!.body;
     expect(profile).toMatchObject({ platformStatuses: null, bankCount: null, needsBank: null, currentAddress: null });

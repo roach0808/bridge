@@ -35,7 +35,7 @@ describe('POST /calls', () => {
       scheduledAt: '2027-03-01T15:00:00.000Z',
       endsAt: '2027-03-01T15:45:00.000Z',
       allowedTransitions: ['scheduled'],
-      permissions: { edit: true, reassignAssociate: false, reassignExpert: true, editInvoice: false },
+      permissions: { edit: true, reassignAssociate: false, reassignExpert: true, editIncome: false, editGptLink: false, editRate: true },
     });
     const history = await prisma.callStatusHistory.findMany({ where: { callId: res.body.id } });
     expect(history).toEqual([expect.objectContaining({ fromStatus: null, toStatus: 'on_scheduling', actorId: fx.a1.id, isOverride: false })]);
@@ -188,16 +188,36 @@ describe('PATCH /calls/:id permissions', () => {
     expect((await (await as(fx.founder)).patch(`/calls/${late.id}`, { notes: 'founder can' })).status).toBe(200);
   });
 
-  it('invoice fields are founder only', async () => {
-    const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+  it('real income: only the founder corrects it, and only once the call is paid', async () => {
     const cs = await clientsFor(fx, ['a1', 'm1', 'e1', 'founder']);
+    const unpaid = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    expectError(await cs.founder.patch(`/calls/${unpaid.id}`, { realIncome: 100 }), 409);
+
+    const paid = await makeCall(fx, { associate: fx.a1, status: 'invoice_approve', scheduledAt: '2027-03-01T09:00:00Z' });
+    expect((await cs.founder.post(`/calls/${paid.id}/transition`, { to: 'process_to_bank', realIncome: 150.5 })).status).toBe(200);
     for (const who of ['a1', 'm1', 'e1'] as const) {
-      expectError(await cs[who].patch(`/calls/${call.id}`, { invoiceAmount: 150 }), 403);
-      expectError(await cs[who].patch(`/calls/${call.id}`, { invoiceCurrency: 'USD' }), 403);
+      const res = await cs[who].patch(`/calls/${paid.id}`, { realIncome: 1 });
+      expect([403, 404], res.text).toContain(res.status);
     }
-    const res = await cs.founder.patch(`/calls/${call.id}`, { invoiceAmount: 150.5, invoiceCurrency: 'usd' });
+    const res = await cs.founder.patch(`/calls/${paid.id}`, { realIncome: 149.99 });
     expect(res.status, res.text).toBe(200);
-    expect(res.body).toMatchObject({ invoiceAmount: '150.50', invoiceCurrency: 'USD' });
+    expect(res.body.realIncome).toBe(149.99);
+    expectError(await cs.founder.patch(`/calls/${paid.id}`, { realIncome: null }), 400);
+    expectError(await cs.founder.patch(`/calls/${paid.id}`, { realIncome: 12.345 }), 400);
+  });
+
+  it('expected price is the rate for the minutes the call really took', async () => {
+    const f = await as(fx.founder);
+    await f.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { status: 'registered', rate: 1200 });
+    const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    expect((await f.get(`/calls/${call.id}`)).body.expectedPrice).toBeNull(); // no duration yet
+    await prisma.call.update({ where: { id: call.id }, data: { actualDurationMinutes: 45 } });
+    expect((await f.get(`/calls/${call.id}`)).body.expectedPrice).toBe(900);
+    // A special rate on the call wins.
+    await f.patch(`/calls/${call.id}`, { rateOverride: 1000 });
+    expect((await f.get(`/calls/${call.id}`)).body.expectedPrice).toBe(750);
+    await prisma.call.update({ where: { id: call.id }, data: { actualDurationMinutes: 7 } });
+    expect((await f.get(`/calls/${call.id}`)).body.expectedPrice).toBe(116.67);
   });
 
   it('associate reassignment: managers within their team, associates never', async () => {
@@ -389,13 +409,13 @@ describe.runIf(FEATURES.messages)('messages', () => {
 });
 
 describe('database constraints', () => {
-  const insert = (over: Partial<Record<'project' | 'duration' | 'status' | 'expert' | 'currency', string | number | null>> = {}) =>
+  const insert = (over: Partial<Record<'project' | 'duration' | 'status' | 'expert' | 'income', string | number | null>> = {}) =>
     prisma.$executeRaw`
       INSERT INTO calls (id, status, platform_id, profile_id, associate_id, expert_id, scheduled_at, duration_minutes,
-                         project_details, platform_associate_name, invoice_currency, created_by, updated_at)
+                         project_details, platform_associate_name, real_income, created_by, updated_at)
       VALUES (gen_random_uuid(), ${over.status ?? 'on_scheduling'}::"CallStatus", ${fx.platform.id}::uuid, ${fx.approvedProfile.id}::uuid,
               ${fx.a1.id}::uuid, ${over.expert === undefined ? fx.e1.id : over.expert}::uuid, '2027-02-01T09:00:00Z', ${over.duration ?? 30},
-              ${over.project ?? 'Details'}, 'Pat', ${over.currency ?? null}, ${fx.a1.id}::uuid, now())`;
+              ${over.project ?? 'Details'}, 'Pat', ${over.income ?? null}::numeric, ${fx.a1.id}::uuid, now())`;
 
   it('a valid raw insert works and the trigger sets ends_at', async () => {
     expect(await insert()).toBe(1);
@@ -415,8 +435,10 @@ describe('database constraints', () => {
     await expect(insert({ status: 'scheduled', expert: null })).rejects.toThrow(/calls_expert_required_when_scheduled/);
   });
 
-  it('a lower-case invoice currency is rejected', async () => {
-    await expect(insert({ currency: 'usd' })).rejects.toThrow(/calls_invoice_currency_format/);
+  it('a paid call needs a real income, and it cannot be negative', async () => {
+    await expect(insert({ status: 'process_to_bank' })).rejects.toThrow(/calls_paid_has_real_income/);
+    await expect(insert({ income: -1 })).rejects.toThrow(/calls_real_income_nonnegative/);
+    expect(await insert({ status: 'process_to_bank', income: 500 })).toBe(1);
   });
 
   it('the exclusion constraint rejects overlapping blocking calls', async () => {
@@ -469,7 +491,6 @@ describe('GPT link', () => {
     await f.patch(`/calls/${call.id}`, { gptLink: 'https://chatgpt.com/share/xyz' });
     expect(await prisma.notification.count({ where: { userId: fx.e1.id, type: 'call.updated' } })).toBe(1);
     await f.patch(`/calls/${call.id}`, { rateOverride: 1500 });
-    await f.patch(`/calls/${call.id}`, { invoiceAmount: 700, invoiceCurrency: 'USD' });
     expect(await prisma.notification.count({ where: { userId: fx.e1.id } })).toBe(1);
   });
 });

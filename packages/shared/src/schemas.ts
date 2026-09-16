@@ -162,6 +162,13 @@ export const rate = z.coerce
   .max(MAX_PLATFORM_RATE, 'That rate is too high')
   .multipleOf(0.01, 'Use at most two decimals');
 
+/** A USD amount with cents. */
+export const money = z.coerce
+  .number({ invalid_type_error: 'Enter an amount' })
+  .min(0, 'The amount cannot be negative')
+  .max(9_999_999_999.99, 'That amount is too large')
+  .multipleOf(0.01, 'Use at most two decimals');
+
 export const profilePlatformStatusSchema = z
   .object({
     status: z.enum(PLATFORM_REGISTRATIONS).optional(),
@@ -205,14 +212,8 @@ export const updateCallSchema = z
     projectDetails: trimmed('Project details').optional(),
     platformAssociateName: trimmed('Platform associate', 160).optional(),
     notes: optionalText().optional(),
-    invoiceAmount: z.coerce.number().min(0).max(9_999_999_999.99).nullable().optional(),
-    invoiceCurrency: z
-      .string()
-      .trim()
-      .toUpperCase()
-      .regex(/^[A-Z]{3}$/, 'Use a three-letter currency code')
-      .nullable()
-      .optional(),
+    /** Founder only: correct what reached the bank after the call was processed. */
+    realIncome: money.nullable().optional(),
     /** Founder only; the Expert reads it but never writes it. */
     gptLink: z
       .string()
@@ -246,8 +247,13 @@ export const transitionSchema = z
       .optional(),
     rating: z.coerce.number().int().min(1, 'Rate from 1 to 5').max(5, 'Rate from 1 to 5').optional(),
     feedback: optionalText(2000).optional(),
+    /** Required to move a call to `process_to_bank`: what actually reached the bank (USD). */
+    realIncome: money.optional(),
   })
   .superRefine((v, ctx) => {
+    if (v.to === 'process_to_bank' && v.realIncome === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['realIncome'], message: 'Enter the amount that reached the bank' });
+    }
     if (v.to === 'ongoing' && !v.ninjaLink) {
       ctx.addIssue({ code: 'custom', path: ['ninjaLink'], message: 'Add the Ninja link to start the call' });
     }

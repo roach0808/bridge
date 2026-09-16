@@ -259,8 +259,13 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     }
     if (input.expertId) await assertActiveUser(input.expertId, 'expert', 'expertId');
   }
-  if ((input.invoiceAmount !== undefined || input.invoiceCurrency !== undefined) && !perms.editInvoice) {
-    throw forbidden('Only the Founder edits invoices');
+  if (input.realIncome !== undefined) {
+    if (!perms.editIncome) throw forbidden('Only the Founder records what reached the bank');
+    // Before payment there is nothing to correct; the amount is entered with the payment step.
+    if (current.status !== 'process_to_bank') {
+      throw conflict('Real income is entered when the call is processed to bank');
+    }
+    if (input.realIncome === null) throw badRequest('A paid call must keep its real income', { issues: [{ path: 'realIncome', message: 'Required once paid' }] });
   }
   if (input.gptLink !== undefined && !perms.editGptLink) {
     throw forbidden('Only the Founder sets the GPT link');
@@ -294,8 +299,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
           notes: input.notes,
           associateId: input.associateId,
           expertId: input.expertId,
-          invoiceAmount: input.invoiceAmount === undefined ? undefined : input.invoiceAmount,
-          invoiceCurrency: input.invoiceCurrency,
+          realIncome: input.realIncome === undefined ? undefined : input.realIncome,
           gptLink: input.gptLink,
           rateOverride: input.rateOverride === undefined ? undefined : input.rateOverride,
         },
@@ -318,7 +322,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     const before = new Set(await participantIds(tx, current));
     const after = await participantIds(tx, updated);
     // Money-only edits are none of the Expert's business.
-    const MONEY_FIELDS = ['invoiceAmount', 'invoiceCurrency', 'rateOverride'];
+    const MONEY_FIELDS = ['realIncome', 'rateOverride'];
     const moneyOnly = Object.entries(input).every(([k, v]) => v === undefined || MONEY_FIELDS.includes(k));
     const recipients = [...new Set([...before, ...after])].filter(
       (uid) => uid !== actor.id && !(moneyOnly && uid === updated.expertId),
@@ -394,6 +398,8 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
       data.rating = input.rating;
       data.feedback = input.feedback ?? null;
     }
+    // The bank never pays exactly the expected price: record what actually arrived.
+    if (to === 'process_to_bank') data.realIncome = input.realIncome;
     const updated = await tx.call
       .update({ where: { id }, data, include: callInclude })
       .catch(rethrowOverlap);

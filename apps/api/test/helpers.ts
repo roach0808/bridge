@@ -137,6 +137,8 @@ export interface MakeCallOptions {
   createdBy?: FixtureUser;
   projectDetails?: string;
   notes?: string | null;
+  /** Defaults to 1000 for a call already processed to bank (the database requires one). */
+  realIncome?: number | null;
 }
 
 /** Inserts a call (and its first history row) directly, bypassing the API. */
@@ -153,6 +155,7 @@ export async function makeCall(fx: Fixtures, opts: MakeCallOptions) {
       projectDetails: opts.projectDetails ?? 'Market sizing for industrial pumps',
       platformAssociateName: 'Jordan at GLG',
       notes: opts.notes ?? null,
+      realIncome: opts.realIncome !== undefined ? opts.realIncome : opts.status === 'process_to_bank' ? 1000 : null,
       createdById: (opts.createdBy ?? opts.associate).id,
     },
   });

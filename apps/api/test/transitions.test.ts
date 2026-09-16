@@ -14,6 +14,7 @@ afterAll(async () => {
 const REQUIRED_EXTRAS: Partial<Record<CallStatus, Record<string, unknown>>> = {
   ongoing: { ninjaLink: 'https://vdo.ninja/?room=test' },
   finished: { actualDurationMinutes: 50 },
+  process_to_bank: { realIncome: 950 },
 };
 
 const transition = (client: Client, callId: string, to: CallStatus, comment?: string) =>
@@ -349,5 +350,20 @@ describe('a finished call cannot be invoiced without a rate', () => {
     expect((await founder.patch(`/calls/${call.id}`, { rateOverride: 900 })).status).toBe(200);
     expect((await transition(founder, call.id, 'invoice_submit')).status).toBe(200);
     expect((await founder.get('/dashboard')).body.tasks.profilesNeedingRate).toEqual([]);
+  });
+});
+
+describe('processing to bank records what actually arrived', () => {
+  it('requires the real income, and stores it', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'invoice_approve' });
+    const founder = await as(fx.founder);
+    const missing = await founder.post(`/calls/${call.id}/transition`, { to: 'process_to_bank' });
+    expectError(missing, 400, 'validation_error');
+    expect(missing.body.error.details.issues).toContainEqual(expect.objectContaining({ path: 'realIncome' }));
+    expectError(await founder.post(`/calls/${call.id}/transition`, { to: 'process_to_bank', realIncome: -5 }), 400);
+
+    const res = await founder.post(`/calls/${call.id}/transition`, { to: 'process_to_bank', realIncome: 980.4 });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toMatchObject({ status: 'process_to_bank', realIncome: 980.4 });
   });
 });
