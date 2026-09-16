@@ -117,6 +117,31 @@ describe('messages, unread counts and read receipts', () => {
     const second = await e1.get(`/chat/conversations/${id}/messages`, { limit: 3, cursor: first.body.nextCursor });
     expect(second.body.items.map((m: { body: string }) => m.body)).toEqual(['m1', 'm2']);
     expect(second.body.nextCursor).toBeNull();
+    expect([first.body.hasNewer, second.body.hasNewer]).toEqual([false, true]);
+  });
+
+  it('pages back down with after, so a client can keep only a window of messages', async () => {
+    const e1 = await as(fx.e1);
+    const id = await open(e1, fx.founder);
+    const base = Date.parse('2027-01-01T00:00:00Z');
+    for (let i = 1; i <= 7; i++) {
+      await prisma.chatMessage.create({ data: { conversationId: id, senderId: fx.e1.id, body: `m${i}`, createdAt: new Date(base + i * 1000) } });
+    }
+    const bodies = (res: { body: { items: Array<{ body: string }> } }) => res.body.items.map((m) => m.body);
+    const latest = await e1.get(`/chat/conversations/${id}/messages`, { limit: 3 });
+    const older = await e1.get(`/chat/conversations/${id}/messages`, { limit: 3, cursor: latest.body.nextCursor });
+    expect(bodies(older)).toEqual(['m2', 'm3', 'm4']);
+
+    const newer = await e1.get(`/chat/conversations/${id}/messages`, { limit: 2, after: older.body.newerCursor });
+    expect(bodies(newer)).toEqual(['m5', 'm6']);
+    expect(newer.body.hasNewer).toBe(true);
+    const newest = await e1.get(`/chat/conversations/${id}/messages`, { limit: 2, after: newer.body.newerCursor });
+    expect(bodies(newest)).toEqual(['m7']);
+    expect(newest.body).toMatchObject({ hasNewer: false });
+    // Scrolling up again from a newer page continues where it left off.
+    expect(bodies(await e1.get(`/chat/conversations/${id}/messages`, { limit: 3, cursor: newer.body.nextCursor }))).toEqual(['m2', 'm3', 'm4']);
+
+    expectError(await e1.get(`/chat/conversations/${id}/messages`, { cursor: latest.body.nextCursor, after: older.body.newerCursor }), 400);
   });
 
   it('blank messages are rejected', async () => {

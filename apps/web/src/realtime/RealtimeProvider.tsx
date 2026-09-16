@@ -2,6 +2,7 @@ import type {
   CallDetailDTO,
   CallDTO,
   ChatMessageDTO,
+  ChatMessagePage,
   ChatReadEvent,
   CursorPage,
   MessageDTO,
@@ -19,12 +20,15 @@ import { showInTabNotification } from '@/lib/push';
 import { socket } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 
-type ChatPages = { pages: CursorPage<ChatMessageDTO>[]; pageParams: unknown[] };
+type ChatPages = { pages: ChatMessagePage[]; pageParams: unknown[] };
 
-/** Adds a chat message to the loaded thread (newest page), ignoring duplicates. */
+/**
+ * Adds a chat message to the loaded thread, ignoring duplicates. When the thread
+ * holds an older window (the newest pages were let go), it arrives on scrolling down.
+ */
 export function appendChatMessage(queryClient: QueryClient, message: ChatMessageDTO) {
   queryClient.setQueryData<ChatPages>(qk.chat.messages(message.conversationId), (data) => {
-    if (!data?.pages.length) return data;
+    if (!data?.pages.length || data.pages[0]!.hasNewer) return data;
     if (data.pages.some((p) => p.items.some((m) => m.id === message.id))) return data;
     const [first, ...rest] = data.pages;
     return { ...data, pages: [{ ...first!, items: [...first!.items, message] }, ...rest] };

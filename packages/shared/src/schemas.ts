@@ -310,10 +310,15 @@ export const messagesQuerySchema = z.object({
 
 export const startConversationSchema = z.object({ userId: uuid });
 export const chatMessageSchema = z.object({ body: trimmed('Message', CHAT_MESSAGE_MAX) });
-export const chatMessagesQuerySchema = z.object({
-  cursor: z.string().optional(),
-  limit: z.coerce.number().int().min(1).max(100).default(50),
-});
+export const chatMessagesQuerySchema = z
+  .object({
+    /** Older messages than this one (a page's `nextCursor`). */
+    cursor: z.string().optional(),
+    /** Newer messages than this one (a page's `newerCursor`). */
+    after: z.string().optional(),
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+  })
+  .refine((q) => !(q.cursor && q.after), { message: 'Use either cursor or after', path: ['after'] });
 export const todoDoneSchema = z.object({ note: optionalText(2000).optional() });
 export const listTodosQuerySchema = z.object({
   /** `assigned` = tasks given to me; `created` = tasks I gave. */

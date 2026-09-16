@@ -1,5 +1,6 @@
 import AddCommentRounded from '@mui/icons-material/AddCommentRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
+import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
@@ -32,7 +33,7 @@ import {
   ROLES,
   type ChatMessageDTO,
   type ConversationDTO,
-  type CursorPage,
+  type ChatMessagePage,
   type UserRef,
 } from '@god/shared';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -55,7 +56,14 @@ import { ROLE_COLORS } from '@/theme/theme';
 import { SearchField, useIsPhone } from '../admin/adminShared';
 import { TODO_COLORS, TodoDoneDialog, TodoPill, useRefreshTodos } from '../todos/todoShared';
 
-type Pages = { pages: CursorPage<ChatMessageDTO>[]; pageParams: (string | null)[] };
+type PageParam = { cursor: string } | { after: string } | null;
+type Pages = { pages: ChatMessagePage[]; pageParams: PageParam[] };
+
+/** Messages per request, and how many requests' worth a thread keeps in memory. */
+const PAGE_SIZE = 40;
+const WINDOW_PAGES = 5;
+/** How close to either end of the loaded messages scrolling starts loading more. */
+const EDGE_PX = 400;
 
 const PANEL_HEIGHT = { xs: 'calc(100dvh - 150px)', md: 'calc(100vh - 170px)' };
 
@@ -436,14 +444,65 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   const stickToBottom = useRef(true);
 
   const conversation = useQuery({ queryKey: qk.chat.conversation(conversationId), queryFn: () => api.chat.conversation(conversationId) });
-  const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading, error } = useInfiniteQuery({
+  const {
+    data,
+    fetchNextPage,
+    fetchPreviousPage,
+    hasNextPage,
+    hasPreviousPage,
+    isFetchingNextPage,
+    isFetchingPreviousPage,
+    isLoading,
+    error,
+  } = useInfiniteQuery({
     queryKey: qk.chat.messages(conversationId),
-    queryFn: ({ pageParam }) => api.chat.messages(conversationId, pageParam, 50),
-    initialPageParam: null as string | null,
-    getNextPageParam: (last) => last.nextCursor,
+    queryFn: ({ pageParam }) => api.chat.messages(conversationId, { ...pageParam, limit: PAGE_SIZE }),
+    initialPageParam: null as PageParam,
+    // "Next" pages are older messages, "previous" pages newer ones.
+    getNextPageParam: (last) => (last.nextCursor ? { cursor: last.nextCursor } : undefined),
+    getPreviousPageParam: (first) => (first.hasNewer && first.newerCursor ? { after: first.newerCursor } : undefined),
+    // Only a window of messages stays in memory; the far end is let go and reloaded on scrolling back.
+    maxPages: WINDOW_PAGES,
   });
   // Pages are newest-first; each page's items are oldest → newest.
   const messages = useMemo(() => (data ? [...data.pages].reverse().flatMap((p) => p.items) : []), [data]);
+  const fetching = isFetchingNextPage || isFetchingPreviousPage;
+
+  // Back to the latest messages, e.g. after sending from an older window.
+  const jumpToLatest = () => {
+    stickToBottom.current = true;
+    void queryClient.resetQueries({ queryKey: qk.chat.messages(conversationId) });
+  };
+  useEffect(() => {
+    // A window left scrolled up last time: start at the latest messages again.
+    if (queryClient.getQueryData<Pages>(qk.chat.messages(conversationId))?.pages[0]?.hasNewer) jumpToLatest();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversationId]);
+
+  /** The first message on screen and its offset, so loading pages above or dropping them doesn't move the view. */
+  const anchor = useRef<{ id: string; top: number } | null>(null);
+  const captureAnchor = () => {
+    const el = scroller.current;
+    if (!el) return;
+    for (const item of el.querySelectorAll<HTMLElement>('[data-mid]')) {
+      if (item.offsetTop + item.offsetHeight > el.scrollTop) {
+        anchor.current = { id: item.dataset.mid!, top: item.offsetTop - el.scrollTop };
+        return;
+      }
+    }
+  };
+  /** Loads more when the view nears either end of the window. */
+  const loadNearEdges = () => {
+    const el = scroller.current;
+    if (!el || fetching || isLoading) return;
+    if (el.scrollTop < EDGE_PX && hasNextPage) {
+      captureAnchor();
+      void fetchNextPage();
+    } else if (el.scrollHeight - el.scrollTop - el.clientHeight < EDGE_PX && hasPreviousPage) {
+      captureAnchor();
+      void fetchPreviousPage();
+    }
+  };
 
   // Reading: whenever unread messages are on screen and the tab is visible.
   const markRead = useMutation({
@@ -469,7 +528,8 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   const send = useMutation({
     mutationFn: (body: string) => api.chat.send(conversationId, body),
     onSuccess: (message) => {
-      appendChatMessage(queryClient, message);
+      if (hasPreviousPage) jumpToLatest();
+      else appendChatMessage(queryClient, message);
       stickToBottom.current = true;
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
     },
@@ -486,8 +546,18 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
 
   useLayoutEffect(() => {
     const el = scroller.current;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages.length, conversationId]);
+    if (!el) return;
+    const a = anchor.current;
+    anchor.current = null;
+    if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+    else if (a) {
+      const item = el.querySelector<HTMLElement>(`[data-mid="${a.id}"]`);
+      if (item) el.scrollTop = item.offsetTop - a.top;
+    }
+    // A short window may not fill the panel yet.
+    loadNearEdges();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, conversationId]);
 
   const submit = () => {
     const body = draft.trim();
@@ -544,24 +614,20 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
         ref={scroller}
         onScroll={(e) => {
           const el = e.currentTarget;
-          stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          stickToBottom.current = !hasPreviousPage && el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+          loadNearEdges();
         }}
-        sx={{ flex: 1, overflowY: 'auto', px: { xs: 1.5, md: 2.5 }, py: 1.5 }}
+        sx={{ flex: 1, overflowY: 'auto', position: 'relative', px: { xs: 1.5, md: 2.5 }, py: 1.5 }}
       >
-        {hasNextPage && (
-          <Box sx={{ textAlign: 'center', mb: 1 }}>
-            <Button
-              size="small"
-              color="inherit"
-              onClick={() => {
-                stickToBottom.current = false;
-                void fetchNextPage();
-              }}
-              disabled={isFetchingNextPage}
-            >
-              {isFetchingNextPage ? 'Loading…' : 'Load earlier messages'}
-            </Button>
-          </Box>
+        {isFetchingNextPage && (
+          <Stack alignItems="center" sx={{ py: 1 }}>
+            <CircularProgress size={18} aria-label="Loading earlier messages" />
+          </Stack>
+        )}
+        {!isLoading && !hasNextPage && messages.length > 0 && (
+          <Typography variant="caption" color="text.disabled" component="div" sx={{ textAlign: 'center', my: 1 }}>
+            Start of your chat with {c?.other.nickname}
+          </Typography>
         )}
         {isLoading || !c ? (
           <Stack alignItems="center" justifyContent="center" sx={{ height: '100%' }}>
@@ -579,7 +645,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
             const showDay = day !== lastDay;
             lastDay = day;
             return (
-              <Box key={m.id}>
+              <Box key={m.id} data-mid={m.id}>
                 {showDay && (
                   <Typography variant="caption" color="text.secondary" component="div" sx={{ textAlign: 'center', my: 1.5 }}>
                     {inZone(m.createdAt, zone).hasSame(DateTime.now().setZone(zone), 'day') ? 'Today' : inZone(m.createdAt, zone).toFormat('cccc, LLL d')}
@@ -597,7 +663,26 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
             );
           })
         )}
+        {isFetchingPreviousPage && (
+          <Stack alignItems="center" sx={{ py: 1 }}>
+            <CircularProgress size={18} aria-label="Loading newer messages" />
+          </Stack>
+        )}
       </Box>
+
+      {hasPreviousPage && (
+        <Box sx={{ position: 'relative', height: 0 }}>
+          <Button
+            size="small"
+            variant="contained"
+            startIcon={<ArrowDownwardRounded />}
+            onClick={jumpToLatest}
+            sx={{ position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)', borderRadius: 99, boxShadow: 3, zIndex: 2 }}
+          >
+            Jump to latest
+          </Button>
+        </Box>
+      )}
 
       {c && !c.canSend ? (
         <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', textAlign: 'center' }}>

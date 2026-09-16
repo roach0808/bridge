@@ -201,6 +201,15 @@ export interface CursorPage<T> {
   nextCursor: string | null;
 }
 
+/**
+ * A window of chat messages, oldest → newest. `nextCursor` loads older ones;
+ * `newerCursor` (with `after`) loads newer ones while `hasNewer` is true.
+ */
+export interface ChatMessagePage extends CursorPage<ChatMessageDTO> {
+  newerCursor: string | null;
+  hasNewer: boolean;
+}
+
 export type NotificationType =
   | 'call.status_changed'
   | 'call.assigned'

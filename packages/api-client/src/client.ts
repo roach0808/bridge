@@ -2,6 +2,7 @@ import type {
   AuditEntryDTO,
   AuthResponse,
   ChatMessageDTO,
+  ChatMessagePage,
   ConversationDTO,
   DbDumpDTO,
   TodoDTO,
@@ -189,8 +190,9 @@ export function createApiClient(options: ClientOptions) {
       conversation: (id: string) => get<ConversationDTO>(`/chat/conversations/${enc(id)}`),
       /** Opens (or creates) the one-to-one chat with a user. */
       start: (userId: string) => post<ConversationDTO>('/chat/conversations', { userId }),
-      messages: (id: string, cursor?: string | null, limit?: number) =>
-        get<CursorPage<ChatMessageDTO>>(`/chat/conversations/${enc(id)}/messages`, { cursor, limit }),
+      /** `cursor` loads older messages, `after` newer ones; neither loads the latest. */
+      messages: (id: string, query: { cursor?: string | null; after?: string | null; limit?: number } = {}) =>
+        get<ChatMessagePage>(`/chat/conversations/${enc(id)}/messages`, query),
       send: (id: string, body: string) => post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { body }),
       markRead: (id: string) => post<void>(`/chat/conversations/${enc(id)}/read`),
       makeTodo: (messageId: string) => post<TodoDTO>(`/chat/messages/${enc(messageId)}/todo`),

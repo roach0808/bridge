@@ -8,8 +8,8 @@ import {
   startConversationSchema,
   todoDoneSchema,
   type ChatMessageDTO,
+  type ChatMessagePage,
   type ConversationDTO,
-  type CursorPage,
   type Role,
   type ServerToClientEvents,
   type TodoDTO,
@@ -225,30 +225,54 @@ function decodeCursor(cursor: string): { createdAt: Date; id: string } {
   return { createdAt, id };
 }
 
-/** Newest page first; items inside a page are oldest → newest for display. */
+/**
+ * A page of messages, oldest → newest. Without cursors: the latest ones.
+ * `cursor`: the ones just before it (scrolling up). `after`: the ones just after it
+ * (scrolling back down once the client has let go of the newest pages).
+ */
 chatRouter.get('/chat/conversations/:id/messages', async (req, res) => {
   const c = await loadConversation(actorOf(req), idParam(req));
-  const { cursor, limit } = parseQuery(chatMessagesQuerySchema, req);
-  const before = cursor ? decodeCursor(cursor) : null;
+  const { cursor, after, limit } = parseQuery(chatMessagesQuerySchema, req);
+  const body: ChatMessagePage = after ? await messagesAfter(c.id, decodeCursor(after), limit) : await messagesBefore(c.id, cursor ? decodeCursor(cursor) : null, limit);
+  res.json(body);
+});
+
+async function messagesBefore(conversationId: string, before: { createdAt: Date; id: string } | null, limit: number): Promise<ChatMessagePage> {
   const rows = await prisma.chatMessage.findMany({
     where: {
-      conversationId: c.id,
-      ...(before
-        ? { OR: [{ createdAt: { lt: before.createdAt } }, { createdAt: before.createdAt, id: { lt: before.id } }] }
-        : {}),
+      conversationId,
+      ...(before ? { OR: [{ createdAt: { lt: before.createdAt } }, { createdAt: before.createdAt, id: { lt: before.id } }] } : {}),
     },
     include: messageInclude,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
   });
-  const hasMore = rows.length > limit;
-  const page = rows.slice(0, limit);
-  const body: CursorPage<ChatMessageDTO> = {
-    items: page.reverse().map(toMessageDTO),
-    nextCursor: hasMore ? encodeCursor(page[0]!) : null,
+  const page = rows.slice(0, limit).reverse();
+  return {
+    items: page.map(toMessageDTO),
+    nextCursor: rows.length > limit ? encodeCursor(page[0]!) : null,
+    newerCursor: page.length ? encodeCursor(page.at(-1)!) : null,
+    // Anything before a cursor has at least the cursor's message after it.
+    hasNewer: before !== null,
   };
-  res.json(body);
-});
+}
+
+async function messagesAfter(conversationId: string, after: { createdAt: Date; id: string }, limit: number): Promise<ChatMessagePage> {
+  const rows = await prisma.chatMessage.findMany({
+    where: { conversationId, OR: [{ createdAt: { gt: after.createdAt } }, { createdAt: after.createdAt, id: { gt: after.id } }] },
+    include: messageInclude,
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    take: limit + 1,
+  });
+  const page = rows.slice(0, limit);
+  return {
+    items: page.map(toMessageDTO),
+    // The `after` message itself is older than this page.
+    nextCursor: page.length ? encodeCursor(page[0]!) : encodeCursor(after),
+    newerCursor: page.length ? encodeCursor(page.at(-1)!) : null,
+    hasNewer: rows.length > limit,
+  };
+}
 
 chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   const actor = actorOf(req);
