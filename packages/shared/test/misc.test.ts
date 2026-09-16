@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AVATAR_CATALOG,
   canChat,
+  expectedPrice,
+  transitionSchema,
   stagesForRole,
   statusFilterForRole,
   statusForRole,
@@ -118,9 +120,19 @@ describe('schemas', () => {
     expect(updateCallSchema.safeParse({}).success).toBe(false);
   });
 
-  it('updateCallSchema upper-cases currency and validates format', () => {
-    expect(updateCallSchema.parse({ invoiceCurrency: 'usd' }).invoiceCurrency).toBe('USD');
-    expect(updateCallSchema.safeParse({ invoiceCurrency: 'US' }).success).toBe(false);
+  it('real income is a non-negative amount with cents, required to process a call to bank', () => {
+    expect(updateCallSchema.parse({ realIncome: '942.50' }).realIncome).toBe(942.5);
+    expect(updateCallSchema.safeParse({ realIncome: -1 }).success).toBe(false);
+    expect(updateCallSchema.safeParse({ realIncome: 1.234 }).success).toBe(false);
+    expect(transitionSchema.safeParse({ to: 'process_to_bank' }).success).toBe(false);
+    expect(transitionSchema.safeParse({ to: 'process_to_bank', realIncome: 0 }).success).toBe(true);
+  });
+
+  it('expected price is the hourly rate for the real minutes, in cents', () => {
+    expect(expectedPrice(1200, 45)).toBe(900);
+    expect(expectedPrice(1000, 7)).toBe(116.67);
+    expect(expectedPrice(null, 30)).toBeNull();
+    expect(expectedPrice(900, null)).toBeNull();
   });
 
   it.each([
