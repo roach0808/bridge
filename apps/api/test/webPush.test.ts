@@ -79,7 +79,7 @@ describe('browser push', () => {
     await founder.post(`/chat/messages/${msg.id}/todo`);
     await waitForPush(2);
     expect(sent.calls.map((c) => c.payload)).toContainEqual(
-      expect.objectContaining({ title: 'Founder gave you a to-do', body: 'Update your calendar', url: '/todos', kind: 'notification' }),
+      expect.objectContaining({ title: 'Founder gave you a task', body: 'Update your calendar', url: '/todos', kind: 'notification' }),
     );
   });
 

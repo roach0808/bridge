@@ -1,55 +1,82 @@
+import AddTaskRounded from '@mui/icons-material/AddTaskRounded';
 import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
+import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import { Box, Button, Card, CardContent, Skeleton, Stack, Tab, Tabs, Tooltip, Typography } from '@mui/material';
-import type { TodoDTO, TodoStatus } from '@god/shared';
-import { useQuery } from '@tanstack/react-query';
+import type { TodoDTO } from '@god/shared';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { BrowserNotificationsPrompt } from '@/components/BrowserNotifications';
+import { useToast } from '@/components/ToastProvider';
 import { EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { UserChip } from '@/components/identity';
 import { api } from '@/lib/api';
+import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { formatDateTime, relativeTime } from '@/lib/time';
 import { FilterChips } from '../admin/adminShared';
-import { TODO_COLORS, TodoDoneDialog, TodoPill } from './todoShared';
+import { NewTaskDialog, TODO_COLORS, TodoDoneDialog, TodoPill, TodoReopenDialog, todoText, useRefreshTodos } from './todoShared';
 
 type Scope = 'assigned' | 'created';
-type Filter = 'all' | TodoStatus;
+/** `active` = not completed yet, the default view. */
+type Filter = 'active' | 'open' | 'done' | 'completed' | 'all';
+
+const FILTER_LABELS: Record<Filter, string> = {
+  active: 'Active',
+  open: 'Open',
+  done: 'Waiting for confirmation',
+  completed: 'Completed',
+  all: 'All',
+};
+
+const matches = (t: TodoDTO, f: Filter) => (f === 'all' ? true : f === 'active' ? t.status !== 'completed' : t.status === f);
 
 export default function TodosPage() {
   const me = useMe();
-  const isFounder = me.role === 'founder';
-  const [scope, setScope] = useState<Scope>(isFounder ? 'created' : 'assigned');
-  const [filter, setFilter] = useState<Filter>('open');
+  const gives = me.role === 'founder' || me.role === 'manager';
+  const [params, setParams] = useSearchParams();
+  const scope: Scope = gives && (params.get('scope') ?? (me.role === 'founder' ? 'created' : 'assigned')) === 'created' ? 'created' : 'assigned';
+  const setScope = (s: Scope) => setParams((p) => ({ ...Object.fromEntries(p), scope: s }), { replace: true });
+  const [filter, setFilter] = useState<Filter>('active');
   const [doneFor, setDoneFor] = useState<TodoDTO | null>(null);
+  const [reopenFor, setReopenFor] = useState<TodoDTO | null>(null);
+  const [creating, setCreating] = useState(false);
 
   const query = useQuery({
-    queryKey: qk.todos.list({ scope }),
-    queryFn: () => api.todos.list({ scope }),
+    queryKey: qk.todos.list({ scope, status: 'all' }),
+    queryFn: () => api.todos.list({ scope, status: 'all' }),
   });
   const all = query.data ?? [];
-  const counts = { all: all.length, open: all.filter((t) => t.status === 'open').length, done: all.filter((t) => t.status === 'done').length };
-  const visible = all.filter((t) => filter === 'all' || t.status === filter);
+  const visible = all.filter((t) => matches(t, filter));
 
   return (
     <Box>
       <PageHeader
-        title="To-dos"
+        title="Tasks"
         subtitle={
           scope === 'created'
-            ? 'Instructions you turned into to-dos in chat, and whether they are done.'
-            : 'Instructions from the Founder. Marking one done replies to it in the chat.'
+            ? 'Tasks you gave. Confirm the ones marked done to complete them.'
+            : 'Tasks given to you. Mark them done when finished; the person who gave them confirms.'
+        }
+        actions={
+          gives && (
+            <Button variant="contained" startIcon={<AddTaskRounded />} onClick={() => setCreating(true)}>
+              New task
+            </Button>
+          )
         }
       />
 
       <BrowserNotificationsPrompt />
 
-      {isFounder && (
+      {gives && (
         <Tabs value={scope} onChange={(_, v: Scope) => setScope(v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }}>
-          <Tab value="created" label="Assigned by me" />
+          <Tab value="created" label="Given by me" />
           <Tab value="assigned" label="Assigned to me" />
         </Tabs>
       )}
@@ -59,10 +86,10 @@ export default function TodosPage() {
           ariaLabel="Filter by status"
           value={filter}
           onChange={setFilter}
-          options={(['open', 'done', 'all'] as const).map((f) => ({
+          options={(['active', 'open', 'done', 'completed', 'all'] as const).map((f) => ({
             value: f,
-            label: f === 'open' ? 'Open' : f === 'done' ? 'Done' : 'All',
-            count: query.data ? counts[f] : undefined,
+            label: FILTER_LABELS[f],
+            count: query.data ? all.filter((t) => matches(t, f)).length : undefined,
           }))}
         />
       </Box>
@@ -78,39 +105,62 @@ export default function TodosPage() {
       ) : visible.length === 0 ? (
         <Card>
           <EmptyState
-            icon={filter === 'done' ? <TaskAltRounded /> : <ChecklistRounded />}
-            title={filter === 'open' ? (scope === 'created' ? 'Nothing waiting' : 'You’re all caught up') : 'No to-dos here'}
+            icon={filter === 'completed' ? <VerifiedRounded /> : <ChecklistRounded />}
+            title={filter === 'active' || filter === 'open' ? (scope === 'created' ? 'Nothing waiting' : 'You’re all caught up') : 'No tasks here'}
             description={
               scope === 'created'
-                ? 'In a chat, open a message’s menu and choose “Mark as to-do”.'
-                : 'When the Founder marks a chat message as a to-do for you, it shows up here.'
+                ? 'Use “New task”, or in a chat open a message’s menu and choose “Give as task”.'
+                : 'When someone gives you a task, it shows up here.'
             }
           />
         </Card>
       ) : (
         <Stack spacing={1.5}>
           {visible.map((t) => (
-            <TodoCard key={t.id} todo={t} scope={scope} onDone={() => setDoneFor(t)} />
+            <TodoCard key={t.id} todo={t} scope={scope} onDone={() => setDoneFor(t)} onReopen={() => setReopenFor(t)} />
           ))}
         </Stack>
       )}
 
       <TodoDoneDialog
-        todo={doneFor ? { id: doneFor.id, conversationId: doneFor.conversationId, instruction: doneFor.message.body } : null}
+        todo={doneFor ? { id: doneFor.id, conversationId: doneFor.conversationId, instruction: todoText(doneFor) } : null}
         onClose={() => setDoneFor(null)}
       />
+      <TodoReopenDialog todo={reopenFor} onClose={() => setReopenFor(null)} />
+      <NewTaskDialog open={creating} onClose={() => setCreating(false)} />
     </Box>
   );
 }
 
-function TodoCard({ todo: t, scope, onDone }: { todo: TodoDTO; scope: Scope; onDone: () => void }) {
+function TodoCard({ todo: t, scope, onDone, onReopen }: { todo: TodoDTO; scope: Scope; onDone: () => void; onReopen: () => void }) {
   const me = useMe();
   const { zone } = useAuth();
+  const toast = useToast();
+  const refresh = useRefreshTodos();
   const navigate = useNavigate();
   const person = scope === 'created' ? t.assignee : t.createdBy;
+  const iGave = t.createdBy.id === me.id;
+  const finished = t.status !== 'open';
+
+  const confirm = useMutation({
+    mutationFn: () => api.todos.confirm(t.id),
+    onSuccess: (saved) => {
+      refresh(saved);
+      toast.success('Completed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.todos.remove(t.id),
+    onSuccess: () => {
+      refresh(t);
+      toast.success('Task removed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
 
   return (
-    <Card sx={{ borderLeft: 4, borderLeftColor: TODO_COLORS[t.status] }}>
+    <Card sx={{ borderLeft: 4, borderLeftColor: TODO_COLORS[t.status], opacity: t.status === 'completed' ? 0.8 : 1 }}>
       <CardContent sx={{ p: 2, '&:last-child': { pb: 2 } }}>
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} justifyContent="space-between" alignItems={{ sm: 'flex-start' }}>
           <Box sx={{ minWidth: 0, flex: 1 }}>
@@ -124,29 +174,58 @@ function TodoCard({ todo: t, scope, onDone }: { todo: TodoDTO; scope: Scope; onD
             </Stack>
             <Typography
               variant="body1"
-              sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', textDecoration: t.status === 'done' ? 'line-through' : 'none', color: t.status === 'done' ? 'text.secondary' : 'text.primary' }}
+              sx={{
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                fontWeight: t.title ? 600 : 400,
+                textDecoration: t.status === 'completed' ? 'line-through' : 'none',
+                color: finished ? 'text.secondary' : 'text.primary',
+              }}
             >
-              {t.message.body}
+              {todoText(t)}
             </Typography>
-            {t.status === 'done' && (
+            {t.details && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {t.details}
+              </Typography>
+            )}
+            {finished && (
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
                 Done {t.doneAt ? relativeTime(t.doneAt) : ''}
                 {t.doneNote ? ` — “${t.doneNote}”` : ''}
+                {t.confirmedAt ? ` · confirmed ${relativeTime(t.confirmedAt)}` : ''}
               </Typography>
             )}
             <Box sx={{ mt: 1.25 }}>
               <UserChip user={person} size={22} subtitle={scope === 'created' ? 'Assigned to' : 'From'} />
             </Box>
           </Box>
-          <Stack direction={{ xs: 'row', sm: 'column' }} spacing={1} alignItems={{ sm: 'flex-end' }} sx={{ flexShrink: 0 }}>
+          <Stack direction={{ xs: 'row', sm: 'column' }} spacing={1} alignItems={{ sm: 'flex-end' }} sx={{ flexShrink: 0, flexWrap: 'wrap' }} useFlexGap>
             {t.status === 'open' && t.assignee.id === me.id && (
               <Button variant="contained" color="success" startIcon={<TaskAltRounded />} onClick={onDone}>
                 Mark done
               </Button>
             )}
-            <Button color="inherit" startIcon={<ChatBubbleOutlineRounded />} onClick={() => navigate(`/chat/${t.conversationId}`)} sx={{ color: 'text.secondary' }}>
-              Open chat
-            </Button>
+            {t.status === 'done' && iGave && (
+              <Button variant="contained" color="success" startIcon={<VerifiedRounded />} onClick={() => confirm.mutate()} disabled={confirm.isPending}>
+                Confirm
+              </Button>
+            )}
+            {finished && iGave && (
+              <Button color="inherit" startIcon={<ReplayRounded />} onClick={onReopen} sx={{ color: 'text.secondary' }}>
+                Reopen
+              </Button>
+            )}
+            {t.status === 'open' && iGave && (
+              <Button color="inherit" startIcon={<DeleteOutlineRounded />} onClick={() => remove.mutate()} disabled={remove.isPending} sx={{ color: 'text.secondary' }}>
+                Remove
+              </Button>
+            )}
+            {t.conversationId && (
+              <Button color="inherit" startIcon={<ChatBubbleOutlineRounded />} onClick={() => navigate(`/chat/${t.conversationId}`)} sx={{ color: 'text.secondary' }}>
+                Open chat
+              </Button>
+            )}
           </Stack>
         </Stack>
       </CardContent>

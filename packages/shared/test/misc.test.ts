@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AVATAR_CATALOG,
   canChat,
+  canGiveTask,
   expectedPrice,
   transitionSchema,
   stagesForRole,
@@ -177,6 +178,27 @@ describe('canChat', () => {
   });
   it('nobody chats with themselves', () => {
     expect(canChat(u('a', 'founder'), u('a', 'founder'))).toBe(false);
+  });
+});
+
+describe('canGiveTask', () => {
+  it('the founder gives tasks to anyone but themselves', () => {
+    for (const role of ['founder', 'manager', 'associate', 'expert'] as const) {
+      expect(canGiveTask({ id: 'f', role: 'founder' }, { id: 'x', role })).toBe(true);
+    }
+    expect(canGiveTask({ id: 'f', role: 'founder' }, { id: 'f', role: 'founder' })).toBe(false);
+  });
+  it('a manager gives tasks only to associates on their team', () => {
+    const m = { id: 'm', role: 'manager' as const };
+    expect(canGiveTask(m, { id: 'a', role: 'associate', managerId: 'm' })).toBe(true);
+    expect(canGiveTask(m, { id: 'a', role: 'associate', managerId: 'other' })).toBe(false);
+    expect(canGiveTask(m, { id: 'a', role: 'associate', managerId: null })).toBe(false);
+    expect(canGiveTask(m, { id: 'm2', role: 'manager' })).toBe(false);
+    expect(canGiveTask(m, { id: 'e', role: 'expert', managerId: 'm' })).toBe(false);
+  });
+  it('associates and experts give no tasks', () => {
+    expect(canGiveTask({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate', managerId: 'a' })).toBe(false);
+    expect(canGiveTask({ id: 'e', role: 'expert' }, { id: 'f', role: 'founder' })).toBe(false);
   });
 });
 

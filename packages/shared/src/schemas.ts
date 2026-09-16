@@ -316,9 +316,15 @@ export const chatMessagesQuerySchema = z.object({
 });
 export const todoDoneSchema = z.object({ note: optionalText(2000).optional() });
 export const listTodosQuerySchema = z.object({
-  /** `assigned` = to-dos assigned to me; `created` = to-dos I (a Founder) created. */
+  /** `assigned` = tasks given to me; `created` = tasks I gave. */
   scope: z.enum(['assigned', 'created']).default('assigned'),
-  status: z.enum(TODO_STATUSES).optional(),
+  /** `active` (the default) is everything not yet completed. */
+  status: z.enum([...TODO_STATUSES, 'active', 'all']).default('active'),
+});
+export const createTodoSchema = z.object({
+  assigneeId: uuid,
+  title: trimmed('Title', 200),
+  details: optionalText(5000).optional(),
 });
 
 // --- Audit trail ----------------------------------------------------------------

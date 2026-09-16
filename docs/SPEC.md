@@ -106,7 +106,7 @@ grouped under Managers; they are assigned per Call.
 | Run / download a database dump | ✓ | | | |
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders only |
-| Turn a chat message into a to-do | ✓ | | | |
+| Give tasks (chat message or New task) | ✓ anyone | ✓ own-team Associates | | |
 | View audit history | ✓ | ✓ (own team) | own | assigned (without invoicing steps) |
 
 "override" means the role may perform the transition on behalf of the normal
@@ -353,7 +353,7 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 |---|---|---|
 | id | uuid | |
 | user_id | uuid → User | |
-| type | text | call.status_changed, call.assigned, call.created, call.updated, call.message, todo.assigned, todo.done, profile.submitted, profile.approved, profile.rejected |
+| type | text | call.status_changed, call.assigned, call.created, call.updated, call.message, todo.assigned, todo.done, todo.completed, todo.reopened, profile.submitted, profile.approved, profile.rejected |
 | payload | jsonb | callId, conversationId, todoId, profileId, from, to, actor nickname + role, summary |
 | read_at | timestamptz, nullable | |
 | created_at | timestamptz | |
@@ -385,7 +385,9 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | Field | Type | Notes |
 |---|---|---|
 | id | uuid | |
-| message_id | uuid → ChatMessage, unique | The chat message the Founder turned into a to-do |
+| message_id | uuid → ChatMessage, nullable, unique | The chat message the task was made from (null for a standalone task) |
+| title, details | text, nullable | A standalone task's title (required when there is no message) and details |
+| confirmed_at | timestamptz, nullable | When the giver confirmed it; set exactly when status = completed |
 | conversation_id | uuid → Conversation | |
 | assignee_id | uuid → User | The other person in the chat |
 | created_by | uuid → User (Founder) | |
@@ -944,7 +946,7 @@ Profile responses carry `photoId`, and for the Founder `bankCount` and
   the number of booked calls and the next upcoming one.
 - `database`: current database size and per-table sizes.
 
-### 6.11 Chat and to-dos **[Implementation]**
+### 6.11 Chat and tasks **[Implementation]**
 
 One-to-one chats. Who may chat with whom (`canChat` in
 `packages/shared/src/chat.ts`, enforced by the API):
@@ -966,10 +968,15 @@ Associates from before this rule) stays readable, with `canSend: false`.
 | GET | /chat/conversations/:id/messages | the two people | Cursor paginated like call messages. Each message: { id, sender, body, kind, replyTo, todo, createdAt } |
 | POST | /chat/conversations/:id/messages | the two people | { body }. 403 when the other person is inactive or no longer allowed (`canSend: false`) |
 | POST | /chat/conversations/:id/read | the two people | Marks the chat read (204) |
-| POST | /chat/messages/:id/todo | Founder in that chat | Turns any regular message in the chat into a to-do for the other person; they get `todo.assigned`. 409 if already a to-do |
-| DELETE | /chat/messages/:id/todo | Founder in that chat | Removes an open to-do. 409 once done |
-| GET | /todos | all | Query: scope = assigned (mine, default) \| created (Founder: the ones I gave out), status. Open first |
-| POST | /todos/:id/done | the assignee | { note? }. Marks it done and posts a `todo_done` reply to the to-do's message in the chat (body = note or "Done"); the Founder gets `todo.done` |
+| POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`). Founder → anyone, Manager → own-team Associates; 403 otherwise, 409 if already a task. Conversations carry `canGiveTask` |
+| DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
+| GET | /todos/assignees | Founder, Manager | People the caller may give a task to |
+| POST | /todos | Founder, Manager | { assigneeId, title, details? }: a task without a chat message |
+| DELETE | /todos/:id | the giver | Removes an open task |
+| GET | /todos | giver or taker | Query: scope = assigned (default) \| created (Founders and Managers), status = active (default: open + done) \| open \| done \| completed \| all. Open first |
+| POST | /todos/:id/done | the taker | { note? }. open → done; for a chat task posts a `todo_done` reply (body = note or "Done"). The giver gets `todo.done` |
+| POST | /todos/:id/confirm | the giver | done → completed (`confirmed_at`); the taker gets `todo.completed`. Completed tasks leave the default list |
+| POST | /todos/:id/reopen | the giver | { note? }. done or completed → open, clearing the done state; the taker gets `todo.reopened` |
 
 Sending a message counts as reading the chat. A chat message is pushed to the
 other person's browsers (§7.5); it does not create a bell notification.
@@ -1027,7 +1034,7 @@ the database is unreachable.
 | presence:update | user:{id} | `PresenceDTO[]`: who came online, went away or left (§7.6) |
 | session:revoked | user:{id} | Sent before a deactivated user's sockets are dropped |
 | chat:message | both people's user rooms | ChatMessage |
-| chat:todo | both people's user rooms | Todo, or { id, conversationId, messageId, removed: true } |
+| chat:todo | giver's and taker's user rooms | Todo, or { id, conversationId, messageId, removed: true } (ids null for standalone tasks) |
 | chat:read | both people's user rooms | { conversationId, userId, readAt } |
 
 **[Implementation]** `call:updated` goes to each participant's `user:{id}`
@@ -1128,8 +1135,8 @@ Everyone sees whether the people they may chat with are at their screen.
 | New Call | Founder, Manager, Associate | Required fields are marked with *. In this order: Profile (approved and active only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. Saving asks for confirmation when the time is today, in the past, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
 | Profiles | all | Cards with a details window (personal details, history; platform statuses for everyone but Experts; for the Founder a private section with the current address and banks). Founders add profiles (approved at once), review Associate submissions, upload photos, manage banks, deactivate a Profile ("Needs bank" and "Deactivated" filters) and by default see a table of every Profile against every platform, editable in place. Associates submit profiles for review. Experts see the Profiles of their calls |
-| Chat | all | Chat list (search, unread counts, open to-do marker) beside the conversation; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders open a message's menu to mark it as a to-do; the assignee gets a "Mark done" button on it |
-| To-dos | all | My to-dos (open / done / all) with "Mark done" (optional note, posted as the chat reply) and "Open chat". Founders also have "Assigned by me" with the done notes |
+| Chat | all | Chat list (search, unread counts, open to-do marker) beside the conversation; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
+| Tasks | all | Assigned to me / Given by me (Founders, Managers) with filters Active / Open / Waiting for confirmation / Completed / All. "Mark done" (optional note), "Confirm", "Reopen" (optional note), "Remove" while open, "New task" |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create, deactivate |
 | Users | Founder | All users, create any role |
@@ -1147,7 +1154,7 @@ the database size.
 
 - Every list subscribes to `call:updated` and patches the TanStack Query cache;
   chat and to-do screens follow `chat:message`, `chat:todo` and `chat:read`.
-- The sidebar shows unread chat messages on Chat and open to-dos on To-dos.
+- The sidebar shows unread chat messages on Chat, and on Tasks the open tasks given to me plus done tasks I gave that wait for my confirmation.
 - Transition buttons are disabled while a request is in flight; a 409 refreshes
   the Call and shows the reason.
 - Time zones. Experts see every time in their own zone. Everyone else sees
@@ -1372,7 +1379,7 @@ Container alternative:
 5. Does one Call ever involve more than one Expert?
 6. Should Managers also be able to add Profiles, and to change platform
    statuses? (Currently: Associates submit, Founders approve and set statuses.)
-7. Can a done to-do be reopened? (Currently: no; open ones can be removed.)
+7. ~~Can a done to-do be reopened?~~ Yes: the giver reopens done or completed tasks.
 
 ---
 
@@ -1390,7 +1397,7 @@ Container alternative:
 | Ninja link | The VDO.Ninja meeting link the Expert adds when a call starts |
 | Platform status | A Profile's standing on an expert network platform: not registered, registered or banned |
 | Conversation | A one-to-one chat between two users |
-| To-do | A chat message a Founder assigned to the other person; marking it done replies in the chat |
+| Task (to-do) | Work given by someone above you (Founder → anyone, Manager → own-team Associates), from a chat message or New task. The taker marks it done, the giver confirms it: completed |
 
 ## Appendix B. Change log
 
@@ -1415,3 +1422,4 @@ Container alternative:
 | 2026-09-15 | Each Profile has a rate per expert network platform (USD per hour, default 1000), set by the Founder and hidden from Experts; finishing a call now asks the Expert only for the real duration |
 | 2026-09-16 | Presence (online / away / offline with "last seen") for everyone you may chat with. Nightly database dumps, kept for 7 days, with Run now and Download on the Founder dashboard. Profiles can be deactivated: Founder-only visibility and unbookable. A platform rate is now required only when a Profile is marked registered and stays editable, and one Call can carry a special rate. New `gpt_link` on a Call, readable only by the Founder and the Expert. Associates can change the Expert for the whole scheduling stage. Required fields marked on the New Call form |
 | 2026-09-15 | Chat narrowed: no chats between Associates or between Experts. Experts chat only with Founders; Managers with Founders, Managers and Associates; Associates with Founders and Managers. Older chats that are no longer allowed are read-only |
+| 2026-09-16 | Tasks: Founders give tasks to anyone, Managers to Associates on their own team, from a chat message or with New task. The taker marks a task done, the giver confirms it (completed, hidden from the default list) or reopens it |

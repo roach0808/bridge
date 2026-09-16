@@ -5,6 +5,7 @@ import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
+import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import {
   Badge,
   Box,
@@ -52,7 +53,7 @@ import { usePresence } from '@/realtime/PresenceProvider';
 import { appendChatMessage } from '@/realtime/RealtimeProvider';
 import { ROLE_COLORS } from '@/theme/theme';
 import { SearchField, useIsPhone } from '../admin/adminShared';
-import { TODO_COLORS, TodoDoneDialog, TodoPill } from '../todos/todoShared';
+import { TODO_COLORS, TodoDoneDialog, TodoPill, useRefreshTodos } from '../todos/todoShared';
 
 type Pages = { pages: CursorPage<ChatMessageDTO>[]; pageParams: (string | null)[] };
 
@@ -62,7 +63,7 @@ function previewOf(c: ConversationDTO, meId: string): string {
   const m = c.lastMessage;
   if (!m) return 'No messages yet';
   const prefix = m.senderId === meId ? 'You: ' : '';
-  return m.kind === 'todo_done' ? `${prefix}✓ Marked a to-do done` : `${prefix}${m.body}`;
+  return m.kind === 'todo_done' ? `${prefix}✓ Marked a task done` : `${prefix}${m.body}`;
 }
 
 function shortTime(iso: string, zone: string): string {
@@ -225,7 +226,7 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                       {previewOf(c, me.id)}
                     </Typography>
                     {c.openTodoCount > 0 && (
-                      <Tooltip title={`${c.openTodoCount} open to-do${c.openTodoCount === 1 ? '' : 's'}`}>
+                      <Tooltip title={`${c.openTodoCount} open task${c.openTodoCount === 1 ? '' : 's'}`}>
                         <ChecklistRounded sx={{ fontSize: 15, color: TODO_COLORS.open }} />
                       </Tooltip>
                     )}
@@ -261,7 +262,7 @@ function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conve
     mutationFn: () => api.chat.makeTodo(message.id),
     onSuccess: () => {
       refresh();
-      toast.success(`Added to ${conversation.other.nickname}'s to-do list`);
+      toast.success(`Task given to ${conversation.other.nickname}`);
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
@@ -269,13 +270,14 @@ function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conve
     mutationFn: () => api.chat.removeTodo(message.id),
     onSuccess: () => {
       refresh();
-      toast.success('Removed from the to-do list');
+      toast.success('Task removed');
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
 
-  const canMake = !message.todo && conversation.other.isActive;
-  const canRemove = message.todo?.status === 'open';
+  const me = useMe();
+  const canMake = !message.todo && conversation.canGiveTask;
+  const canRemove = message.todo?.status === 'open' && message.todo.createdBy.id === me.id;
   if (!canMake && !canRemove) return null;
   return (
     <>
@@ -297,7 +299,7 @@ function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conve
             }}
           >
             <ChecklistRounded fontSize="small" sx={{ mr: 1.25, color: TODO_COLORS.open }} />
-            Mark as to-do for {conversation.other.nickname}
+            Give as task to {conversation.other.nickname}
           </MenuItem>
         )}
         {canRemove && (
@@ -307,11 +309,29 @@ function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conve
               remove.mutate();
             }}
           >
-            Remove to-do
+            Remove task
           </MenuItem>
         )}
       </Menu>
     </>
+  );
+}
+
+function ConfirmTaskButton({ todoId, conversationId }: { todoId: string; conversationId: string }) {
+  const toast = useToast();
+  const refresh = useRefreshTodos();
+  const confirm = useMutation({
+    mutationFn: () => api.todos.confirm(todoId),
+    onSuccess: () => {
+      refresh({ conversationId });
+      toast.success('Task completed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  return (
+    <Button size="small" variant="outlined" color="success" startIcon={<VerifiedRounded />} onClick={() => confirm.mutate()} disabled={confirm.isPending} sx={{ height: 24, fontSize: 12, py: 0 }}>
+      Confirm
+    </Button>
   );
 }
 
@@ -366,7 +386,7 @@ function MessageBubble({
               <>
                 <Stack direction="row" spacing={0.5} alignItems="center" sx={{ color: TODO_COLORS.done, fontWeight: 600, mb: 0.5 }}>
                   <TaskAltRounded sx={{ fontSize: 16 }} />
-                  <span>Marked the to-do done</span>
+                  <span>Marked the task done</span>
                 </Stack>
                 {m.replyTo && (
                   <Box sx={{ pl: 1, mb: m.body !== 'Done' ? 0.75 : 0, borderLeft: 2, borderColor: 'divider', color: 'text.secondary', fontSize: '0.8rem' }}>
@@ -391,6 +411,7 @@ function MessageBubble({
                   Mark done
                 </Button>
               )}
+              {todo.status === 'done' && todo.createdBy.id === me.id && <ConfirmTaskButton todoId={todo.id} conversationId={m.conversationId} />}
             </>
           )}
           <Typography variant="caption" color="text.disabled">
@@ -399,7 +420,7 @@ function MessageBubble({
           </Typography>
         </Stack>
       </Box>
-      {me.role === 'founder' && m.kind === 'text' && <MessageMenu message={m} conversation={conversation} />}
+      {m.kind === 'text' && <MessageMenu message={m} conversation={conversation} />}
     </Stack>
   );
 }
@@ -510,7 +531,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
                 <PresenceText userId={c.other.id} />
                 {c.openTodoCount > 0 && (
                   <Typography variant="caption" sx={{ color: TODO_COLORS.open, fontWeight: 600 }}>
-                    {c.openTodoCount} open to-do{c.openTodoCount === 1 ? '' : 's'}
+                    {c.openTodoCount} open task{c.openTodoCount === 1 ? '' : 's'}
                   </Typography>
                 )}
               </Stack>
@@ -550,7 +571,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
           <EmptyState
             icon={<ChatBubbleOutlineRounded />}
             title={`Say hello to ${c.other.nickname}`}
-            description={me.role === 'founder' ? 'Tip: open a message’s menu to turn it into a to-do.' : undefined}
+            description={me.role === 'founder' || me.role === 'manager' ? 'Tip: open a message’s menu to give it as a task.' : undefined}
           />
         ) : (
           messages.map((m) => {

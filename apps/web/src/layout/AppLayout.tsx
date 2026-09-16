@@ -122,17 +122,24 @@ function useNotificationNavigation() {
   }, [navigate]);
 }
 
-/** Unread chat messages and open to-dos assigned to me, for the sidebar badges. */
+/** Unread chat messages, and tasks waiting on me (open ones I was given, done ones I gave), for the sidebar badges. */
 function useNavBadges(): Record<NonNullable<NavItem['badge']>, number> {
   const conversations = useQuery({ queryKey: qk.chat.conversations, queryFn: api.chat.conversations, refetchInterval: 120_000 });
+  const me = useMe();
   const todos = useQuery({
     queryKey: qk.todos.list({ scope: 'assigned', status: 'open' }),
     queryFn: () => api.todos.list({ scope: 'assigned', status: 'open' }),
     refetchInterval: 120_000,
   });
+  const toConfirm = useQuery({
+    queryKey: qk.todos.list({ scope: 'created', status: 'done' }),
+    queryFn: () => api.todos.list({ scope: 'created', status: 'done' }),
+    refetchInterval: 120_000,
+    enabled: me.role === 'founder' || me.role === 'manager',
+  });
   return {
     chat: (conversations.data ?? []).reduce((n, c) => n + c.unreadCount, 0),
-    todos: todos.data?.length ?? 0,
+    todos: (todos.data?.length ?? 0) + (toConfirm.data?.length ?? 0),
   };
 }
 

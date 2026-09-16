@@ -19,7 +19,21 @@ export function canChat(a: { id: string; role: Role }, b: { id: string; role: Ro
 export const CHAT_MESSAGE_KINDS = ['text', 'todo_done'] as const;
 export type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
 
-export const TODO_STATUSES = ['open', 'done'] as const;
+/** open → done (the taker ticks it) → completed (the giver confirms it). */
+export const TODO_STATUSES = ['open', 'done', 'completed'] as const;
 export type TodoStatus = (typeof TODO_STATUSES)[number];
+
+/**
+ * Who may give a task to whom: the Founder to anyone else,
+ * a Manager to the Associates on their own team.
+ */
+export function canGiveTask(
+  giver: { id: string; role: Role },
+  taker: { id: string; role: Role; managerId?: string | null },
+): boolean {
+  if (giver.id === taker.id) return false;
+  if (giver.role === 'founder') return true;
+  return giver.role === 'manager' && taker.role === 'associate' && taker.managerId === giver.id;
+}
 
 export const CHAT_MESSAGE_MAX = 5000;

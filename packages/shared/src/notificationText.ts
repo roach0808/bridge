@@ -19,9 +19,13 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
     case 'call.updated':
       return { title: `${who} updated a call`, body: n.payload.summary ?? '' };
     case 'todo.assigned':
-      return { title: `${who} gave you a to-do`, body: n.payload.summary ?? '' };
+      return { title: `${who} gave you a task`, body: n.payload.summary ?? '' };
     case 'todo.done':
-      return { title: `${who} finished a to-do`, body: n.payload.summary ?? '' };
+      return { title: `${who} finished a task`, body: n.payload.summary ?? '' };
+    case 'todo.completed':
+      return { title: `${who} confirmed your task is complete`, body: n.payload.summary ?? '' };
+    case 'todo.reopened':
+      return { title: `${who} reopened your task`, body: n.payload.summary ?? '' };
     case 'profile.submitted':
       return { title: `${who} submitted a profile for review`, body: n.payload.summary ?? '' };
     case 'profile.approved':
@@ -36,7 +40,8 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
 /** Where a notification leads in the web app, or null. */
 export function notificationLink(n: NotificationDTO): string | null {
   if (n.payload.callId) return `/calls/${n.payload.callId}`;
-  if (n.type === 'todo.assigned') return '/todos';
+  if (n.payload.todoId && n.type !== 'todo.done') return '/todos';
+  if (n.type === 'todo.done') return '/todos?scope=created';
   if (n.payload.conversationId) return `/chat/${n.payload.conversationId}`;
   if (n.payload.profileId) return '/profiles';
   return null;

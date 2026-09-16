@@ -194,8 +194,17 @@ export function createApiClient(options: ClientOptions) {
     },
 
     todos: {
-      list: (query?: { scope?: 'assigned' | 'created'; status?: TodoStatus }) => get<TodoDTO[]>('/todos', query),
+      /** `active` (the default) leaves out completed tasks. */
+      list: (query?: { scope?: 'assigned' | 'created'; status?: TodoStatus | 'active' | 'all' }) => get<TodoDTO[]>('/todos', query),
+      /** People the caller may give a task to. */
+      assignees: () => get<UserRef[]>('/todos/assignees'),
+      create: (input: { assigneeId: string; title: string; details?: string | null }) => post<TodoDTO>('/todos', input),
+      remove: (id: string) => del<void>(`/todos/${enc(id)}`),
       done: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/done`, note ? { note } : {}),
+      /** The giver confirms a done task: it becomes completed. */
+      confirm: (id: string) => post<TodoDTO>(`/todos/${enc(id)}/confirm`),
+      /** The giver sends a done or completed task back to the taker. */
+      reopen: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/reopen`, note ? { note } : {}),
     },
 
     push: {

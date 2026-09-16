@@ -49,9 +49,11 @@ enum ChatMessageKind {
   todo_done
 }
 
+/// open → done (the taker ticks it) → completed (the giver confirms).
 enum TodoStatus {
   open
   done
+  completed
 }
 
 enum AvatarAudience {
@@ -498,8 +500,11 @@ model ChatMessage {
 /// A Founder turned a chat message into a to-do for the other person in the chat.
 model Todo {
   id             String     @id @default(uuid()) @db.Uuid
-  messageId      String     @unique @map("message_id") @db.Uuid
-  conversationId String     @map("conversation_id") @db.Uuid
+  /// Set when the task was made from a chat message; standalone tasks have a title instead.
+  messageId      String?    @unique @map("message_id") @db.Uuid
+  conversationId String?    @map("conversation_id") @db.Uuid
+  title          String?
+  details        String?
   assigneeId     String     @map("assignee_id") @db.Uuid
   createdById    String     @map("created_by") @db.Uuid
   status         TodoStatus @default(open)
@@ -507,12 +512,14 @@ model Todo {
   doneNote       String?    @map("done_note")
   /// The chat reply posted when the assignee marked it done.
   doneMessageId  String?    @unique @map("done_message_id") @db.Uuid
+  /// When the giver confirmed it done; the task is then completed.
+  confirmedAt    DateTime?  @map("confirmed_at") @db.Timestamptz(3)
   createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  message      ChatMessage  @relation("TodoMessage", fields: [messageId], references: [id], onDelete: Cascade)
+  message      ChatMessage? @relation("TodoMessage", fields: [messageId], references: [id], onDelete: Cascade)
   doneMessage  ChatMessage? @relation("TodoDoneMessage", fields: [doneMessageId], references: [id], onDelete: SetNull)
-  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   assignee     User         @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
   createdBy    User         @relation("TodoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 

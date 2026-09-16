@@ -87,6 +87,9 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^platforms/, 'platform'],
   [/^chat\/messages\/:id\/todo$/, 'todo'],
   [/^todos\/:id\/done$/, 'todo.done', true],
+  [/^todos\/:id\/confirm$/, 'todo.confirm', true],
+  [/^todos\/:id\/reopen$/, 'todo.reopen', true],
+  [/^todos/, 'todo'],
   [/^chat/, 'chat'],
   [/^db-dumps/, 'dump'],
   [/^me\/sessions/, 'session'],
@@ -130,8 +133,11 @@ const SUMMARIES: Record<string, string> = {
   'session.read': 'looked at signed-in devices',
   'user.create': 'created a user',
   'user.update': 'changed a user',
-  'todo.create': 'made a message a to-do',
-  'todo.done': 'marked a to-do done',
+  'todo.create': 'gave a task',
+  'todo.delete': 'removed a task',
+  'todo.done': 'marked a task done',
+  'todo.confirm': 'confirmed a task complete',
+  'todo.reopen': 'reopened a task',
   'audit.read': 'read the audit trail',
 };
 

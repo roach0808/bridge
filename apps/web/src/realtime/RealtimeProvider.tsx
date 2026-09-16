@@ -111,10 +111,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     };
 
     const onChatTodo = (todo: TodoDTO | TodoRemovedEvent) => {
-      // The to-do shows on its message, in the chat list counts and on the to-do lists.
-      void queryClient.invalidateQueries({ queryKey: qk.chat.messages(todo.conversationId) });
-      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
-      void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(todo.conversationId) });
+      // A chat task shows on its message and in the chat list counts; every task is on the task lists.
+      if (todo.conversationId) {
+        void queryClient.invalidateQueries({ queryKey: qk.chat.messages(todo.conversationId) });
+        void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+        void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(todo.conversationId) });
+      }
       void queryClient.invalidateQueries({ queryKey: qk.todos.all });
     };
 

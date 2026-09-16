@@ -35,7 +35,7 @@ function useBrowserNotifications() {
 }
 
 const STATE_TEXT: Record<PushState, string> = {
-  on: 'On — you’ll be notified about new chat messages, to-dos and call updates, even when this site is closed.',
+  on: 'On — you’ll be notified about new chat messages, tasks and call updates, even when this site is closed.',
   'tab-only': 'On while this site is open in a tab. This browser can’t receive notifications when the site is closed.',
   off: 'Off in this browser.',
   denied: 'Blocked. To allow them, click the lock icon next to the address bar, set Notifications to Allow, then reload.',
@@ -134,7 +134,7 @@ export function BrowserNotificationsPrompt() {
     >
       <NotificationsActiveOutlined color="primary" />
       <Typography variant="body2" sx={{ flex: 1, minWidth: 200 }}>
-        Get notified about new messages and to-dos, even when this site is closed.
+        Get notified about new messages and tasks, even when this site is closed.
       </Typography>
       <Button size="small" variant="contained" onClick={() => void enable()} disabled={busy}>
         Turn on notifications

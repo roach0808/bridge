@@ -209,6 +209,8 @@ export type NotificationType =
   | 'call.created'
   | 'todo.assigned'
   | 'todo.done'
+  | 'todo.completed'
+  | 'todo.reopened'
   | 'profile.submitted'
   | 'profile.approved'
   | 'profile.rejected';
@@ -391,13 +393,15 @@ export interface DashboardSummary {
 
 // --- Chat & to-dos ------------------------------------------------------------
 
-/** The to-do attached to a chat message, if the Founder marked it. */
+/** The task attached to a chat message, if someone above the other person marked it. */
 export interface TodoSummary {
   id: string;
   status: TodoStatus;
   assignee: UserRef;
   createdBy: UserRef;
   doneAt: string | null;
+  /** When the giver confirmed it; the task is then completed. */
+  confirmedAt: string | null;
 }
 
 export interface ChatMessageDTO {
@@ -423,12 +427,18 @@ export interface ConversationDTO {
   otherLastReadAt: string | null;
   /** Both people are active and still allowed to chat. */
   canSend: boolean;
+  /** The caller may turn messages in this chat into tasks for the other person. */
+  canGiveTask: boolean;
   createdAt: string;
 }
 
 export interface TodoDTO extends TodoSummary {
-  conversationId: string;
-  message: { id: string; body: string; sender: UserRef; createdAt: string };
+  /** Set for tasks made from a chat message. */
+  conversationId: string | null;
+  message: { id: string; body: string; sender: UserRef; createdAt: string } | null;
+  /** Set for tasks made with "New task". */
+  title: string | null;
+  details: string | null;
   /** The note the assignee added when marking it done. */
   doneNote: string | null;
   createdAt: string;
@@ -462,8 +472,8 @@ export interface ChatReadEvent {
 
 export interface TodoRemovedEvent {
   id: string;
-  conversationId: string;
-  messageId: string;
+  conversationId: string | null;
+  messageId: string | null;
   removed: true;
 }
 

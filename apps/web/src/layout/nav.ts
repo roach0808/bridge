@@ -32,7 +32,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/calls', label: 'Calls', icon: PhoneInTalkRounded, roles: ALL, section: 'work' },
   { to: '/calendar', label: 'Calendar', icon: CalendarMonthRounded, roles: ALL, section: 'work' },
   { to: '/chat', label: 'Chat', icon: ChatRounded, roles: ALL, section: 'work', badge: 'chat' },
-  { to: '/todos', label: 'To-dos', icon: ChecklistRounded, roles: ALL, section: 'work', badge: 'todos' },
+  { to: '/todos', label: 'Tasks', icon: ChecklistRounded, roles: ALL, section: 'work', badge: 'todos' },
   { to: '/invoicing', label: 'Invoicing', icon: ReceiptLongRounded, roles: ['founder'], section: 'work' },
   { to: '/profiles', label: 'Profiles', icon: AccountTreeRounded, roles: ALL, section: 'admin' },
   { to: '/platforms', label: 'Platforms', icon: HubRounded, roles: ['founder', 'manager'], section: 'admin' },

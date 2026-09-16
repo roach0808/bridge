@@ -163,17 +163,29 @@ describe('to-dos', () => {
     expect(res.body.assignee.id).toBe(fx.e1.id);
   });
 
-  it('only founders create to-dos, once per message, and only in their own chats', async () => {
-    const { founder, id } = await founderChatWith(fx.m1);
-    const msg = (await send(founder, id, 'Review the team calendar')).body;
-    expectError(await (await as(fx.m1)).post(`/chat/messages/${msg.id}/todo`), 403);
-    expect((await founder.post(`/chat/messages/${msg.id}/todo`)).status).toBe(201);
-    expectError(await founder.post(`/chat/messages/${msg.id}/todo`), 409);
+  it('a manager gives tasks to their own associates only, once per message, in their own chats', async () => {
+    const m1 = await as(fx.m1);
+    const own = await open(m1, fx.a1);
+    const ownMsg = (await send(m1, own, 'Confirm the Hanbit slot')).body;
+    expect((await m1.get(`/chat/conversations/${own}`)).body.canGiveTask).toBe(true);
+    expect((await (await as(fx.a1)).get(`/chat/conversations/${own}`)).body.canGiveTask).toBe(false);
+    expectError(await (await as(fx.a1)).post(`/chat/messages/${ownMsg.id}/todo`), 403);
+    expect((await m1.post(`/chat/messages/${ownMsg.id}/todo`)).status).toBe(201);
+    expectError(await m1.post(`/chat/messages/${ownMsg.id}/todo`), 409);
 
-    const other = await open(await as(fx.m1), fx.m2);
-    const peerMsg = (await send(await as(fx.m1), other, 'between managers')).body;
-    expectError(await founder.post(`/chat/messages/${peerMsg.id}/todo`), 404);
-    expectError(await (await as(fx.m1)).get('/todos', { scope: 'created' }), 403);
+    // Another team's associate, and a fellow manager, are off limits.
+    const otherTeam = await open(m1, fx.a3);
+    expect((await m1.get(`/chat/conversations/${otherTeam}`)).body.canGiveTask).toBe(false);
+    const otherMsg = (await send(m1, otherTeam, 'Can you help?')).body;
+    expectError(await m1.post(`/chat/messages/${otherMsg.id}/todo`), 403);
+    const peers = await open(m1, fx.m2);
+    const peerMsg = (await send(m1, peers, 'between managers')).body;
+    expectError(await m1.post(`/chat/messages/${peerMsg.id}/todo`), 403);
+    // Not a participant: the message doesn't exist for them.
+    expectError(await (await as(fx.founder)).post(`/chat/messages/${peerMsg.id}/todo`), 404);
+
+    expect((await m1.get('/todos', { scope: 'created' })).body).toHaveLength(1);
+    expectError(await (await as(fx.a1)).get('/todos', { scope: 'created' }), 403);
   });
 
   it('marking done posts a reply in the chat, closes the to-do and notifies the founder', async () => {
@@ -203,7 +215,7 @@ describe('to-dos', () => {
     expectError(await a2.post(`/todos/${todo.id}/done`), 409);
   });
 
-  it('only the assignee marks it done; open to-dos can be removed, done ones cannot', async () => {
+  it('only the assignee marks it done; the giver can remove it while open', async () => {
     const { founder, id } = await founderChatWith(fx.e2);
     const msg = (await send(founder, id, 'Block out next Monday')).body;
     const todo = (await founder.post(`/chat/messages/${msg.id}/todo`)).body;
@@ -231,5 +243,95 @@ describe('to-dos', () => {
     await a1.post(`/todos/${ids[2]}/done`);
     expect((await a1.get('/todos')).body.map((t: { status: string }) => t.status)).toEqual(['open', 'open', 'done']);
     expect((await a1.get('/todos', { status: 'done' })).body).toHaveLength(1);
+  });
+});
+
+describe('tasks without a chat message', () => {
+  it('a founder gives anyone a task; a manager only their own associates', async () => {
+    const founder = await as(fx.founder);
+    const m1 = await as(fx.m1);
+    const res = await founder.post('/todos', { assigneeId: fx.e1.id, title: '  Update your availability  ', details: 'For next week' });
+    expect(res.status, res.text).toBe(201);
+    expect(res.body).toMatchObject({ title: 'Update your availability', details: 'For next week', conversationId: null, message: null, status: 'open' });
+    expect((await (await as(fx.e1)).get('/notifications')).body.items[0]).toMatchObject({ type: 'todo.assigned', payload: { todoId: res.body.id } });
+
+    expect((await m1.post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' })).status).toBe(201);
+    expectError(await m1.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' }), 403);
+    expectError(await m1.post('/todos', { assigneeId: fx.m2.id, title: 'Chase invoices' }), 403);
+    expectError(await (await as(fx.a1)).post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' }), 403);
+    expectError(await founder.post('/todos', { assigneeId: fx.founder.id, title: 'Myself' }), 403);
+    expectError(await founder.post('/todos', { assigneeId: fx.a1.id, title: '   ' }), 400);
+
+    const assignees = (await m1.get('/todos/assignees')).body.map((u: { id: string }) => u.id).sort();
+    expect(assignees).toEqual([fx.a1.id, fx.a2.id].sort());
+    expect((await founder.get('/todos/assignees')).body.map((u: { id: string }) => u.id)).not.toContain(fx.founder.id);
+    expect((await (await as(fx.a1)).get('/todos/assignees')).body).toEqual([]);
+  });
+
+  it('taker ticks done, giver confirms: the task is completed and leaves the default list', async () => {
+    const m1 = await as(fx.m1);
+    const a1 = await as(fx.a1);
+    const todo = (await m1.post('/todos', { assigneeId: fx.a1.id, title: 'Send the weekly report' })).body;
+
+    expectError(await m1.post(`/todos/${todo.id}/confirm`), 409); // not done yet
+    expectError(await m1.post(`/todos/${todo.id}/done`), 403);
+    expectError(await (await as(fx.a2)).post(`/todos/${todo.id}/done`), 404);
+    const done = await a1.post(`/todos/${todo.id}/done`, { note: 'Sent' });
+    expect(done.body).toMatchObject({ status: 'done', doneNote: 'Sent', confirmedAt: null });
+    expect((await m1.get('/notifications')).body.items[0]).toMatchObject({ type: 'todo.done', payload: { todoId: todo.id } });
+
+    expectError(await a1.post(`/todos/${todo.id}/confirm`), 403);
+    const confirmed = await m1.post(`/todos/${todo.id}/confirm`);
+    expect(confirmed.status, confirmed.text).toBe(200);
+    expect(confirmed.body.status).toBe('completed');
+    expect(confirmed.body.confirmedAt).not.toBeNull();
+    expect((await a1.get('/notifications')).body.items[0]).toMatchObject({ type: 'todo.completed', payload: { todoId: todo.id } });
+
+    expect((await a1.get('/todos')).body).toEqual([]);
+    expect((await m1.get('/todos', { scope: 'created' })).body).toEqual([]);
+    expect((await a1.get('/todos', { status: 'completed' })).body).toHaveLength(1);
+    expect((await a1.get('/todos', { status: 'all' })).body).toHaveLength(1);
+    expectError(await m1.delete(`/todos/${todo.id}`), 409);
+  });
+
+  it('the giver can reopen a done or completed task, which clears the done state', async () => {
+    const founder = await as(fx.founder);
+    const a3 = await as(fx.a3);
+    const todo = (await founder.post('/todos', { assigneeId: fx.a3.id, title: 'Fix the profile photos' })).body;
+    expectError(await founder.post(`/todos/${todo.id}/reopen`), 409);
+    await a3.post(`/todos/${todo.id}/done`, { note: 'Fixed' });
+    expectError(await a3.post(`/todos/${todo.id}/reopen`), 403);
+
+    const reopened = await founder.post(`/todos/${todo.id}/reopen`, { note: 'Two are still blurry' });
+    expect(reopened.body).toMatchObject({ status: 'open', doneAt: null, doneNote: null, confirmedAt: null });
+    expect((await a3.get('/notifications')).body.items[0]).toMatchObject({
+      type: 'todo.reopened',
+      payload: { summary: 'Fix the profile photos — Two are still blurry' },
+    });
+
+    await a3.post(`/todos/${todo.id}/done`);
+    await founder.post(`/todos/${todo.id}/confirm`);
+    expect((await founder.post(`/todos/${todo.id}/reopen`)).body.status).toBe('open');
+  });
+
+  it('a chat task confirmed by the giver keeps its done reply in the chat', async () => {
+    const m1 = await as(fx.m1);
+    const id = await open(m1, fx.a2);
+    const msg = (await send(m1, id, 'Rebook the Tuesday call')).body;
+    const todo = (await m1.post(`/chat/messages/${msg.id}/todo`)).body;
+    await (await as(fx.a2)).post(`/todos/${todo.id}/done`, { note: 'Rebooked for Wednesday' });
+    expect((await m1.post(`/todos/${todo.id}/confirm`)).body.status).toBe('completed');
+    const items = (await m1.get(`/chat/conversations/${id}/messages`)).body.items;
+    expect(items[0].todo.status).toBe('completed');
+    expect(items.at(-1)).toMatchObject({ kind: 'todo_done', body: 'Rebooked for Wednesday' });
+  });
+
+  it('the giver removes an open task; nobody else can', async () => {
+    const founder = await as(fx.founder);
+    const todo = (await founder.post('/todos', { assigneeId: fx.m2.id, title: 'Plan the offsite' })).body;
+    expectError(await (await as(fx.m2)).delete(`/todos/${todo.id}`), 403);
+    expectError(await (await as(fx.m1)).delete(`/todos/${todo.id}`), 404);
+    expect((await founder.delete(`/todos/${todo.id}`)).status).toBe(204);
+    expect((await (await as(fx.m2)).get('/todos')).body).toEqual([]);
   });
 });

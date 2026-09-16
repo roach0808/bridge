@@ -1,6 +1,8 @@
 import {
   canChat,
+  canGiveTask,
   chatMessageSchema,
+  createTodoSchema,
   chatMessagesQuerySchema,
   listTodosQuerySchema,
   startConversationSchema,
@@ -11,11 +13,12 @@ import {
   type Role,
   type ServerToClientEvents,
   type TodoDTO,
+  type TodoRemovedEvent,
   type TodoSummary,
 } from '@god/shared';
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
-import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
+import { actorOf, requireAuth, type Actor } from '../auth/middleware';
 import { prisma, type Db } from '../db';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
@@ -29,7 +32,7 @@ chatRouter.use(['/chat', '/todos'], requireAuth);
 
 // --- Loading & serializing -----------------------------------------------------
 
-const participantSelect = { ...userRefSelect, isActive: true } satisfies Prisma.UserSelect;
+const participantSelect = { ...userRefSelect, isActive: true, managerId: true } satisfies Prisma.UserSelect;
 
 const conversationInclude = {
   userA: { select: participantSelect },
@@ -61,6 +64,7 @@ const toTodoSummary = (t: Prisma.TodoGetPayload<{ include: typeof todoSummaryInc
   assignee: toUserRef(t.assignee),
   createdBy: toUserRef(t.createdBy),
   doneAt: isoOrNull(t.doneAt),
+  confirmedAt: isoOrNull(t.confirmedAt),
 });
 
 const toMessageDTO = (m: MessageRow): ChatMessageDTO => ({
@@ -77,7 +81,11 @@ const toMessageDTO = (m: MessageRow): ChatMessageDTO => ({
 const toTodoDTO = (t: TodoRow): TodoDTO => ({
   ...toTodoSummary(t),
   conversationId: t.conversationId,
-  message: { id: t.message.id, body: t.message.body, sender: toUserRef(t.message.sender), createdAt: iso(t.message.createdAt) },
+  message: t.message
+    ? { id: t.message.id, body: t.message.body, sender: toUserRef(t.message.sender), createdAt: iso(t.message.createdAt) }
+    : null,
+  title: t.title,
+  details: t.details,
   doneNote: t.doneNote,
   createdAt: iso(t.createdAt),
 });
@@ -97,6 +105,12 @@ async function loadConversation(actor: Actor, id: string | null): Promise<Conver
   if (!c || !isParticipant(c, actor.id)) throw notFound('Conversation');
   return c;
 }
+
+const meIn = (c: ConversationRow, userId: string) => {
+  const me = c.userAId === userId ? c.userA : c.userB;
+  return { id: me.id, role: me.role as Role };
+};
+const asTaker = (u: { id: string; role: string; managerId: string | null }) => ({ id: u.id, role: u.role as Role, managerId: u.managerId });
 
 /** Builds the list entries for the given conversations, as `userId` sees them. */
 async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: string): Promise<ConversationDTO[]> {
@@ -132,6 +146,7 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
       openTodoCount: openTodos.find((t) => t.conversationId === c.id)?._count._all ?? 0,
       otherLastReadAt: isoOrNull(otherLastReadAt(c, userId)),
       canSend: canSendIn(c),
+      canGiveTask: canSendIn(c) && canGiveTask(meIn(c, userId), asTaker(other)),
       createdAt: iso(c.createdAt),
     };
   });
@@ -282,9 +297,22 @@ chatRouter.post('/chat/conversations/:id/read', async (req, res) => {
   res.status(204).end();
 });
 
-// --- To-dos ----------------------------------------------------------------------------
+// --- Tasks -----------------------------------------------------------------------------
+//
+// The Founder gives tasks to anyone, a Manager to the Associates on their team (canGiveTask).
+// A task comes from a chat message or stands alone with a title. The taker marks it done,
+// then the giver confirms it (completed) or reopens it.
 
-async function loadMessageForFounder(actor: Actor, id: string | null) {
+const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+const todoText = (t: { title: string | null; message: { body: string } | null }) => t.message?.body ?? t.title ?? '';
+
+/** Tells the giver and the taker (and so every open chat or task list of theirs) about a change. */
+function emitTodo(t: { assigneeId: string; createdById: string }, payload: TodoDTO | TodoRemovedEvent) {
+  emitToUser(t.assigneeId, 'chat:todo', payload);
+  emitToUser(t.createdById, 'chat:todo', payload);
+}
+
+async function loadMessageInMyChat(actor: Actor, id: string | null) {
   if (!id) throw notFound('Message');
   const m = await prisma.chatMessage.findUnique({
     where: { id },
@@ -294,13 +322,21 @@ async function loadMessageForFounder(actor: Actor, id: string | null) {
   return m;
 }
 
-/** A Founder turns any message in their chat into a to-do for the other person. */
-chatRouter.post('/chat/messages/:id/todo', requireRole('founder'), async (req, res) => {
+/** A task the caller gave or was given; anyone else gets a 404. */
+async function loadTodo(actor: Actor, id: string | null) {
+  const t = id ? await prisma.todo.findUnique({ where: { id }, include: { conversation: true } }) : null;
+  if (!t || (t.assigneeId !== actor.id && t.createdById !== actor.id)) throw notFound('Task');
+  return t;
+}
+
+/** Turns a message in the caller's chat into a task for the other person. */
+chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
   const actor = actorOf(req);
-  const m = await loadMessageForFounder(actor, idParam(req));
-  if (m.kind !== 'text') throw conflict('Only regular messages can become to-dos');
-  if (m.todo) throw conflict('This message is already a to-do');
+  const m = await loadMessageInMyChat(actor, idParam(req));
   const assignee = otherOf(m.conversation, actor.id);
+  if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
+  if (m.kind !== 'text') throw conflict('Only regular messages can become tasks');
+  if (m.todo) throw conflict('This message is already a task');
   if (!assignee.isActive) throw conflict('The other person is no longer active');
 
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
@@ -312,34 +348,97 @@ chatRouter.post('/chat/messages/:id/todo', requireRole('founder'), async (req, r
       todoId: todo.id,
       conversationId: m.conversationId,
       actor: { nickname: actor.nickname, role: actor.role },
-      summary: m.body.length > 120 ? `${m.body.slice(0, 117)}…` : m.body,
+      summary: clip(m.body, 120),
     });
     return { todo, deliver };
   });
   deliver();
   const dto = toTodoDTO(todo);
-  emitToBoth(m.conversation, 'chat:todo', dto);
+  emitTodo(todo, dto);
   res.status(201).json(dto);
 });
 
-/** A Founder takes back a to-do that is still open. */
-chatRouter.delete('/chat/messages/:id/todo', requireRole('founder'), async (req, res) => {
+/** The giver takes back a task that is still open. */
+async function removeTodo(actor: Actor, t: { id: string; status: string; createdById: string; assigneeId: string; conversationId: string | null; messageId: string | null }) {
+  if (t.createdById !== actor.id) throw forbidden('Only the person who gave the task can remove it');
+  if (t.status !== 'open') throw conflict('Only an open task can be removed');
+  await prisma.todo.delete({ where: { id: t.id } });
+  emitTodo(t, { id: t.id, conversationId: t.conversationId, messageId: t.messageId, removed: true });
+}
+
+chatRouter.delete('/chat/messages/:id/todo', async (req, res) => {
   const actor = actorOf(req);
-  const m = await loadMessageForFounder(actor, idParam(req));
-  if (!m.todo) throw notFound('To-do');
-  if (m.todo.status !== 'open') throw conflict('A done to-do cannot be removed');
-  await prisma.todo.delete({ where: { id: m.todo.id } });
-  emitToBoth(m.conversation, 'chat:todo', { id: m.todo.id, conversationId: m.conversationId, messageId: m.id, removed: true });
+  const m = await loadMessageInMyChat(actor, idParam(req));
+  if (!m.todo) throw notFound('Task');
+  await removeTodo(actor, m.todo);
   res.status(204).end();
 });
 
-/** `assigned`: my to-dos. `created`: to-dos I gave out (Founders). Open first, newest first. */
+/** People the caller may give a task to. */
+chatRouter.get('/todos/assignees', async (req, res) => {
+  const actor = actorOf(req);
+  if (actor.role !== 'founder' && actor.role !== 'manager') return void res.json([]);
+  const users = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      id: { not: actor.id },
+      ...(actor.role === 'manager' ? { role: 'associate', managerId: actor.id } : {}),
+    },
+    select: userRefSelect,
+    orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
+  });
+  res.json(users.map(toUserRef));
+});
+
+/** A task that doesn't come from a chat message. */
+chatRouter.post('/todos', async (req, res) => {
+  const actor = actorOf(req);
+  const input = parseBody(createTodoSchema, req);
+  const assignee = await prisma.user.findUnique({
+    where: { id: input.assigneeId },
+    select: { id: true, role: true, managerId: true, isActive: true },
+  });
+  if (!assignee || !assignee.isActive) {
+    throw badRequest('Choose who the task is for', { issues: [{ path: 'assigneeId', message: 'Not an active user' }] });
+  }
+  if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
+
+  const { todo, deliver } = await prisma.$transaction(async (tx) => {
+    const todo = await tx.todo.create({
+      data: { title: input.title, details: input.details ?? null, assigneeId: assignee.id, createdById: actor.id },
+      include: todoInclude,
+    });
+    const deliver = await notify(tx, [assignee.id], 'todo.assigned', {
+      todoId: todo.id,
+      actor: { nickname: actor.nickname, role: actor.role },
+      summary: clip(input.title, 120),
+    });
+    return { todo, deliver };
+  });
+  deliver();
+  const dto = toTodoDTO(todo);
+  emitTodo(todo, dto);
+  res.status(201).json(dto);
+});
+
+chatRouter.delete('/todos/:id', async (req, res) => {
+  const actor = actorOf(req);
+  await removeTodo(actor, await loadTodo(actor, idParam(req)));
+  res.status(204).end();
+});
+
+/** `assigned`: tasks given to me. `created`: tasks I gave. Open first, then done, then completed; newest first. */
 chatRouter.get('/todos', async (req, res) => {
   const actor = actorOf(req);
   const { scope, status } = parseQuery(listTodosQuerySchema, req);
-  if (scope === 'created' && actor.role !== 'founder') throw forbidden('Only Founders create to-dos');
+  if (scope === 'created' && actor.role !== 'founder' && actor.role !== 'manager') {
+    throw forbidden('Only Founders and Managers give tasks');
+  }
   const rows = await prisma.todo.findMany({
-    where: { ...(scope === 'assigned' ? { assigneeId: actor.id } : { createdById: actor.id }), ...(status ? { status } : {}) },
+    where: {
+      ...(scope === 'assigned' ? { assigneeId: actor.id } : { createdById: actor.id }),
+      ...(status === 'all' ? {} : status === 'active' ? { status: { in: ['open', 'done'] } } : { status }),
+    },
     include: todoInclude,
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
     take: 500,
@@ -347,51 +446,94 @@ chatRouter.get('/todos', async (req, res) => {
   res.json(rows.map(toTodoDTO));
 });
 
-/** The assignee marks a to-do done; this posts a reply to the to-do message in the chat. */
+/** The taker marks a task done. For a chat task this posts a reply to the task message. */
 chatRouter.post('/todos/:id/done', async (req, res) => {
   const actor = actorOf(req);
-  const id = idParam(req);
+  const existing = await loadTodo(actor, idParam(req));
   const { note } = parseBody(todoDoneSchema, req);
-  const existing = id ? await prisma.todo.findUnique({ where: { id }, include: { conversation: true } }) : null;
-  if (!existing || !isParticipant(existing.conversation, actor.id)) throw notFound('To-do');
-  if (existing.assigneeId !== actor.id) throw forbidden('Only the person the to-do is for can mark it done');
-  if (existing.status === 'done') throw conflict('This to-do is already done');
+  if (existing.assigneeId !== actor.id) throw forbidden('Only the person the task is for can mark it done');
+  if (existing.status !== 'open') throw conflict('This task is already done');
 
   const now = new Date();
   const { todo, message, deliver } = await prisma.$transaction(async (tx) => {
     // Guard against a double click racing past the check above.
     const claimed = await tx.todo.updateMany({ where: { id: existing.id, status: 'open' }, data: { status: 'done', doneAt: now, doneNote: note ?? null } });
-    if (!claimed.count) throw conflict('This to-do is already done');
-    const message = await tx.chatMessage.create({
-      data: {
-        conversationId: existing.conversationId,
-        senderId: actor.id,
-        body: note ?? 'Done',
-        kind: 'todo_done',
-        replyToId: existing.messageId,
-        createdAt: now,
-      },
-      include: messageInclude,
-    });
-    const todo = await tx.todo.update({ where: { id: existing.id }, data: { doneMessageId: message.id }, include: todoInclude });
-    await tx.conversation.update({
-      where: { id: existing.conversationId },
-      data: {
-        lastMessageAt: now,
-        ...(existing.conversation.userAId === actor.id ? { userALastReadAt: now } : { userBLastReadAt: now }),
-      },
-    });
+    if (!claimed.count) throw conflict('This task is already done');
+    let message: MessageRow | null = null;
+    if (existing.conversation) {
+      message = await tx.chatMessage.create({
+        data: {
+          conversationId: existing.conversation.id,
+          senderId: actor.id,
+          body: note ?? 'Done',
+          kind: 'todo_done',
+          replyToId: existing.messageId,
+          createdAt: now,
+        },
+        include: messageInclude,
+      });
+      await tx.conversation.update({
+        where: { id: existing.conversation.id },
+        data: {
+          lastMessageAt: now,
+          ...(existing.conversation.userAId === actor.id ? { userALastReadAt: now } : { userBLastReadAt: now }),
+        },
+      });
+    }
+    const todo = await tx.todo.update({ where: { id: existing.id }, data: { doneMessageId: message?.id ?? null }, include: todoInclude });
     const deliver = await notify(tx, [existing.createdById], 'todo.done', {
       todoId: existing.id,
-      conversationId: existing.conversationId,
+      ...(existing.conversationId ? { conversationId: existing.conversationId } : {}),
       actor: { nickname: actor.nickname, role: actor.role },
-      summary: `Done: ${todo.message.body.length > 100 ? `${todo.message.body.slice(0, 97)}…` : todo.message.body}`,
+      summary: `Done: ${clip(todoText(todo), 100)}`,
     });
     return { todo, message, deliver };
   });
   deliver();
-  emitToBoth(existing.conversation, 'chat:message', toMessageDTO(message));
+  if (message && existing.conversation) emitToBoth(existing.conversation, 'chat:message', toMessageDTO(message));
   const dto = toTodoDTO(todo);
-  emitToBoth(existing.conversation, 'chat:todo', dto);
+  emitTodo(todo, dto);
   res.json(dto);
+});
+
+/** The giver moves a task on: `confirm` completes a done task, `reopen` sends it back to the taker. */
+async function reviewTodo(actor: Actor, id: string | null, action: 'confirm' | 'reopen', note: string | null) {
+  const existing = await loadTodo(actor, id);
+  if (existing.createdById !== actor.id) throw forbidden('Only the person who gave the task can do this');
+  const from = action === 'confirm' ? (['done'] as const) : (['done', 'completed'] as const);
+  if (!(from as readonly string[]).includes(existing.status)) {
+    throw conflict(action === 'confirm' ? 'Only a task marked done can be confirmed' : 'This task is still open');
+  }
+  const { todo, deliver } = await prisma.$transaction(async (tx) => {
+    const claimed = await tx.todo.updateMany({
+      where: { id: existing.id, status: { in: [...from] } },
+      data:
+        action === 'confirm'
+          ? { status: 'completed', confirmedAt: new Date() }
+          : { status: 'open', doneAt: null, doneNote: null, doneMessageId: null, confirmedAt: null },
+    });
+    if (!claimed.count) throw conflict('This task just changed; refresh and try again');
+    const todo = await tx.todo.findUniqueOrThrow({ where: { id: existing.id }, include: todoInclude });
+    const text = clip(todoText(todo), 100);
+    const deliver = await notify(tx, [existing.assigneeId], action === 'confirm' ? 'todo.completed' : 'todo.reopened', {
+      todoId: existing.id,
+      ...(existing.conversationId ? { conversationId: existing.conversationId } : {}),
+      actor: { nickname: actor.nickname, role: actor.role },
+      summary: note ? `${text} — ${clip(note, 120)}` : text,
+    });
+    return { todo, deliver };
+  });
+  deliver();
+  const dto = toTodoDTO(todo);
+  emitTodo(todo, dto);
+  return dto;
+}
+
+chatRouter.post('/todos/:id/confirm', async (req, res) => {
+  res.json(await reviewTodo(actorOf(req), idParam(req), 'confirm', null));
+});
+
+chatRouter.post('/todos/:id/reopen', async (req, res) => {
+  const { note } = parseBody(todoDoneSchema, req);
+  res.json(await reviewTodo(actorOf(req), idParam(req), 'reopen', note ?? null));
 });
