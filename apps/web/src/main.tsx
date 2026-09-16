@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { RouterProvider } from 'react-router';
 import { AuthProvider } from '@/auth/AuthProvider';
 import { ToastProvider } from '@/components/ToastProvider';
+import { PresenceProvider } from '@/realtime/PresenceProvider';
 import { RealtimeProvider } from '@/realtime/RealtimeProvider';
 import { router } from '@/router';
 import { theme } from '@/theme/theme';
@@ -33,7 +34,9 @@ createRoot(document.getElementById('root')!).render(
           <ToastProvider>
             <AuthProvider>
               <RealtimeProvider>
-                <RouterProvider router={router} />
+                <PresenceProvider>
+                  <RouterProvider router={router} />
+                </PresenceProvider>
               </RealtimeProvider>
             </AuthProvider>
           </ToastProvider>

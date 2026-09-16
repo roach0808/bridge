@@ -1,8 +1,9 @@
-import type { ClientToServerEvents, ServerToClientEvents } from '@god/shared';
+import type { ClientToServerEvents, Role, ServerToClientEvents } from '@god/shared';
 import type { Server } from 'socket.io';
 
 export interface SocketData {
   userId: string;
+  role: Role;
 }
 
 export type IoServer = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;

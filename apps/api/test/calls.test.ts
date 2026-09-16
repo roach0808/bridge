@@ -149,10 +149,25 @@ describe('PATCH /calls/:id permissions', () => {
     expect(await prisma.notification.count({ where: { userId: fx.e2.id, type: 'call.assigned' } })).toBe(1);
   });
 
-  it.each(['scheduled', 'on_rescheduling'] as const)('associate may not change the expert once %s', async (status) => {
+  it.each(['scheduled', 'confirmed', 'on_rescheduling'] as const)(
+    'associate may still change the expert while %s (they own scheduling)',
+    async (status) => {
+      const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status });
+      const res = await (await as(fx.a1)).patch(`/calls/${call.id}`, { expertId: fx.e2.id });
+      expect(res.status, res.text).toBe(200);
+      expect(res.body.expert.id).toBe(fx.e2.id);
+    },
+  );
+
+  it.each(['ongoing', 'finished'] as const)('associate may not change the expert once %s', async (status) => {
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status });
     expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { expertId: fx.e2.id }), 403);
     expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).expertId).toBe(fx.e1.id);
+  });
+
+  it('an associate cannot remove the Expert from a scheduled call', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { expertId: null }), 409, 'expert_required');
   });
 
   it('manager may change the expert during rescheduling but not remove it', async () => {
@@ -422,5 +437,65 @@ describe('database constraints', () => {
     await expect(
       prisma.profile.create({ data: { name: 'X', avatarId: 'profile-05', status: 'rejected', createdById: fx.a1.id } }),
     ).rejects.toThrow(Prisma.PrismaClientUnknownRequestError);
+  });
+});
+
+describe('GPT link', () => {
+  it('the founder sets it; only the founder and the expert can read it', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    const f = await as(fx.founder);
+    const link = 'https://chatgpt.com/share/abc123';
+    const saved = await f.patch(`/calls/${call.id}`, { gptLink: link });
+    expect(saved.status, saved.text).toBe(200);
+    expect(saved.body.gptLink).toBe(link);
+
+    expect((await (await as(fx.e1)).get(`/calls/${call.id}`)).body.gptLink).toBe(link);
+    for (const who of ['a1', 'm1'] as const) {
+      const res = await (await as(fx[who])).get(`/calls/${call.id}`);
+      expect(res.body.gptLink, who).toBeNull();
+      expect(res.body.permissions.editGptLink).toBe(false);
+      expect(res.text).not.toContain('chatgpt.com');
+    }
+    // Nobody but the founder may write it, and it must be a link.
+    expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { gptLink: 'https://x.test' }), 403);
+    expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { gptLink: 'https://x.test' }), 403);
+    expectError(await f.patch(`/calls/${call.id}`, { gptLink: 'not a link' }), 400);
+    expect((await f.patch(`/calls/${call.id}`, { gptLink: null })).body.gptLink).toBeNull();
+  });
+
+  it('the expert is notified when the link is added, but not about money-only edits', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
+    const f = await as(fx.founder);
+    await f.patch(`/calls/${call.id}`, { gptLink: 'https://chatgpt.com/share/xyz' });
+    expect(await prisma.notification.count({ where: { userId: fx.e1.id, type: 'call.updated' } })).toBe(1);
+    await f.patch(`/calls/${call.id}`, { rateOverride: 1500 });
+    await f.patch(`/calls/${call.id}`, { invoiceAmount: 700, invoiceCurrency: 'USD' });
+    expect(await prisma.notification.count({ where: { userId: fx.e1.id } })).toBe(1);
+  });
+});
+
+describe('call rate', () => {
+  it('shows the platform rate, takes a special rate for one call, and hides both from the expert', async () => {
+    const f = await as(fx.founder);
+    await f.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { status: 'registered', rate: 1100 });
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+
+    const a1 = await as(fx.a1);
+    let res = await a1.get(`/calls/${call.id}`);
+    expect(res.body).toMatchObject({ platformRate: 1100, rateOverride: null, permissions: { editRate: true } });
+
+    // The associate sets a special rate for this project only.
+    res = await a1.patch(`/calls/${call.id}`, { rateOverride: 1750.25 });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toMatchObject({ platformRate: 1100, rateOverride: 1750.25 });
+    expect((await a1.patch(`/calls/${call.id}`, { rateOverride: null })).body.rateOverride).toBeNull();
+    expectError(await a1.patch(`/calls/${call.id}`, { rateOverride: -5 }), 400);
+
+    // The manager may too; the Expert sees nothing and cannot write it.
+    expect((await (await as(fx.m1)).patch(`/calls/${call.id}`, { rateOverride: 1200 })).status).toBe(200);
+    const expertView = await (await as(fx.e1)).get(`/calls/${call.id}`);
+    expect(expertView.body).toMatchObject({ platformRate: null, rateOverride: null, permissions: { editRate: false } });
+    expect(expertView.text).not.toMatch(/1100|1200/);
+    expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { rateOverride: 1 }), 403);
   });
 });

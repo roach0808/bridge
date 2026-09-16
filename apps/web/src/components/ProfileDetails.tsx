@@ -80,7 +80,7 @@ function useSetPlatform(profileId: string, platformId: string) {
   const queryClient = useQueryClient();
   const toast = useToast();
   return useMutation({
-    mutationFn: (body: { status?: PlatformRegistration; rate?: number }) => api.profiles.setPlatform(profileId, platformId, body),
+    mutationFn: (body: { status?: PlatformRegistration; rate?: number | null }) => api.profiles.setPlatform(profileId, platformId, body),
     onSuccess: (saved) => {
       queryClient.setQueryData(qk.profiles.detail(saved.id), saved);
       void queryClient.invalidateQueries({ queryKey: qk.profiles.all });
@@ -94,11 +94,15 @@ export function PlatformStatusSelect({
   profile,
   platformId,
   status,
+  rate,
 }: {
   profile: Pick<ProfileDTO, 'id' | 'name'>;
   platformId: string;
   status: PlatformRegistration;
+  /** Needed to mark the Profile registered. */
+  rate?: number | null;
 }) {
+  const toast = useToast();
   const mutation = useSetPlatform(profile.id, platformId);
   const value = mutation.isPending && mutation.variables?.status ? mutation.variables.status : status;
   return (
@@ -108,7 +112,14 @@ export function PlatformStatusSelect({
       disableUnderline
       value={value}
       disabled={mutation.isPending}
-      onChange={(e) => mutation.mutate({ status: e.target.value as PlatformRegistration })}
+      onChange={(e) => {
+        const next = e.target.value as PlatformRegistration;
+        if (next === 'registered' && rate == null) {
+          toast.error('Set the hourly rate first — you can change it later');
+          return;
+        }
+        mutation.mutate({ status: next });
+      }}
       renderValue={(v) => <PlatformStatusChip status={v} />}
       inputProps={{ 'aria-label': `${profile.name} platform status` }}
       sx={{ '& .MuiSelect-select': { py: 0.25, display: 'flex', alignItems: 'center' } }}
@@ -127,21 +138,26 @@ export function PlatformRateField({
   profile,
   platformId,
   rate,
+  registered,
 }: {
   profile: Pick<ProfileDTO, 'id' | 'name'>;
   platformId: string;
-  rate: number;
+  rate: number | null;
+  /** A registered Profile must keep a rate, so the field cannot be cleared. */
+  registered?: boolean;
 }) {
   const mutation = useSetPlatform(profile.id, platformId);
-  const [draft, setDraft] = useState(String(rate));
-  useEffect(() => setDraft(String(rate)), [rate]);
+  const text = (r: number | null) => (r === null ? '' : String(r));
+  const [draft, setDraft] = useState(text(rate));
+  useEffect(() => setDraft(text(rate)), [rate]);
+  const empty = draft.trim() === '';
   const value = Number(draft);
-  const valid = draft.trim() !== '' && Number.isFinite(value) && value >= 0 && value <= MAX_PLATFORM_RATE;
+  const valid = empty ? !registered : Number.isFinite(value) && value >= 0 && value <= MAX_PLATFORM_RATE;
 
   const save = () => {
-    if (!valid) return setDraft(String(rate));
-    const rounded = Math.round(value * 100) / 100;
-    if (rounded !== rate) mutation.mutate({ rate: rounded });
+    if (!valid) return setDraft(text(rate));
+    const next = empty ? null : Math.round(value * 100) / 100;
+    if (next !== rate) mutation.mutate({ rate: next });
   };
 
   return (
@@ -156,7 +172,7 @@ export function PlatformRateField({
       onBlur={save}
       onKeyDown={(e) => {
         if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-        if (e.key === 'Escape') setDraft(String(rate));
+        if (e.key === 'Escape') setDraft(text(rate));
       }}
       slotProps={{
         input: {
@@ -164,10 +180,34 @@ export function PlatformRateField({
           startAdornment: <InputAdornment position="start">$</InputAdornment>,
           endAdornment: <InputAdornment position="end">/h</InputAdornment>,
         },
-        htmlInput: { min: 0, step: 50, 'aria-label': `${profile.name} rate`, style: { width: 64 } },
+        htmlInput: { min: 0, step: 50, placeholder: 'not set', 'aria-label': `${profile.name} rate`, style: { width: 64 } },
       }}
     />
   );
+}
+
+/** Founder-only: take a Profile out of use, or bring it back. */
+export function ProfileActiveToggle({ profile, size = 'small' }: { profile: ProfileDTO; size?: 'small' | 'medium' }) {
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  const mutation = useMutation({
+    mutationFn: () => api.profiles.setActive(profile.id, !profile.isActive),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(qk.profiles.detail(saved.id), saved);
+      void queryClient.invalidateQueries({ queryKey: qk.profiles.all });
+      toast.success(saved.isActive ? `“${saved.name}” is active again` : `“${saved.name}” deactivated — only Founders see it now`);
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  return (
+    <Button size={size} color="inherit" disabled={mutation.isPending} onClick={() => mutation.mutate()} sx={{ color: 'text.secondary' }}>
+      {mutation.isPending ? <CircularProgress size={14} /> : profile.isActive ? 'Deactivate' : 'Activate'}
+    </Button>
+  );
+}
+
+export function DeactivatedPill() {
+  return <DotPill color="#9aa0a6">Deactivated</DotPill>;
 }
 
 function ageOf(dateOfBirth: string): number {
@@ -237,7 +277,7 @@ function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
               Expert network platforms
             </Typography>
             <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
-              Rate per hour on each platform{isFounder ? ' (default $1,000)' : ''}. Not shown to Experts.
+              Rate per hour on each platform. Required to mark a Profile registered, and editable at any time afterwards. Not shown to Experts.
             </Typography>
             {p.platformStatuses.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -252,13 +292,13 @@ function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
                     </Typography>
                     {isFounder ? (
                       <>
-                        <PlatformRateField profile={p} platformId={platform.id} rate={rate} />
-                        <PlatformStatusSelect profile={p} platformId={platform.id} status={status} />
+                        <PlatformRateField profile={p} platformId={platform.id} rate={rate} registered={status === 'registered'} />
+                        <PlatformStatusSelect profile={p} platformId={platform.id} status={status} rate={rate} />
                       </>
                     ) : (
                       <>
-                        <Typography variant="body2" color="text.secondary">
-                          {formatRate(rate)}
+                        <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.secondary'}>
+                          {rate === null ? 'No rate' : formatRate(rate)}
                         </Typography>
                         <PlatformStatusChip status={status} />
                       </>
@@ -315,9 +355,12 @@ export function ProfileDetailsDialog({
               </Tooltip>
             )}
           </Stack>
-          <Typography variant="body2" color="text.secondary">
-            Profile details
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center">
+            <Typography variant="body2" color="text.secondary">
+              Profile details
+            </Typography>
+            {p && !p.isActive && <DeactivatedPill />}
+          </Stack>
         </Box>
         <IconButton onClick={onClose} aria-label="Close">
           <CloseRounded />
@@ -335,7 +378,8 @@ export function ProfileDetailsDialog({
         )}
       </DialogContent>
       {p && onEdit && (
-        <DialogActions sx={{ px: 3, py: 1.5 }}>
+        <DialogActions sx={{ px: 3, py: 1.5, justifyContent: 'space-between' }}>
+          <ProfileActiveToggle profile={p} />
           <Button startIcon={<EditOutlined />} onClick={() => onEdit(p)}>
             Edit profile
           </Button>

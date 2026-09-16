@@ -33,7 +33,7 @@ describe('experts do not see invoicing', () => {
     expect(detail.history.map((h: { toStatus: string }) => h.toStatus)).not.toContain('invoice_submit');
     expect(detail.history.map((h: { toStatus: string }) => h.toStatus)).not.toContain('invoice_approve');
     expect((await e1.get(`/calls/${call.id}/history`)).body.every((h: { toStatus: string }) => !h.toStatus.startsWith('invoice'))).toBe(true);
-    expect(JSON.stringify(detail)).not.toMatch(/invoice_(submit|approve)|process_to_bank|450/);
+    expect(JSON.stringify(detail)).not.toMatch(/invoice_(submit|approve)|process_to_bank|"invoiceAmount":"|450\.00/);
 
     // Everyone else still sees the real status and amount.
     const a1 = (await (await as(fx.a1)).get(`/calls/${call.id}`)).body;
@@ -81,7 +81,7 @@ describe('experts do not see invoicing', () => {
     ];
     for (const res of responses) {
       expect(res.status, res.text).toBe(200);
-      expect(res.text).not.toMatch(/"rate"|"bankCount":\d|"needsBank":(true|false)|"invoiceAmount":"|"invoiceCurrency":"|1500|450/);
+      expect(res.text).not.toMatch(/"(rate|platformRate|rateOverride)":\d|"bankCount":\d|"needsBank":(true|false)|"invoiceAmount":"|"invoiceCurrency":"|1500\.00|450\.00/);
     }
     const profile = responses[4]!.body;
     expect(profile).toMatchObject({ platformStatuses: null, bankCount: null, needsBank: null, currentAddress: null });

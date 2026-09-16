@@ -6,24 +6,27 @@ import {
   Button,
   ButtonBase,
   Card,
+  CircularProgress,
   Skeleton,
   Stack,
   Tooltip,
   Typography,
 } from '@mui/material';
 import { STAGE_LABELS, STAGE_STATUSES, STAGES, type CallDTO, type CallStatus, type DashboardSummary, type ProfileNeedingBank } from '@god/shared';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useState, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { BanksDialog } from '@/components/BanksDialog';
 import { ErrorState } from '@/components/common';
+import { useToast } from '@/components/ToastProvider';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS } from '@/components/StatusChip';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
-import { dayLabel, inZone, zoneAbbr } from '@/lib/time';
+import { dayLabel, formatDateTime, inZone, relativeTime, zoneAbbr } from '@/lib/time';
+import { errorMessage } from '@/lib/errors';
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -218,6 +221,99 @@ function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['ta
   );
 }
 
+/** Nightly database dumps: when the last one ran, and download or run one now. */
+function BackupsCard() {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const { zone } = useAuth();
+  const dumps = useQuery({ queryKey: qk.dbDumps, queryFn: api.dbDumps.list });
+  const [downloading, setDownloading] = useState<string | null>(null);
+
+  const run = useMutation({
+    mutationFn: () => api.dbDumps.run(),
+    onSuccess: (dump) => {
+      void queryClient.invalidateQueries({ queryKey: qk.dbDumps });
+      if (dump.succeeded) toast.success(`Backup taken · ${formatBytes(dump.byteSize)}`);
+      else toast.error(dump.error ?? 'The backup failed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const download = async (id: string) => {
+    setDownloading(id);
+    try {
+      const { blob, filename } = await api.dbDumps.download(id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename ?? 'god-dump.json.gz';
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      toast.error(errorMessage(err, 'Could not download the backup'));
+    } finally {
+      setDownloading(null);
+    }
+  };
+
+  const rows = dumps.data ?? [];
+  const latest = rows[0];
+  const rowCount = latest ? Object.values(latest.tableCounts).reduce((n, c) => n + c, 0) : 0;
+
+  return (
+    <Panel
+      title="Backups"
+      action={
+        <Button size="small" onClick={() => run.mutate()} disabled={run.isPending}>
+          {run.isPending ? <CircularProgress size={14} /> : 'Run now'}
+        </Button>
+      }
+    >
+      <Box sx={{ px: 1, pb: 1 }}>
+        {dumps.isLoading ? (
+          <Skeleton height={80} />
+        ) : !latest ? (
+          <Empty>The first nightly backup has not run yet.</Empty>
+        ) : (
+          <>
+            <Typography variant="h4" component="div" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+              {latest.succeeded ? formatBytes(latest.byteSize) : 'Failed'}
+            </Typography>
+            <Typography variant="caption" color={latest.succeeded ? 'text.secondary' : 'error.main'}>
+              {latest.succeeded
+                ? `${relativeTime(latest.createdAt)} · ${rowCount.toLocaleString()} rows`
+                : (latest.error ?? 'The last backup failed')}
+            </Typography>
+            <Stack spacing={0.5} sx={{ mt: 2 }}>
+              {rows.map((d) => (
+                <Stack key={d.id} direction="row" alignItems="center" spacing={1}>
+                  <Tooltip title={formatDateTime(d.createdAt, zone)}>
+                    <Typography variant="caption" sx={{ flex: 1, minWidth: 0 }} noWrap>
+                      {relativeTime(d.createdAt)}
+                      {d.trigger === 'manual' ? ' · manual' : ''}
+                    </Typography>
+                  </Tooltip>
+                  <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                    {d.succeeded ? formatBytes(d.byteSize) : 'failed'}
+                  </Typography>
+                  {d.succeeded && (
+                    <Button size="small" onClick={() => void download(d.id)} disabled={downloading === d.id} sx={{ minWidth: 0 }}>
+                      {downloading === d.id ? <CircularProgress size={12} /> : 'Download'}
+                    </Button>
+                  )}
+                </Stack>
+              ))}
+            </Stack>
+            <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 1.5 }}>
+              Runs every night (3:00 team time); the last {rows.length === 1 ? 'backup is' : `${rows.length} backups are`} kept.
+            </Typography>
+          </>
+        )}
+      </Box>
+    </Panel>
+  );
+}
+
 function DatabaseCard({ database }: { database: NonNullable<DashboardSummary['database']> }) {
   const top = database.tables.slice(0, 5);
   const max = Math.max(1, ...top.map((t) => t.bytes));
@@ -337,7 +433,12 @@ export default function DashboardPage() {
         {(data.tasks || data.database) && (
           <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 2fr) minmax(0, 1fr)' }, alignItems: 'start' }}>
             {data.tasks && <PendingTasks tasks={data.tasks} zone={zone} />}
-            {data.database && <DatabaseCard database={data.database} />}
+            {data.database && (
+              <Stack spacing={2}>
+                <DatabaseCard database={data.database} />
+                <BackupsCard />
+              </Stack>
+            )}
           </Box>
         )}
         {data.team && <TeamPanel team={data.team} />}

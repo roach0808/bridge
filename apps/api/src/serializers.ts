@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { BLOCKING_STATUSES, DEFAULT_PLATFORM_RATE } from '@god/shared';
+import { BLOCKING_STATUSES } from '@god/shared';
 import type {
   MeDTO,
   MessageDTO,
@@ -111,12 +111,16 @@ export const toProfileDTO = (p: ProfileRow & ProfileCounts, platforms: PlatformR
   avatarId: p.avatarId,
   photoId: p.photoId,
   status: p.status,
+  isActive: p.isActive,
   platformStatuses: platforms
-    ? platforms.map((platform) => ({
-        platform,
-        status: p.platformStatuses.find((s) => s.platformId === platform.id)?.status ?? 'not_registered',
-        rate: Number(p.platformStatuses.find((s) => s.platformId === platform.id)?.rate ?? DEFAULT_PLATFORM_RATE),
-      }))
+    ? platforms.map((platform) => {
+        const row = p.platformStatuses.find((s) => s.platformId === platform.id);
+        return {
+          platform,
+          status: row?.status ?? 'not_registered',
+          rate: row?.rate == null ? null : Number(row.rate),
+        };
+      })
     : null,
   bankCount: p._count ? p._count.banks : null,
   needsBank: p._count ? p._count.calls > 0 && p._count.banks === 0 : null,

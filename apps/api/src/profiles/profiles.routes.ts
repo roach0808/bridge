@@ -1,6 +1,7 @@
 import {
   isAvatarForAudience,
   listProfilesQuerySchema,
+  profileActiveSchema,
   profilePlatformStatusSchema,
   profileSchema,
   rejectProfileSchema,
@@ -42,11 +43,12 @@ const platformsFor = (actor: Pick<Actor, 'role'>): Promise<PlatformRef[] | null>
  * profiles of calls they are assigned to.
  */
 function visibleProfilesWhere(actor: Actor): Prisma.ProfileWhereInput {
+  // Deactivated Profiles are the Founder's business only.
   if (actor.role === 'founder') return {};
-  if (actor.role === 'expert') return { calls: { some: { expertId: actor.id } } };
+  if (actor.role === 'expert') return { isActive: true, calls: { some: { expertId: actor.id } } };
   const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }];
   if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } });
-  return { OR: [{ status: 'approved' }, ...own] };
+  return { isActive: true, OR: [{ status: 'approved' }, ...own] };
 }
 
 async function loadVisible(actor: Actor, id: string | null) {
@@ -208,7 +210,20 @@ async function review(actor: Actor, id: string | null, decision: 'approved' | 'r
   return toProfileDTO(updated, await platformRefs());
 }
 
-/** Founder sets a profile's standing on one platform. */
+/** Founder deactivates a Profile (hidden from everyone else, and unbookable) or brings it back. */
+profilesRouter.patch('/profiles/:id/active', requireRole('founder'), async (req, res) => {
+  const actor = actorOf(req);
+  const profile = await loadVisible(actor, idParam(req));
+  const { isActive } = parseBody(profileActiveSchema, req);
+  const updated = await prisma.profile.update({
+    where: { id: profile.id },
+    data: { isActive },
+    include: includeFor(actor),
+  });
+  res.json(toProfileDTO(updated, await platformRefs()));
+});
+
+/** Founder sets a profile's standing and rate on one platform. */
 profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder'), async (req, res) => {
   const actor = actorOf(req);
   const profile = await loadVisible(actor, idParam(req));
@@ -216,9 +231,21 @@ profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder')
   const platform = platformId && (await prisma.platform.findUnique({ where: { id: platformId }, select: { id: true } }));
   if (!platform) throw notFound('Platform');
   const { status, rate } = parseBody(profilePlatformStatusSchema, req);
+  const existing = await prisma.profilePlatformStatus.findUnique({
+    where: { profileId_platformId: { profileId: profile.id, platformId: platform.id } },
+    select: { status: true, rate: true },
+  });
+  // A registered Profile must have a rate; it stays editable afterwards.
+  const nextStatus = status ?? existing?.status ?? 'not_registered';
+  const nextRate = rate !== undefined ? rate : (existing?.rate ?? null);
+  if (nextStatus === 'registered' && nextRate === null) {
+    throw badRequest('Set the hourly rate to mark this profile registered', {
+      issues: [{ path: 'rate', message: 'A rate is required once registered (you can change it later)' }],
+    });
+  }
   await prisma.profilePlatformStatus.upsert({
     where: { profileId_platformId: { profileId: profile.id, platformId: platform.id } },
-    create: { profileId: profile.id, platformId: platform.id, status, rate },
+    create: { profileId: profile.id, platformId: platform.id, status: nextStatus, rate: nextRate },
     update: { status, rate },
   });
   res.json(toProfileDTO(await loadVisible(actor, profile.id), await platformRefs()));

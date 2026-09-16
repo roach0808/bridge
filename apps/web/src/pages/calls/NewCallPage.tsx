@@ -308,7 +308,7 @@ export default function NewCallPage() {
     <>
       <PageHeader
         title="New call"
-        subtitle="Starts in On scheduling. The Expert can change until it’s scheduled."
+        subtitle="Starts in On scheduling. The Expert can change until it’s scheduled. Fields marked * are required."
         actions={
           <Button variant="outlined" color="inherit" startIcon={<CalendarMonthRounded />} component={RouterLink} to="/calendar?expert=all">
             All experts calendar
@@ -318,9 +318,9 @@ export default function NewCallPage() {
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1fr) 320px' }, alignItems: 'start' }}>
         <Stack spacing={2} sx={{ minWidth: 0 }}>
-          <Step n={1} title="Profile" subtitle="Approved profiles only. Ask the Founder to add someone new.">
+          <Step n={1} title="Profile *" subtitle="Approved, active profiles only. Ask the Founder to add someone new.">
             <Autocomplete
-              options={profiles.data ?? []}
+              options={(profiles.data ?? []).filter((p) => p.isActive)}
               loading={profiles.isLoading}
               value={form.profile}
               onChange={(_, v) => set('profile', v)}
@@ -345,7 +345,7 @@ export default function NewCallPage() {
                   </Stack>
                 </li>
               )}
-              renderInput={(p) => <TextField {...p} label="Profile" placeholder="Search by name or experience" error={Boolean(errors.profileId)} helperText={errors.profileId} autoFocus />}
+              renderInput={(p) => <TextField {...p} label="Profile" required placeholder="Search by name or experience" error={Boolean(errors.profileId)} helperText={errors.profileId} autoFocus />}
             />
             {form.profile && (
               <Stack direction="row" spacing={1.5} sx={{ mt: 2, p: 1.5, borderRadius: '10px', bgcolor: 'background.subtle' }}>
@@ -369,11 +369,12 @@ export default function NewCallPage() {
             )}
           </Step>
 
-          <Step n={2} title="Project">
+          <Step n={2} title="Project *">
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
               <TextField
                 select
                 label="Platform"
+                required
                 value={form.platformId}
                 onChange={(e) => set('platformId', e.target.value)}
                 error={Boolean(errors.platformId)}
@@ -393,6 +394,7 @@ export default function NewCallPage() {
               </TextField>
               <TextField
                 label="Platform associate"
+                required
                 value={form.platformAssociateName}
                 onChange={(e) => set('platformAssociateName', e.target.value)}
                 error={Boolean(errors.platformAssociateName)}
@@ -421,13 +423,14 @@ export default function NewCallPage() {
                     </li>
                   )}
                   renderInput={(p) => (
-                    <TextField {...p} label="Associate" helperText={errors.associateId ?? 'Owns scheduling for this call'} error={Boolean(errors.associateId)} />
+                    <TextField {...p} label="Associate" required helperText={errors.associateId ?? 'Owns scheduling for this call'} error={Boolean(errors.associateId)} />
                   )}
                 />
               )}
               <TextField
                 sx={{ gridColumn: '1 / -1' }}
                 label="Project details"
+                required
                 multiline
                 minRows={4}
                 value={form.projectDetails}
@@ -446,7 +449,7 @@ export default function NewCallPage() {
             </Box>
           </Step>
 
-          <Step n={3} title="When" subtitle={`Team time · ${zoneCity(zone)} (${zoneAbbr(zone, start ?? DateTime.now())})`}>
+          <Step n={3} title="When *" subtitle={`Team time · ${zoneCity(zone)} (${zoneAbbr(zone, start ?? DateTime.now())})`}>
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
               <DatePicker
                 label={`Date (${zoneAbbr(zone)})`}

@@ -27,6 +27,8 @@ export const qk = {
     detail: (id: string) => ['profiles', 'detail', id] as const,
   },
   notifications: ['notifications'] as const,
+  presence: ['presence'] as const,
+  dbDumps: ['db-dumps'] as const,
   chat: {
     all: ['chat'] as const,
     conversations: ['chat', 'conversations'] as const,

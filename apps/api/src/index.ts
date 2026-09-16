@@ -3,6 +3,7 @@ import { createApp } from './app';
 import { config } from './config';
 import { prisma } from './db';
 import { logger } from './logger';
+import { startDumpSchedule } from './backup/dumps';
 import { createSocketServer } from './realtime/socket';
 
 const app = createApp();
@@ -12,6 +13,9 @@ const io = createSocketServer(server);
 server.listen(config.PORT, config.HOST, () => {
   logger.info(`God System API listening on http://${config.HOST}:${config.PORT}`);
 });
+
+// Nightly database dumps for the Founder (§6.13); catches up after downtime.
+if (config.DB_DUMPS_ENABLED) startDumpSchedule();
 
 async function shutdown(signal: string) {
   logger.info({ signal }, 'shutting down');

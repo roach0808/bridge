@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   ChatMessageDTO,
   ConversationDTO,
+  DbDumpDTO,
   TodoDTO,
   TodoStatus,
   BankDTO,
@@ -26,6 +27,7 @@ import type {
   PlatformDTO,
   PlatformInput,
   PlatformRegistration,
+  PresenceDTO,
   ProfileDTO,
   ProfileInput,
   ProfileStatus,
@@ -151,7 +153,9 @@ export function createApiClient(options: ClientOptions) {
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/photo`, { body: { dataUrl } }),
       removePhoto: (id: string) => del<ProfileDTO>(`/profiles/${enc(id)}/photo`),
       /** Founder: a Profile's registration status and/or rate (USD per hour) on one platform. */
-      setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number }) =>
+      /** Founder: deactivate a Profile (Founders only see it afterwards) or bring it back. */
+      setActive: (id: string, isActive: boolean) => patch<ProfileDTO>(`/profiles/${enc(id)}/active`, { isActive }),
+      setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number | null }) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}`, { body }),
     },
 
@@ -195,6 +199,17 @@ export function createApiClient(options: ClientOptions) {
         post<void>('/push/subscriptions', subscription),
       unsubscribe: (endpoint: string) => del<void>('/push/subscriptions', { endpoint }),
       test: () => post<{ browsers: number }>('/push/test'),
+    },
+
+    presence: {
+      /** Online / away / offline for everyone the caller may chat with. */
+      list: () => get<PresenceDTO[]>('/presence'),
+    },
+
+    dbDumps: {
+      list: () => get<DbDumpDTO[]>('/db-dumps'),
+      run: () => post<DbDumpDTO>('/db-dumps'),
+      download: (id: string) => http.download(`/db-dumps/${enc(id)}/download`),
     },
 
     notifications: {

@@ -10,6 +10,8 @@ import { banksRouter } from './banks/banks.routes';
 import { calendarRouter } from './calendar/calendar.routes';
 import { callsRouter } from './calls/calls.routes';
 import { chatRouter } from './chat/chat.routes';
+import { dumpsRouter } from './backup/dumps.routes';
+import { presenceRouter } from './presence/presence.routes';
 import { config } from './config';
 import { dashboardRouter } from './dashboard/dashboard.routes';
 import { prisma } from './db';
@@ -70,6 +72,8 @@ export function createApp() {
   api.use(profilesRouter);
   api.use(callsRouter);
   api.use(chatRouter);
+  api.use(presenceRouter);
+  api.use(dumpsRouter);
   api.use(calendarRouter);
   api.use(notificationsRouter);
   api.use(dashboardRouter);

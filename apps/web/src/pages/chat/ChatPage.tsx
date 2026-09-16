@@ -42,11 +42,13 @@ import { useAuth, useMe } from '@/auth/AuthProvider';
 import { BrowserNotificationsPrompt } from '@/components/BrowserNotifications';
 import { EmptyState, ErrorState } from '@/components/common';
 import { RoleBadge, UserAvatar } from '@/components/identity';
+import { PresenceBadge, presenceLabel } from '@/components/PresenceDot';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { inZone } from '@/lib/time';
+import { usePresence } from '@/realtime/PresenceProvider';
 import { appendChatMessage } from '@/realtime/RealtimeProvider';
 import { ROLE_COLORS } from '@/theme/theme';
 import { SearchField, useIsPhone } from '../admin/adminShared';
@@ -110,7 +112,9 @@ function NewChatDialog({ open, onClose, onPick }: { open: boolean; onClose: () =
                     <ListSubheader sx={{ lineHeight: '32px', bgcolor: 'background.paper' }}>{ROLE_LABELS[role]}s</ListSubheader>
                     {people.map((u) => (
                       <ListItemButton key={u.id} onClick={() => onPick(u)} sx={{ py: 1 }}>
-                        <UserAvatar avatarId={u.avatarId} photoId={u.photoId} label={u.nickname} size={32} />
+                        <PresenceBadge userId={u.id} size={9}>
+                          <UserAvatar avatarId={u.avatarId} photoId={u.photoId} label={u.nickname} size={32} />
+                        </PresenceBadge>
                         <Typography variant="body2" fontWeight={500} sx={{ ml: 1.5 }}>
                           {u.nickname}
                         </Typography>
@@ -124,6 +128,16 @@ function NewChatDialog({ open, onClose, onPick }: { open: boolean; onClose: () =
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** "Online", "Away" or "Last seen …" beside the name in the chat header. */
+function PresenceText({ userId }: { userId: string }) {
+  const presence = usePresence(userId);
+  return (
+    <Typography variant="caption" color={presence.status === 'online' ? 'success.main' : 'text.secondary'}>
+      {presenceLabel(presence)}
+    </Typography>
   );
 }
 
@@ -190,7 +204,9 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
             {rows.map((c) => (
               <ListItemButton key={c.id} selected={c.id === activeId} onClick={() => onOpen(c.id)} sx={{ py: 1.25, px: 2, gap: 1.5, alignItems: 'flex-start' }}>
                 <Badge color="primary" variant="dot" invisible={!c.unreadCount} overlap="circular">
-                  <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={40} />
+                  <PresenceBadge userId={c.other.id}>
+                    <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={40} />
+                  </PresenceBadge>
                 </Badge>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Stack direction="row" alignItems="center" spacing={0.75}>
@@ -482,13 +498,16 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
         )}
         {c && (
           <>
-            <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={38} />
+            <PresenceBadge userId={c.other.id} size={11}>
+              <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={38} />
+            </PresenceBadge>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="subtitle1" noWrap>
                 {c.other.nickname}
               </Typography>
               <Stack direction="row" spacing={1} alignItems="center">
                 <RoleBadge role={c.other.role} />
+                <PresenceText userId={c.other.id} />
                 {c.openTodoCount > 0 && (
                   <Typography variant="caption" sx={{ color: TODO_COLORS.open, fontWeight: 600 }}>
                     {c.openTodoCount} open to-do{c.openTodoCount === 1 ? '' : 's'}

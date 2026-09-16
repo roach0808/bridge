@@ -30,13 +30,20 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { DEFAULT_PLATFORM_RATE, type ProfileDTO, type ProfileStatus } from '@god/shared';
+import type { ProfileDTO, ProfileStatus } from '@god/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState } from 'react';
 import { useMe } from '@/auth/AuthProvider';
 import { EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { BanksDialog } from '@/components/BanksDialog';
-import { DotPill, PlatformRateField, PlatformStatusSelect, ProfileDetailsDialog } from '@/components/ProfileDetails';
+import {
+  DeactivatedPill,
+  DotPill,
+  PlatformRateField,
+  PlatformStatusSelect,
+  ProfileActiveToggle,
+  ProfileDetailsDialog,
+} from '@/components/ProfileDetails';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
@@ -59,7 +66,7 @@ export function ProfileStatusChip({ status }: { status: ProfileStatus }) {
   return <DotPill color={meta.color}>{meta.label}</DotPill>;
 }
 
-type Filter = 'all' | ProfileStatus | 'needs_bank';
+type Filter = 'all' | ProfileStatus | 'needs_bank' | 'deactivated';
 type View = 'cards' | 'table';
 const VIEW_KEY = 'god.profiles.view';
 
@@ -103,11 +110,12 @@ export default function ProfilesPage() {
   });
 
   const counts = useMemo(() => {
-    const c: Record<Filter, number> = { all: 0, pending: 0, approved: 0, rejected: 0, needs_bank: 0 };
+    const c: Record<Filter, number> = { all: 0, pending: 0, approved: 0, rejected: 0, needs_bank: 0, deactivated: 0 };
     for (const p of query.data ?? []) {
       c.all++;
       c[p.status]++;
       if (p.needsBank) c.needs_bank++;
+      if (!p.isActive) c.deactivated++;
     }
     return c;
   }, [query.data]);
@@ -115,17 +123,38 @@ export default function ProfilesPage() {
   const visible = useMemo(
     () =>
       (query.data ?? [])
-        .filter((p) => filter === 'all' || (filter === 'needs_bank' ? p.needsBank : p.status === filter))
+        .filter((p) =>
+          filter === 'all'
+            ? true
+            : filter === 'needs_bank'
+              ? p.needsBank
+              : filter === 'deactivated'
+                ? !p.isActive
+                : p.status === filter,
+        )
         .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name)),
     [query.data, filter],
   );
 
   // Non-founders only see statuses they actually have (their own submissions).
-  const filterOptions = (['all', 'pending', 'approved', 'rejected', 'needs_bank'] as const)
-    .filter((f) => (f === 'needs_bank' ? isFounder : isFounder || f === 'all' || (!isExpert && (f === 'approved' || counts[f] > 0))))
+  const filterOptions = (['all', 'pending', 'approved', 'rejected', 'needs_bank', 'deactivated'] as const)
+    .filter((f) =>
+      f === 'needs_bank' || f === 'deactivated'
+        ? isFounder
+        : isFounder || f === 'all' || (!isExpert && (f === 'approved' || counts[f] > 0)),
+    )
     .map((f) => ({
       value: f,
-      label: f === 'all' ? 'All' : f === 'pending' ? 'Pending' : f === 'needs_bank' ? 'Needs bank' : PROFILE_STATUS_META[f].label,
+      label:
+        f === 'all'
+          ? 'All'
+          : f === 'pending'
+            ? 'Pending'
+            : f === 'needs_bank'
+              ? 'Needs bank'
+              : f === 'deactivated'
+                ? 'Deactivated'
+                : PROFILE_STATUS_META[f].label,
       count: query.data ? counts[f] : undefined,
     }));
 
@@ -386,9 +415,10 @@ function ProfileCard({
                 </Tooltip>
               )}
             </Stack>
-            <Box sx={{ mt: 0.5 }}>
+            <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.5 }} useFlexGap flexWrap="wrap">
               <ProfileStatusChip status={p.status} />
-            </Box>
+              {!p.isActive && <DeactivatedPill />}
+            </Stack>
           </Box>
           {canEdit && (
             <Tooltip title={authorCanEdit ? 'Edit and resubmit' : 'Edit'}>
@@ -436,6 +466,7 @@ function ProfileCard({
         <Button size="small" color="inherit" onClick={onOpen} sx={{ color: 'text.secondary' }}>
           Details
         </Button>
+        {isFounder && <ProfileActiveToggle profile={p} />}
         {isFounder && p.status === 'approved' && (
           <Button size="small" color="inherit" onClick={() => setBanksOpen(true)} sx={{ gap: 0.75, color: 'text.secondary' }}>
             {p.needsBank && <Box component="span" sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }} />}
@@ -500,15 +531,23 @@ function ProfilesTable({ profiles, onOpen }: { profiles: ProfileDTO[]; onOpen: (
                 </Stack>
               </TableCell>
               <TableCell>
-                <ProfileStatusChip status={p.status} />
+                <Stack spacing={0.5} alignItems="flex-start">
+                  <ProfileStatusChip status={p.status} />
+                  {!p.isActive && <DeactivatedPill />}
+                </Stack>
               </TableCell>
               {platforms.map((pl) => {
                 const entry = p.platformStatuses?.find((s) => s.platform.id === pl.id);
                 return (
                   <TableCell key={pl.id}>
                     <Stack spacing={0.5} alignItems="flex-start">
-                      <PlatformStatusSelect profile={p} platformId={pl.id} status={entry?.status ?? 'not_registered'} />
-                      <PlatformRateField profile={p} platformId={pl.id} rate={entry?.rate ?? DEFAULT_PLATFORM_RATE} />
+                      <PlatformStatusSelect profile={p} platformId={pl.id} status={entry?.status ?? 'not_registered'} rate={entry?.rate ?? null} />
+                      <PlatformRateField
+                        profile={p}
+                        platformId={pl.id}
+                        rate={entry?.rate ?? null}
+                        registered={entry?.status === 'registered'}
+                      />
                     </Stack>
                   </TableCell>
                 );

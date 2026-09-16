@@ -82,9 +82,10 @@ export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAcc
   return {
     edit: ownsScheduling && (scheduling || actor.role === 'founder'),
     reassignAssociate: supervises,
-    reassignExpert:
-      (supervises && scheduling) ||
-      (actor.role === 'associate' && call.associateId === actor.id && call.status === 'on_scheduling'),
+    // The Associate may swap the Expert for as long as they own the scheduling stage.
+    reassignExpert: (supervises || (actor.role === 'associate' && call.associateId === actor.id)) && scheduling,
     editInvoice: actor.role === 'founder',
+    editGptLink: actor.role === 'founder',
+    editRate: ownsScheduling,
   };
 }

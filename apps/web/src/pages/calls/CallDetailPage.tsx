@@ -33,6 +33,7 @@ import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { joinCallRoom } from '@god/api-client';
 import {
   CALL_DURATIONS,
+  MAX_PLATFORM_RATE,
   FEATURES,
   MAX_ACTUAL_DURATION_MINUTES,
   STATUS_LABELS,
@@ -591,6 +592,137 @@ function InvoiceCard({ call }: { call: CallDTO }) {
   );
 }
 
+/** The research link: set by the Founder, read by the Founder and the Expert. */
+function GptLinkCard({ call }: { call: CallDTO }) {
+  const toast = useToast();
+  const update = useUpdateCall(call);
+  const [link, setLink] = useState(call.gptLink ?? '');
+  useEffect(() => setLink(call.gptLink ?? ''), [call.gptLink]);
+  const editable = call.permissions.editGptLink;
+  const trimmed = link.trim();
+  const valid = trimmed === '' || /^https?:\/\/\S+$/i.test(trimmed);
+  const dirty = trimmed !== (call.gptLink ?? '');
+
+  return (
+    <SectionCard title="GPT link">
+      <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.5 }}>
+        Only the Founder and the Expert can see this.
+      </Typography>
+      {editable ? (
+        <Stack spacing={1.5}>
+          <TextField
+            label="Link"
+            type="url"
+            value={link}
+            onChange={(e) => setLink(e.target.value)}
+            error={!valid}
+            helperText={valid ? 'Paste the research chat for this call' : 'Enter a full link starting with https://'}
+            placeholder="https://chatgpt.com/share/…"
+          />
+          <Stack direction="row" spacing={1.5} alignItems="center">
+            <Button
+              variant="outlined"
+              disabled={!dirty || !valid || update.isPending}
+              onClick={() =>
+                update.mutate(
+                  { gptLink: trimmed || null },
+                  { onSuccess: () => toast.success('GPT link saved'), onError: (e) => toast.error(errorMessage(e)) },
+                )
+              }
+            >
+              {update.isPending ? <CircularProgress size={18} /> : 'Save link'}
+            </Button>
+            {call.gptLink && (
+              <Button size="small" color="inherit" href={call.gptLink} target="_blank" rel="noopener noreferrer" sx={{ color: 'text.secondary' }}>
+                Open
+              </Button>
+            )}
+          </Stack>
+        </Stack>
+      ) : call.gptLink ? (
+        <Button variant="contained" href={call.gptLink} target="_blank" rel="noopener noreferrer">
+          Open GPT link
+        </Button>
+      ) : (
+        <Typography variant="body2" color="text.secondary">
+          The Founder has not added one yet.
+        </Typography>
+      )}
+    </SectionCard>
+  );
+}
+
+/** The Profile's rate on this platform, and a special rate for this call only. */
+function RateCard({ call }: { call: CallDTO }) {
+  const toast = useToast();
+  const update = useUpdateCall(call);
+  const text = (r: number | null) => (r === null ? '' : String(r));
+  const [override, setOverride] = useState(text(call.rateOverride));
+  useEffect(() => setOverride(text(call.rateOverride)), [call.rateOverride]);
+  const empty = override.trim() === '';
+  const value = Number(override);
+  const valid = empty || (Number.isFinite(value) && value >= 0 && value <= MAX_PLATFORM_RATE);
+  const next = empty ? null : Math.round(value * 100) / 100;
+  const dirty = next !== call.rateOverride;
+  const effective = call.rateOverride ?? call.platformRate;
+
+  return (
+    <SectionCard title="Rate">
+      <Stack spacing={1.5}>
+        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: '1fr 1fr' }}>
+          <Field label={`${call.platform.name} rate`}>
+            {call.platformRate === null ? (
+              <Typography variant="body2" color="text.disabled">
+                Not set
+              </Typography>
+            ) : (
+              `$${call.platformRate}/h`
+            )}
+          </Field>
+          <Field label="This call">
+            {effective === null ? (
+              <Typography variant="body2" color="text.disabled">
+                Not set
+              </Typography>
+            ) : (
+              <Typography variant="body2" fontWeight={600}>
+                ${effective}/h{call.rateOverride !== null ? ' (special)' : ''}
+              </Typography>
+            )}
+          </Field>
+        </Box>
+        {call.permissions.editRate && (
+          <Stack direction="row" spacing={1.5} alignItems="flex-start">
+            <TextField
+              label="Special rate for this call"
+              type="number"
+              value={override}
+              onChange={(e) => setOverride(e.target.value)}
+              error={!valid}
+              helperText={valid ? 'Leave empty to use the platform rate' : 'Enter a rate of 0 or more'}
+              slotProps={{ htmlInput: { min: 0, step: 50 } }}
+              sx={{ maxWidth: 260 }}
+            />
+            <Button
+              variant="outlined"
+              sx={{ mt: 1 }}
+              disabled={!dirty || !valid || update.isPending}
+              onClick={() =>
+                update.mutate(
+                  { rateOverride: next },
+                  { onSuccess: () => toast.success('Rate saved'), onError: (e) => toast.error(errorMessage(e)) },
+                )
+              }
+            >
+              {update.isPending ? <CircularProgress size={18} /> : 'Save'}
+            </Button>
+          </Stack>
+        )}
+      </Stack>
+    </SectionCard>
+  );
+}
+
 function CallReportCard({ call }: { call: CallDTO }) {
   if (!call.ninjaLink && call.rating === null && call.actualDurationMinutes === null) return null;
   return (
@@ -875,6 +1007,9 @@ export default function CallDetailPage() {
               </Alert>
             )}
           </SectionCard>
+
+          {(me.role === 'founder' || me.role === 'expert') && <GptLinkCard call={call} />}
+          {me.role !== 'expert' && <RateCard call={call} />}
 
           {me.role === 'founder' && ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'].includes(call.status) && (
             <InvoiceCard call={call} />

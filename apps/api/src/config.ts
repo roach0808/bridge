@@ -24,6 +24,11 @@ const schema = z.object({
     .enum(['true', 'false'])
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
+  /** Nightly database dumps; off in tests. */
+  DB_DUMPS_ENABLED: z
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   EXPO_ACCESS_TOKEN: z.string().optional(),
   /** Web Push (browser notifications). Disabled unless both keys are set; generate with `npx web-push generate-vapid-keys`. */

@@ -145,6 +145,25 @@ export class HttpClient {
     return data as T;
   }
 
+  /**
+   * Downloads a file (the database dump) with the access token attached, since
+   * a plain link cannot send one. Refreshes once on an expired token.
+   */
+  async download(path: string, retry = true): Promise<{ blob: Blob; filename: string | null }> {
+    const headers: Record<string, string> = {};
+    if (this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
+    const res = await this.fetchImpl(`${this.apiBase}${path}`, {
+      method: 'GET',
+      headers,
+      credentials: this.options.withCredentials ? 'include' : 'same-origin',
+    });
+    if (res.status === 401 && retry && (await this.refresh())) return this.download(path, false);
+    if (!res.ok) throw new ApiError(res.status, 'http_error', 'Could not download the file');
+    const disposition = res.headers.get('content-disposition') ?? '';
+    const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? null;
+    return { blob: await res.blob(), filename };
+  }
+
   async request<T>(
     method: string,
     path: string,

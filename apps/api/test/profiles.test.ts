@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, expectError, prisma, seedFixtures, type Fixtures } from './helpers';
+import { as, expectError, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -198,12 +198,30 @@ describe('experts and profiles', () => {
 });
 
 describe('platform statuses', () => {
-  it('every platform is listed, defaulting to not_registered at a rate of 1000', async () => {
+  it('every platform is listed, not registered and with no rate yet', async () => {
     const res = await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`);
     expect(res.body.platformStatuses).toEqual([
-      { platform: { id: fx.platform.id, name: 'GLG', priority: 1 }, status: 'not_registered', rate: 1000 },
-      { platform: { id: fx.platform2.id, name: 'AlphaSights', priority: 2 }, status: 'not_registered', rate: 1000 },
+      { platform: { id: fx.platform.id, name: 'GLG', priority: 1 }, status: 'not_registered', rate: null },
+      { platform: { id: fx.platform2.id, name: 'AlphaSights', priority: 2 }, status: 'not_registered', rate: null },
     ]);
+  });
+
+  it('a rate is required to mark a profile registered, and stays editable after', async () => {
+    const f = await as(fx.founder);
+    const url = `/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`;
+    const refused = await f.put(url, { status: 'registered' });
+    expectError(refused, 400, 'validation_error');
+    expect(refused.body.error.details.issues[0].path).toBe('rate');
+    expect((await prisma.profilePlatformStatus.count())).toBe(0);
+
+    // With a rate it goes through, and the rate can be changed afterwards.
+    expect((await f.put(url, { status: 'registered', rate: 1200 })).body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1200 });
+    expect((await f.put(url, { rate: 1350 })).body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1350 });
+    // Not registered needs no rate at all.
+    expect((await f.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform2.id}`, { status: 'banned' })).body.platformStatuses[1]).toMatchObject({
+      status: 'banned',
+      rate: null,
+    });
   });
 
   it('the founder sets a rate per platform without touching the status, and back', async () => {
@@ -213,12 +231,14 @@ describe('platform statuses', () => {
     expect(res.status, res.text).toBe(200);
     expect(res.body.platformStatuses).toEqual([
       expect.objectContaining({ status: 'not_registered', rate: 1250.5 }),
-      expect.objectContaining({ status: 'not_registered', rate: 1000 }),
+      expect.objectContaining({ status: 'not_registered', rate: null }),
     ]);
     res = await f.put(url(fx.platform.id), { status: 'registered' });
     expect(res.body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1250.5 });
     res = await f.put(url(fx.platform2.id), { status: 'banned', rate: 0 });
     expect(res.body.platformStatuses[1]).toMatchObject({ status: 'banned', rate: 0 });
+    // A registered platform cannot have its rate cleared.
+    expectError(await f.put(url(fx.platform.id), { rate: null }), 400);
 
     // Managers and associates see the rates; only the founder changes them.
     expect((await (await as(fx.m1)).get(`/profiles/${fx.approvedProfile.id}`)).body.platformStatuses[0].rate).toBe(1250.5);
@@ -235,7 +255,7 @@ describe('platform statuses', () => {
     const res = await f.put(url, { status: 'banned' });
     expect(res.status, res.text).toBe(200);
     expect(res.body.platformStatuses[1]).toMatchObject({ status: 'banned' });
-    expect((await f.put(url, { status: 'registered' })).body.platformStatuses[1].status).toBe('registered');
+    expect((await f.put(url, { status: 'registered', rate: 900 })).body.platformStatuses[1].status).toBe('registered');
 
     const m1 = await as(fx.m1);
     expect((await m1.get('/profiles')).body.find((p: { id: string }) => p.id === fx.approvedProfile.id).platformStatuses[1].status).toBe('registered');
@@ -246,8 +266,8 @@ describe('platform statuses', () => {
   it('validates the status and the ids', async () => {
     const f = await as(fx.founder);
     expectError(await f.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { status: 'pending' }), 400);
-    expectError(await f.put(`/profiles/${fx.approvedProfile.id}/platforms/00000000-0000-4000-8000-000000000000`, { status: 'registered' }), 404);
-    expectError(await f.put(`/profiles/00000000-0000-4000-8000-000000000000/platforms/${fx.platform.id}`, { status: 'registered' }), 404);
+    expectError(await f.put(`/profiles/${fx.approvedProfile.id}/platforms/00000000-0000-4000-8000-000000000000`, { status: 'registered', rate: 10 }), 404);
+    expectError(await f.put(`/profiles/00000000-0000-4000-8000-000000000000/platforms/${fx.platform.id}`, { status: 'registered', rate: 10 }), 404);
   });
 });
 
@@ -267,5 +287,50 @@ describe('current address is founder-only', () => {
     const submitted = await (await as(fx.a1)).post('/profiles', profileBody({ name: 'Sam Submit', currentAddress: 'Somewhere' }));
     expect(submitted.status).toBe(201);
     expect((await prisma.profile.findUniqueOrThrow({ where: { id: submitted.body.id } })).currentAddress).toBeNull();
+  });
+});
+
+describe('profile deactivation', () => {
+  it('only the founder sees and books a deactivated profile', async () => {
+    const f = await as(fx.founder);
+    const res = await f.patch(`/profiles/${fx.approvedProfile.id}/active`, { isActive: false });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.isActive).toBe(false);
+
+    // Hidden from everyone else, listed for the founder.
+    expect((await f.get('/profiles')).body.some((p: { id: string }) => p.id === fx.approvedProfile.id)).toBe(true);
+    for (const who of ['m1', 'a1'] as const) {
+      const list = await (await as(fx[who])).get('/profiles');
+      expect(list.body.some((p: { id: string }) => p.id === fx.approvedProfile.id), who).toBe(false);
+      expectError(await (await as(fx[who])).get(`/profiles/${fx.approvedProfile.id}`), 404);
+    }
+
+    // It cannot be used for a new call while deactivated.
+    const call = {
+      platformId: fx.platform.id,
+      profileId: fx.approvedProfile.id,
+      expertId: fx.e1.id,
+      scheduledAt: '2027-06-01T10:00:00Z',
+      durationMinutes: 30,
+      projectDetails: 'x',
+      platformAssociateName: 'y',
+    };
+    expectError(await (await as(fx.a1)).post('/calls', call), 409, 'profile_not_approved');
+
+    // Bringing it back restores everything.
+    expect((await f.patch(`/profiles/${fx.approvedProfile.id}/active`, { isActive: true })).body.isActive).toBe(true);
+    expect((await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`)).status).toBe(200);
+    expect((await (await as(fx.a1)).post('/calls', call)).status).toBe(201);
+  });
+
+  it('managers, associates and experts cannot deactivate a profile', async () => {
+    for (const who of ['m1', 'a1', 'e1'] as const) {
+      expectError(await (await as(fx[who])).patch(`/profiles/${fx.approvedProfile.id}/active`, { isActive: false }), 403);
+    }
+    // An Expert keeps seeing the profiles of their calls only while they are active.
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    expect((await (await as(fx.e1)).get('/profiles')).body).toHaveLength(1);
+    await prisma.profile.update({ where: { id: fx.approvedProfile.id }, data: { isActive: false } });
+    expect((await (await as(fx.e1)).get('/profiles')).body).toEqual([]);
   });
 });

@@ -142,24 +142,25 @@ export const profileSchema = z.object({
 });
 export const updateProfileSchema = profileSchema.partial();
 
-/** A Profile's rate on a platform when the Founder hasn't set one (USD per hour). */
-export const DEFAULT_PLATFORM_RATE = 1000;
 export const MAX_PLATFORM_RATE = 1_000_000;
 
-/** Founder sets a Profile's standing and/or rate on one platform. */
+/** Founder sets a Profile's standing and/or rate on one platform (USD per hour). */
+export const rate = z.coerce
+  .number({ invalid_type_error: 'Enter a number' })
+  .min(0, 'The rate cannot be negative')
+  .max(MAX_PLATFORM_RATE, 'That rate is too high')
+  .multipleOf(0.01, 'Use at most two decimals');
+
 export const profilePlatformStatusSchema = z
   .object({
     status: z.enum(PLATFORM_REGISTRATIONS).optional(),
-    rate: z.coerce
-      .number({ invalid_type_error: 'Enter a number' })
-      .min(0, 'The rate cannot be negative')
-      .max(MAX_PLATFORM_RATE, 'That rate is too high')
-      .multipleOf(0.01, 'Use at most two decimals')
-      .optional(),
+    /** Required while registered; null clears it. */
+    rate: rate.nullable().optional(),
   })
   .refine((v) => v.status !== undefined || v.rate !== undefined, 'Nothing to update');
 
 export const rejectProfileSchema = z.object({ reason: trimmed('Reason', 1000) });
+export const profileActiveSchema = z.object({ isActive: z.boolean() });
 export const listProfilesQuerySchema = z.object({
   q: z.string().trim().optional(),
   status: z.enum(PROFILE_STATUSES).optional(),
@@ -201,6 +202,16 @@ export const updateCallSchema = z
       .regex(/^[A-Z]{3}$/, 'Use a three-letter currency code')
       .nullable()
       .optional(),
+    /** Founder only; the Expert reads it but never writes it. */
+    gptLink: z
+      .string()
+      .trim()
+      .url('Enter a valid link')
+      .nullable()
+      .optional()
+      .or(z.literal('').transform(() => null)),
+    /** A special rate for this call only; null falls back to the Profile's platform rate. */
+    rateOverride: rate.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 

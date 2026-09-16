@@ -93,6 +93,8 @@ model User {
   /// An uploaded picture; shown instead of the catalog avatar when set.
   photoId      String?  @unique @map("photo_id") @db.Uuid
   timeZone     String   @default("America/New_York") @map("time_zone")
+  /// Last time the user was connected; used for "last seen" when they are offline.
+  lastSeenAt   DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
@@ -173,6 +175,8 @@ model Profile {
   avatarId        String        @map("avatar_id")
   photoId         String?       @unique @map("photo_id") @db.Uuid
   status          ProfileStatus @default(approved)
+  /// Deactivated Profiles are visible to Founders only and cannot be booked.
+  isActive        Boolean       @default(true) @map("is_active")
   createdById     String        @map("created_by") @db.Uuid
   reviewedById    String?       @map("reviewed_by") @db.Uuid
   reviewedAt      DateTime?     @map("reviewed_at") @db.Timestamptz(3)
@@ -211,6 +215,10 @@ model Call {
   invoiceCurrency       String?    @map("invoice_currency") @db.Char(3)
   /// Meeting link the Expert adds when the call starts.
   ninjaLink             String?    @map("ninja_link")
+  /// Research link set by the Founder; only the Founder and the Expert may read it.
+  gptLink               String?    @map("gpt_link")
+  /// A special rate for this call only (USD per hour), overriding the Profile's platform rate.
+  rateOverride          Decimal?   @map("rate_override") @db.Decimal(12, 2)
   /// Entered by the Expert when finishing: how long the call really took.
   actualDurationMinutes Int?       @map("actual_duration_minutes")
   /// Expert's 1–5 rating of how the call went, plus their answer.
@@ -387,8 +395,8 @@ model ProfilePlatformStatus {
   profileId  String               @map("profile_id") @db.Uuid
   platformId String               @map("platform_id") @db.Uuid
   status     PlatformRegistration @default(not_registered)
-  /// The Profile's rate on this platform (USD per hour), set by the Founder. Never shown to Experts.
-  rate       Decimal              @default(1000) @db.Decimal(12, 2)
+  /// Rate per hour (USD) on this platform, required once registered. Never shown to Experts.
+  rate       Decimal?             @db.Decimal(12, 2)
   updatedAt  DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   profile  Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
@@ -479,4 +487,25 @@ model WebPushSubscription {
 
   @@index([userId])
   @@map("web_push_subscriptions")
+}
+
+enum DbDumpTrigger {
+  scheduled
+  manual
+}
+
+/// A database dump kept for the Founder (gzipped JSON of every table).
+model DbDump {
+  id          String        @id @default(uuid()) @db.Uuid
+  trigger     DbDumpTrigger @default(scheduled)
+  succeeded   Boolean       @default(true)
+  error       String?
+  byteSize    Int           @map("byte_size")
+  tableCounts Json          @map("table_counts")
+  /// gzip of the JSON dump; null when the dump failed.
+  data        Bytes?
+  createdAt   DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([createdAt])
+  @@map("db_dumps")
 }

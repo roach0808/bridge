@@ -3,6 +3,7 @@ import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
 import type { BlockRule, Occurrence } from './scheduleBlocks';
 import type { ChatMessageKind, TodoStatus } from './chat';
+import type { PresenceStatus } from './presence';
 import type { PlatformRegistration } from './schemas';
 
 /** The only identity ever exposed about another user (§2.2). */
@@ -61,8 +62,8 @@ export type ProfileStatus = 'pending' | 'approved' | 'rejected';
 export interface ProfilePlatformStatusDTO {
   platform: Pick<PlatformDTO, 'id' | 'name' | 'priority'>;
   status: PlatformRegistration;
-  /** USD per hour; 1000 until the Founder sets it. */
-  rate: number;
+  /** USD per hour. Null until the Founder sets it; required while registered. */
+  rate: number | null;
 }
 
 export interface ProfileDTO {
@@ -82,6 +83,8 @@ export interface ProfileDTO {
   avatarId: string;
   photoId: string | null;
   status: ProfileStatus;
+  /** Deactivated Profiles are listed for Founders only and cannot be booked. */
+  isActive: boolean;
   /**
    * One entry per platform (by priority), `not_registered` when never set.
    * Null for Experts, who only see the personal details.
@@ -119,6 +122,11 @@ export interface CallDTO {
   invoiceCurrency: string | null;
   /** Added by the Expert when the call starts. */
   ninjaLink: string | null;
+  /** Research link. Only the Founder (who sets it) and the Expert receive it. */
+  gptLink: string | null;
+  /** The Profile's rate on the call's platform, and this call's override. Null for Experts. */
+  platformRate: number | null;
+  rateOverride: number | null;
   /** Entered by the Expert when finishing. */
   actualDurationMinutes: number | null;
   /** 1–5, entered by the Expert when finishing. */
@@ -137,6 +145,10 @@ export interface CallPermissions {
   reassignAssociate: boolean;
   reassignExpert: boolean;
   editInvoice: boolean;
+  /** Founder only. */
+  editGptLink: boolean;
+  /** The call's Associate, their Manager, or the Founder. */
+  editRate: boolean;
 }
 
 export interface StatusHistoryDTO {
@@ -362,6 +374,26 @@ export interface TodoDTO extends TodoSummary {
   createdAt: string;
 }
 
+/** Someone's presence, sent to the people who may chat with them. */
+export interface PresenceDTO {
+  userId: string;
+  status: PresenceStatus;
+  /** When they were last connected; null while online. */
+  lastSeenAt: string | null;
+}
+
+/** A database dump kept for the Founder (§6.13). */
+export interface DbDumpDTO {
+  id: string;
+  trigger: 'scheduled' | 'manual';
+  succeeded: boolean;
+  error: string | null;
+  byteSize: number;
+  /** Rows per table at the time of the dump. */
+  tableCounts: Record<string, number>;
+  createdAt: string;
+}
+
 export interface ChatReadEvent {
   conversationId: string;
   userId: string;
@@ -396,6 +428,7 @@ export interface ServerToClientEvents {
   'chat:message': (message: ChatMessageDTO) => void;
   'chat:todo': (todo: TodoDTO | TodoRemovedEvent) => void;
   'chat:read': (event: ChatReadEvent) => void;
+  'presence:update': (presence: PresenceDTO[]) => void;
   'user:typing': (payload: { callId: string; userId: string; nickname: string }) => void;
   'session:revoked': () => void;
 }
@@ -404,4 +437,8 @@ export interface ClientToServerEvents {
   'call:join': (payload: { callId: string }, ack?: (res: { ok: boolean; error?: string }) => void) => void;
   'call:leave': (payload: { callId: string }) => void;
   'user:typing': (payload: { callId: string }) => void;
+  /** The tab is in use; sent on focus and at most once a minute while working. */
+  'presence:active': () => void;
+  /** The tab went to the background, or the person went idle. */
+  'presence:away': () => void;
 }

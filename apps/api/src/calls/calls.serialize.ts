@@ -7,7 +7,18 @@ import { allowedTransitionsFor, callPermissions } from './calls.access';
 
 export const callInclude = {
   platform: { select: { id: true, name: true, country: true, priority: true } },
-  profile: { select: { id: true, name: true, linkedinUrl: true, briefExperience: true, avatarId: true, photoId: true } },
+  profile: {
+    select: {
+      id: true,
+      name: true,
+      linkedinUrl: true,
+      briefExperience: true,
+      avatarId: true,
+      photoId: true,
+      // The rate that applies to this call comes from the row for its platform.
+      platformStatuses: { select: { platformId: true, rate: true } },
+    },
+  },
   associate: { select: { ...userRefSelect, managerId: true, manager: { select: userRefSelect } } },
   expert: { select: { ...userRefSelect, timeZone: true } },
   createdBy: { select: userRefSelect },
@@ -17,12 +28,16 @@ export type CallRow = Prisma.CallGetPayload<{ include: typeof callInclude }>;
 
 /** Experts see invoiced calls as finished, without invoice figures. */
 export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallDTO {
-  const hideInvoicing = viewer.role === 'expert';
+  // Experts see no money at all, and only the Founder and the Expert see the GPT link.
+  const hideMoney = viewer.role === 'expert';
+  const hideInvoicing = hideMoney;
+  const { platformStatuses, ...profile } = call.profile;
+  const platformRate = platformStatuses.find((s) => s.platformId === call.platformId)?.rate ?? null;
   return {
     id: call.id,
     status: statusForRole(viewer.role, call.status as CallStatus),
     platform: call.platform,
-    profile: call.profile,
+    profile,
     associate: toUserRef(call.associate),
     manager: call.associate.manager ? toUserRef(call.associate.manager) : null,
     expert: call.expert ? { ...toUserRef(call.expert), timeZone: call.expert.timeZone } : null,
@@ -35,6 +50,9 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
     invoiceAmount: !hideInvoicing && call.invoiceAmount ? call.invoiceAmount.toFixed(2) : null,
     invoiceCurrency: hideInvoicing ? null : call.invoiceCurrency,
     ninjaLink: call.ninjaLink,
+    gptLink: viewer.role === 'founder' || viewer.role === 'expert' ? call.gptLink : null,
+    platformRate: hideMoney || platformRate === null ? null : Number(platformRate),
+    rateOverride: hideMoney || call.rateOverride === null ? null : Number(call.rateOverride),
     actualDurationMinutes: call.actualDurationMinutes,
     rating: call.rating,
     feedback: call.feedback,

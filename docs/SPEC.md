@@ -1,6 +1,6 @@
 # God System — Project Specification
 
-Version 1.2 · 2026-09-15 · Status: Phase 1 implemented, deployed
+Version 1.3 · 2026-09-16 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -83,6 +83,7 @@ grouped under Managers; they are assigned per Call.
 | Edit Profile | ✓ | | own pending or rejected submission (sends it back for review) | |
 | View Profile details | all | shared + own team's submissions | shared + own submissions | Profiles of assigned Calls, without platform statuses |
 | Set a Profile's status and rate on a platform | ✓ | | | |
+| Deactivate a Profile / see deactivated ones | ✓ | | | |
 | See / edit a Profile's current address and banks | ✓ | | | |
 | Upload own photo | ✓ | ✓ | ✓ | ✓ |
 | Upload a Profile photo | ✓ | | | |
@@ -91,12 +92,18 @@ grouped under Managers; they are assigned per Call.
 | Create Call | ✓ | ✓ | ✓ | |
 | View Call | all | own team's | own | assigned |
 | Reassign Associate on a Call | ✓ | ✓ (own team) | | |
-| Reassign Expert on a Call | ✓ | ✓ (own team) | ✓ (own, before scheduled) | |
+| Reassign Expert on a Call | ✓ | ✓ (own team) | ✓ (own, whole scheduling stage) | |
 | Set scheduling statuses | override | override | ✓ | request rescheduling only |
 | Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
 | See invoice statuses and amounts | ✓ | ✓ (own team) | own | |
+| See a Profile's platform rates | ✓ | ✓ | ✓ | |
+| Set a special rate for one Call | ✓ | ✓ (own team) | own | |
+| Set the Call's GPT link | ✓ | | | |
+| Read the Call's GPT link | ✓ | | | ✓ (assigned) |
+| See who is online (§7.6) | people they may chat with | same | same | same |
+| Run / download a database dump | ✓ | | | |
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders only |
 | Turn a chat message into a to-do | ✓ | | | |
@@ -115,9 +122,14 @@ as `permissions` on every Call:
   notes): the call's Associate, their Manager or the Founder while the call is
   in the scheduling stage; the Founder at any stage.
 - `reassignAssociate`: Founder, or the Manager of the call's Associate.
-- `reassignExpert`: Founder or Manager during the scheduling stage; the call's
-  Associate only while `on_scheduling`.
+- `reassignExpert`: Founder, the Manager of the call's Associate, or the call's
+  Associate — for as long as the call is in the scheduling stage (through
+  `confirmed`), which is where the Associate owns the status. The Expert still
+  cannot be removed from a call that is `scheduled` or later.
 - `editInvoice`: Founder.
+- `editGptLink`: Founder.
+- `editRate` (the special rate for one call): whoever owns scheduling — the
+  call's Associate, their Manager, or the Founder.
 
 **[Implementation]** Experts never see invoicing. The server shows them
 `invoice_submit`, `invoice_approve` and `process_to_bank` calls as `finished`
@@ -148,6 +160,7 @@ app drops the Invoicing stage from their status bar and filters
 | is_active | boolean | Deactivated users cannot log in |
 | avatar_id | text → Avatar | Must be from the avatar set for the user's role |
 | photo_id | uuid → Photo, nullable, unique | An uploaded picture, shown instead of the avatar |
+| last_seen_at | timestamptz | Last time they were connected; shown as "last seen" when offline (§7.6) |
 | time_zone | text (IANA name) | Default `America/New_York`. Only meaningful for Experts: where they live, e.g. `Asia/Seoul`. Everyone else works on New York time (§9.3) |
 | created_at, updated_at | timestamptz | |
 
@@ -178,6 +191,7 @@ app drops the Invoicing stage from their status bar and filters
 | avatar_id | text → Avatar | Must be from the profile avatar set |
 | photo_id | uuid → Photo, nullable, unique | Uploaded by the Founder |
 | status | enum: pending, approved, rejected | Profiles added by a Founder are approved at once; Associate submissions start pending until a Founder approves or rejects them |
+| is_active | boolean | Default true. A deactivated Profile is listed for Founders only and cannot be booked (409 `profile_not_approved`); its existing Calls carry on |
 | created_by | uuid → User | Who added it |
 | reviewed_by | uuid → User, nullable | Founder who approved or rejected |
 | reviewed_at | timestamptz, nullable | |
@@ -212,6 +226,8 @@ A Profile's standing on each expert network platform. A missing row means
 | project_details | text | Required, never blank. The project brief from the platform |
 | platform_associate_name | text | Required, never blank. The platform's own staff contact, not our associate |
 | ninja_link | text, nullable | Meeting link the Expert must add when starting the call |
+| gpt_link | text, nullable | Research link, set by the Founder. Sent only to the Founder and the Expert |
+| rate_override | numeric(12,2), nullable | A special rate (USD per hour) for this Call only; falls back to the Profile's platform rate. Never sent to Experts |
 | actual_duration_minutes | integer, nullable | Entered by the Expert when finishing; the booked `duration_minutes` (and the calendar slot) stay unchanged |
 | rating | integer 1–5, nullable | From an earlier finish form that asked "How did the call go?". No longer asked for; kept for old calls |
 | feedback | text, nullable | The note that went with that rating |
@@ -382,9 +398,15 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 #### ProfilePlatformStatus rates
 
 Each Profile × Platform row also carries `rate`: what that Profile is paid per
-hour on that platform, in USD. It defaults to **1000** (the column default, and
-the value reported for platforms with no row), only a Founder changes it, and
-Experts never receive it (their `platformStatuses` is null).
+hour on that platform, in USD. It is **empty until the Founder sets one** and is
+**required to mark the Profile `registered`** on that platform (400 with a
+`rate` issue otherwise; a database check backs it up). It stays editable
+afterwards, so marking a Profile registered is never a one-way decision. Only a
+Founder changes it, and Experts never receive it (their `platformStatuses` is
+null).
+
+A Call may also carry `rate_override` for a project priced away from the
+standard rate; the call's Associate, their Manager or the Founder sets it.
 
 #### WebPushSubscription
 
@@ -396,6 +418,22 @@ Experts never receive it (their `platformStatuses` is null).
 | p256dh, auth | text | Encryption keys from the browser |
 | user_agent | text, nullable | |
 | created_at, last_seen_at | timestamptz | |
+
+#### DbDump (database backups)
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| trigger | enum: scheduled, manual | The nightly run, or the Founder's "Run now" |
+| succeeded | boolean | |
+| error | text, nullable | Why it failed |
+| byte_size | integer | Size of the gzipped JSON |
+| table_counts | jsonb | Rows per table at the time of the dump |
+| data | bytea, nullable | gzip of the JSON dump; null when it failed |
+| created_at | timestamptz | |
+
+A dump holds every table except `refresh_tokens` (session secrets, useless in a
+copy). The newest 7 are kept; older rows are deleted after each run.
 
 #### DeviceToken (Phase 2, table created in Phase 1)
 
@@ -471,7 +509,8 @@ User         1 ── * WebPushSubscription
   `calls_invoice_amount_nonnegative`, `calls_invoice_currency_format`,
   `calls_rating_range` (1–5), `calls_actual_duration_positive`,
   `conversations_ordered_pair`, `chat_messages_body_present`,
-  `todos_done_at_when_done`.
+  `todos_done_at_when_done`, `profile_platform_statuses_rate_when_registered`,
+  `calls_rate_override_nonnegative`.
 
 ---
 
@@ -746,7 +785,8 @@ but not shown anywhere else, and are not part of Call payloads.
 | PATCH | /profiles/:id | Founder (no re-approval), or the author of a pending or rejected submission (sends it back to pending and notifies the Founders). Approved profiles: Founder only |
 | POST | /profiles/:id/approve | Founder. Pending only; author is notified |
 | POST | /profiles/:id/reject | Founder. { reason } required; author is notified |
-| PUT | /profiles/:id/platforms/:platformId | Founder. { status?: not_registered \| registered \| banned, rate?: USD per hour, 0–1,000,000, two decimals }. At least one of the two |
+| PATCH | /profiles/:id/active | Founder. { isActive }. A deactivated Profile disappears for everyone else and cannot be booked |
+| PUT | /profiles/:id/platforms/:platformId | Founder. { status?: not_registered \| registered \| banned, rate?: USD per hour, 0–1,000,000, two decimals, or null to clear }. At least one of the two. `registered` needs a rate (still editable afterwards), and a registered row cannot have its rate cleared |
 
 Profile responses include the personal details and `platformStatuses`: one
 entry per platform ({ platform: { id, name, priority }, status, rate }) in priority
@@ -764,7 +804,7 @@ A call can only be created with an approved profile (409
 | GET | /calls | all | Scoped per role (§2.3). Query: status (repeatable), associate_id, expert_id, platform_id, from, to, q, sort, page, pageSize |
 | POST | /calls | Founder, Manager, Associate | { platform_id, profile_id, associate_id?, expert_id?, scheduled_at, duration_minutes, project_details, platform_associate_name, notes? }. The profile must be approved. Founder and Manager must pass associate_id |
 | GET | /calls/:id | participants | Includes platform, profile, associate, manager, expert and the history (`messages` is always empty while messaging is off) |
-| PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, invoice_*. scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
+| PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, invoice_*, gpt_link (Founder only), rate_override. scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
 | POST | /calls/:id/transition | per §4 | { to, comment?, ninjaLink?, actualDurationMinutes?, rating?, feedback? } → 200 with updated Call; 400 when a required field for the step is missing (§4.2); 409 (invalid edge, or `expert_busy` when moving to a blocking status would double-book the Expert) |
 | GET | /calls/:id/history | participants | Status history (Experts: without invoicing steps) |
 | GET | /calls/:id/messages | participants | **Switched off** (404). Cursor paginated when on |
@@ -934,7 +974,27 @@ Associates from before this rule) stays readable, with `canSend: false`.
 Sending a message counts as reading the chat. A chat message is pushed to the
 other person's browsers (§7.5); it does not create a bell notification.
 
-### 6.12 Health
+### 6.12 Presence **[Implementation]**
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /presence | all | `[{ userId, status, lastSeenAt }]` for everyone the caller may chat with (§6.11 rules); `lastSeenAt` is filled in only when offline |
+
+Live changes arrive over the socket as `presence:update` (§7.6).
+
+### 6.13 Database dumps **[Implementation]**
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /db-dumps | Founder | The kept dumps, newest first: { id, trigger, succeeded, error, byteSize, tableCounts, createdAt } |
+| POST | /db-dumps | Founder | Runs one now ("Run now" on the dashboard) and returns it |
+| GET | /db-dumps/:id/download | Founder | The gzipped JSON as a file (`god-dump-<timestamp>.json.gz`) |
+
+A dump runs every night at 03:00 team time, checked every 15 minutes, and
+catches up on start when a day was missed (the API sleeps on free hosting).
+`DB_DUMPS_ENABLED=false` turns the schedule off.
+
+### 6.14 Health
 
 `GET /healthz` (outside `/api/v1`) returns `{ status, db, uptime }`; 503 when
 the database is unreachable.
@@ -964,6 +1024,7 @@ the database is unreachable.
 | call:message | call:{id} | Message with sender nickname + role |
 | notification:new | user:{id} | Notification |
 | user:typing | call:{id} | { callId, userId, nickname } |
+| presence:update | user:{id} | `PresenceDTO[]`: who came online, went away or left (§7.6) |
 | session:revoked | user:{id} | Sent before a deactivated user's sockets are dropped |
 | chat:message | both people's user rooms | ChatMessage |
 | chat:todo | both people's user rooms | Todo, or { id, conversationId, messageId, removed: true } |
@@ -981,6 +1042,8 @@ receive it too.
 | call:join | { callId } — server checks access before joining; optional ack { ok } |
 | call:leave | { callId } |
 | user:typing | { callId } |
+| presence:active | — | This tab is in use (on focus, then at most once a minute) |
+| presence:away | — | This tab went to the background, or the person went idle |
 
 Messages are posted over HTTP (§6.5, §6.11) and broadcast by the server; the
 socket is never the only path for a write.
@@ -1012,6 +1075,25 @@ HTTP but not WebSocket upgrades.
 
 ---
 
+### 7.6 Presence **[Implementation]**
+
+Everyone sees whether the people they may chat with are at their screen.
+
+| Status | Meaning |
+|---|---|
+| **online** | A socket is connected and the tab reported activity within the last 5 minutes |
+| **away** | Connected, but the tab is in the background or idle for 5+ minutes |
+| **offline** | No socket. Clients show "last seen …" from `users.last_seen_at` |
+
+- Presence lives in memory in the API process; only `last_seen_at` is written
+  (on connect, on disconnect, and while a tab stays open). More than one API
+  instance would need a shared store.
+- The chat rules of §6.11 decide who learns about whom, so an Associate never
+  sees an Expert's presence and nobody sees people they cannot message.
+- A sweeper flips idle connections to `away` once a minute.
+
+---
+
 ## 8. Security
 
 - Passwords hashed with argon2id. Unknown emails still cost a hash comparison, so response timing doesn't reveal which emails exist.
@@ -1040,12 +1122,12 @@ HTTP but not WebSocket upgrades.
 | Screen | Roles | Content |
 |---|---|---|
 | Login | all | Email + password |
-| Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, Profiles that need a bank, with an Add bank shortcut) and the **database size**. Manager: team counts per stage |
+| Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, Profiles that need a bank, with an Add bank shortcut), the **database size**, and **Backups** (the last nightly dump with its size and row count, Run now, and Download per kept dump). Manager: team counts per stage |
 | Call list | all | Table with filters (status, associate, expert, date range, search), live updates; filters live in the URL |
-| Call detail | participants | Header with "View profile details", status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions`, assignment controls, status history and a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
-| New Call | Founder, Manager, Associate | In this order: Profile (approved only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. Saving asks for confirmation when the time is today, in the past, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
+| Call detail | participants | Header with "View profile details", status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions`, assignment controls, status history, a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls), a **GPT link** card (the Founder edits it, the Expert reads it) and a **Rate** card (the platform rate plus a special rate for this call, hidden from Experts). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
+| New Call | Founder, Manager, Associate | Required fields are marked with *. In this order: Profile (approved and active only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. Saving asks for confirmation when the time is today, in the past, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
-| Profiles | all | Cards with a details window (personal details, history; platform statuses for everyone but Experts; for the Founder a private section with the current address and banks). Founders add profiles (approved at once), review Associate submissions, upload photos, manage banks ("Needs bank" filter) and by default see a table of every Profile against every platform, editable in place. Associates submit profiles for review. Experts see the Profiles of their calls |
+| Profiles | all | Cards with a details window (personal details, history; platform statuses for everyone but Experts; for the Founder a private section with the current address and banks). Founders add profiles (approved at once), review Associate submissions, upload photos, manage banks, deactivate a Profile ("Needs bank" and "Deactivated" filters) and by default see a table of every Profile against every platform, editable in place. Associates submit profiles for review. Experts see the Profiles of their calls |
 | Chat | all | Chat list (search, unread counts, open to-do marker) beside the conversation; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders open a message's menu to mark it as a to-do; the assignee gets a "Mark done" button on it |
 | To-dos | all | My to-dos (open / done / all) with "Mark done" (optional note, posted as the chat reply) and "Open chat". Founders also have "Assigned by me" with the done notes |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
@@ -1165,6 +1247,7 @@ pnpm dev                      # api on :4000, web on :5173
 | TRUST_PROXY | 1 (2 behind Vercel → Render) |
 | VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY | Browser push keys (`npx web-push generate-vapid-keys`); empty = push off |
 | VAPID_SUBJECT | mailto:admin@god-system.app |
+| DB_DUMPS_ENABLED | true (false turns the nightly dump off) |
 | SEED_FOUNDER_EMAIL, SEED_PASSWORD | founder@god.local, Password123! |
 | PUSH_ENABLED, EXPO_ACCESS_TOKEN | (Phase 2) |
 
@@ -1190,11 +1273,13 @@ calendar has something to show.
   whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 270 tests): transition endpoint returns 403 for wrong role,
+- API (`apps/api`, 284 tests): transition endpoint returns 403 for wrong role,
   409 for wrong edge, 200 and a history row for valid moves; confirmation,
   rescheduling requests, Ninja link and duration rules; Experts never seeing
-  invoicing, rates, bank data or invoice figures; platform rates (default 1000,
-  Founder-only, validated); Profile submissions, personal details, founder-only address
+  invoicing, rates, bank data or invoice figures; platform rates (Founder-only,
+  required once registered); Profile deactivation; the GPT link reaching only
+  the Founder and the Expert; per-call rates; presence per role; database dumps
+  (contents, retention, Founder-only access); Profile submissions, personal details, founder-only address
   and platform statuses; chat rules, unread counts, to-dos and their done
   replies; browser push subscriptions and delivery (push service mocked);
   per-Call messages switched off; anonymity check
@@ -1328,4 +1413,5 @@ Container alternative:
 | 2026-09-15 | Browser push notifications (Web Push + service worker) for chat messages and notifications, with Settings controls and an installable web app manifest |
 | 2026-09-15 | Experts no longer see invoicing: invoiced calls show as finished, without amounts, invoicing history or invoicing notifications |
 | 2026-09-15 | Each Profile has a rate per expert network platform (USD per hour, default 1000), set by the Founder and hidden from Experts; finishing a call now asks the Expert only for the real duration |
+| 2026-09-16 | Presence (online / away / offline with "last seen") for everyone you may chat with. Nightly database dumps, kept for 7 days, with Run now and Download on the Founder dashboard. Profiles can be deactivated: Founder-only visibility and unbookable. A platform rate is now required only when a Profile is marked registered and stays editable, and one Call can carry a special rate. New `gpt_link` on a Call, readable only by the Founder and the Expert. Associates can change the Expert for the whole scheduling stage. Required fields marked on the New Call form |
 | 2026-09-15 | Chat narrowed: no chats between Associates or between Experts. Experts chat only with Founders; Managers with Founders, Managers and Associates; Associates with Founders and Managers. Older chats that are no longer allowed are read-only |

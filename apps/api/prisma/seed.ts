@@ -192,6 +192,10 @@ async function main() {
     details: string;
     contact: string;
     notes?: string;
+    /** Research link: only the Founder and the Expert see it. */
+    gptLink?: string;
+    /** A special rate for this call only. */
+    rateOverride?: number;
     invoice?: [number, string];
     /** [actual minutes, rating, feedback] for finished and later calls. */
     report?: [number, number, string | null];
@@ -201,14 +205,14 @@ async function main() {
   const calls: SeedCall[] = [
     { status: 'on_scheduling', associate: pixel, expert: null, when: at(2, 10), duration: 60, platform: 0, profile: 0, details: 'Consumer electronics OEM evaluating second-source suppliers in Vietnam.', contact: 'Rachel (Northwind)' },
     { status: 'on_scheduling', associate: sprout, expert: ember, when: at(3, 20), duration: 30, platform: 2, profile: 2, details: 'HBM capacity outlook for 2027 and packaging bottlenecks.', contact: 'Min-seo (Hanbit)', notes: 'Client prefers Korean-speaking expert.' },
-    { status: 'scheduled', associate: pixel, expert: quill, when: at(1, 11), duration: 45, platform: 0, profile: 1, details: 'Real-time payments adoption among mid-size US banks.', contact: 'Rachel (Northwind)', messages: [[pixel, 'Client confirmed. Dial-in link is in the platform portal.'], [quill, 'Thanks — I will join 5 minutes early.']] },
+    { status: 'scheduled', associate: pixel, expert: quill, when: at(1, 11), duration: 45, platform: 0, profile: 1, details: 'Real-time payments adoption among mid-size US banks.', contact: 'Rachel (Northwind)', gptLink: 'https://chatgpt.com/share/seed-payments-brief', messages: [[pixel, 'Client confirmed. Dial-in link is in the platform portal.'], [quill, 'Thanks — I will join 5 minutes early.']] },
     { status: 'confirmed', associate: mango, expert: flint, when: at(1, 9), duration: 60, platform: 1, profile: 5, details: 'EU EV battery pack supplier landscape, focus on Poland and Hungary.', contact: 'Oliver (Meridian)' },
     { status: 'scheduled', associate: comet, expert: ember, when: at(0, 21), duration: 30, platform: 4, profile: 6, details: 'Seller advertising tools in Japanese marketplaces.', contact: 'Wei Ling (Harbor)' },
     { status: 'on_rescheduling', associate: sprout, expert: quill, when: at(4, 14), duration: 30, platform: 3, profile: 7, details: 'Hospital revenue cycle outsourcing trends.', contact: 'Jonas (Kestrel)', messages: [[sprout, 'Client asked to move this by a couple of days — working on a new slot.']] },
     { status: 'ongoing', associate: mango, expert: quill, when: at(0, DateTime.now().setZone(TEAM_TIME_ZONE).hour), duration: 60, platform: 1, profile: 9, details: 'Multi-cloud cost optimisation at large retailers.', contact: 'Oliver (Meridian)' },
     { status: 'finished', associate: pixel, expert: flint, when: at(-1, 8), duration: 60, platform: 0, profile: 3, details: 'Private label strategy in LATAM grocery.', contact: 'Rachel (Northwind)', report: [55, 5, 'Call went well. The client wants a follow-up next month.'] },
     { status: 'finished', associate: comet, expert: ember, when: at(-2, 19), duration: 45, platform: 2, profile: 2, details: 'Advanced packaging equipment vendors.', contact: 'Min-seo (Hanbit)', report: [45, 4, null] },
-    { status: 'invoice_submit', associate: sprout, expert: flint, when: at(-5, 10), duration: 60, platform: 1, profile: 4, details: 'Oncology CRO selection criteria.', contact: 'Oliver (Meridian)', invoice: [450, 'USD'], report: [60, 4, 'Good call; client asked detailed questions on site activation.'] },
+    { status: 'invoice_submit', rateOverride: 1800, associate: sprout, expert: flint, when: at(-5, 10), duration: 60, platform: 1, profile: 4, details: 'Oncology CRO selection criteria.', contact: 'Oliver (Meridian)', invoice: [450, 'USD'], report: [60, 4, 'Good call; client asked detailed questions on site activation.'] },
     { status: 'invoice_approve', associate: mango, expert: quill, when: at(-8, 13), duration: 30, platform: 3, profile: 8, details: 'Gulf solar PPA pricing.', contact: 'Jonas (Kestrel)', invoice: [300, 'EUR'], report: [35, 3, 'Ran a little over; audio was patchy.'] },
     { status: 'process_to_bank', associate: pixel, expert: ember, when: at(-12, 20), duration: 60, platform: 4, profile: 0, details: 'APAC sourcing risk after tariff changes.', contact: 'Wei Ling (Harbor)', invoice: [520, 'USD'], report: [60, 5, null] },
   ];
@@ -229,6 +233,8 @@ async function main() {
         notes: c.notes ?? null,
         invoiceAmount: c.invoice?.[0],
         invoiceCurrency: c.invoice?.[1],
+        gptLink: c.gptLink,
+        rateOverride: c.rateOverride,
         ninjaLink: ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'].includes(c.status)
           ? null
           : `https://vdo.ninja/?room=god-${Math.random().toString(36).slice(2, 10)}`,

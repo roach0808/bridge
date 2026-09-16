@@ -180,12 +180,15 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
 
   const [platform, profile] = await Promise.all([
     prisma.platform.findUnique({ where: { id: input.platformId }, select: { id: true } }),
-    prisma.profile.findUnique({ where: { id: input.profileId }, select: { id: true, status: true } }),
+    prisma.profile.findUnique({ where: { id: input.profileId }, select: { id: true, status: true, isActive: true } }),
   ]);
   if (!platform) throw badRequest('Choose a platform', { issues: [{ path: 'platformId', message: 'Unknown platform' }] });
   if (!profile) throw badRequest('Choose a profile', { issues: [{ path: 'profileId', message: 'Unknown profile' }] });
   if (profile.status !== 'approved') {
     throw conflict('A call can only use an approved profile', ERROR_CODES.profileNotApproved);
+  }
+  if (!profile.isActive) {
+    throw conflict('That profile is deactivated', ERROR_CODES.profileNotApproved);
   }
 
   const { call, delivers } = await prisma.$transaction(async (tx) => {
@@ -259,6 +262,12 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
   if ((input.invoiceAmount !== undefined || input.invoiceCurrency !== undefined) && !perms.editInvoice) {
     throw forbidden('Only the Founder edits invoices');
   }
+  if (input.gptLink !== undefined && !perms.editGptLink) {
+    throw forbidden('Only the Founder sets the GPT link');
+  }
+  if (input.rateOverride !== undefined && !perms.editRate) {
+    throw forbidden('You cannot set this call’s rate');
+  }
   if (input.platformId) {
     const exists = await prisma.platform.findUnique({ where: { id: input.platformId }, select: { id: true } });
     if (!exists) throw badRequest('Choose a platform', { issues: [{ path: 'platformId', message: 'Unknown platform' }] });
@@ -287,6 +296,8 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
           expertId: input.expertId,
           invoiceAmount: input.invoiceAmount === undefined ? undefined : input.invoiceAmount,
           invoiceCurrency: input.invoiceCurrency,
+          gptLink: input.gptLink,
+          rateOverride: input.rateOverride === undefined ? undefined : input.rateOverride,
         },
         include: callInclude,
       })
@@ -306,10 +317,11 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
 
     const before = new Set(await participantIds(tx, current));
     const after = await participantIds(tx, updated);
-    // An invoice-only edit is none of the Expert's business.
-    const invoiceOnly = Object.entries(input).every(([k, v]) => v === undefined || k === 'invoiceAmount' || k === 'invoiceCurrency');
+    // Money-only edits are none of the Expert's business.
+    const MONEY_FIELDS = ['invoiceAmount', 'invoiceCurrency', 'rateOverride'];
+    const moneyOnly = Object.entries(input).every(([k, v]) => v === undefined || MONEY_FIELDS.includes(k));
     const recipients = [...new Set([...before, ...after])].filter(
-      (uid) => uid !== actor.id && !(invoiceOnly && uid === updated.expertId),
+      (uid) => uid !== actor.id && !(moneyOnly && uid === updated.expertId),
     );
     const newlyAssigned = [updated.expertId, updated.associateId].filter(
       (uid): uid is string => Boolean(uid) && !before.has(uid!) && uid !== actor.id,
