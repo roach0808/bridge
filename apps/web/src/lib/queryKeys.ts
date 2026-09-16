@@ -46,6 +46,12 @@ export const qk = {
     all: ['todos'] as const,
     list: (params?: object) => ['todos', 'list', params ?? {}] as const,
   },
+  stats: {
+    all: ['stats'] as const,
+    associates: (period: string, count: number) => ['stats', 'associates', period, count] as const,
+    profiles: ['stats', 'profiles'] as const,
+    finance: (period: string, count: number) => ['stats', 'finance', period, count] as const,
+  },
   banks: (profileId: string) => ['banks', profileId] as const,
   avatars: (audience?: string) => ['avatars', audience ?? 'all'] as const,
 };

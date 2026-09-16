@@ -39,10 +39,12 @@ import { BanksDialog } from '@/components/BanksDialog';
 import {
   DeactivatedPill,
   DotPill,
+  PROFILE_STATUS_META,
   PlatformRateField,
   PlatformStatusSelect,
   ProfileActiveToggle,
   ProfileDetailsDialog,
+  ProfileStatusChip,
 } from '@/components/ProfileDetails';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
@@ -53,18 +55,7 @@ import { relativeTime } from '@/lib/time';
 import { FilterChips, Hint, SearchField, TableSurface, useDebouncedValue, useIsPhone } from './adminShared';
 import { ProfileDialog, RejectProfileDialog } from './ProfileDialogs';
 
-const PROFILE_STATUS_META: Record<ProfileStatus, { label: string; color: string }> = {
-  pending: { label: 'Pending review', color: '#e0913a' },
-  approved: { label: 'Approved', color: '#3fb68b' },
-  rejected: { label: 'Rejected', color: '#dc4a4a' },
-};
-
 const STATUS_ORDER: Record<ProfileStatus, number> = { pending: 0, rejected: 1, approved: 2 };
-
-export function ProfileStatusChip({ status }: { status: ProfileStatus }) {
-  const meta = PROFILE_STATUS_META[status];
-  return <DotPill color={meta.color}>{meta.label}</DotPill>;
-}
 
 type Filter = 'all' | ProfileStatus | 'needs_bank' | 'deactivated';
 type View = 'cards' | 'table';

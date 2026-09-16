@@ -327,6 +327,15 @@ export const createTodoSchema = z.object({
   details: optionalText(5000).optional(),
 });
 
+// --- Statistics -----------------------------------------------------------------
+
+export const STATS_PERIODS = ['week', 'biweek', 'month'] as const;
+export const statsQuerySchema = z.object({
+  period: z.enum(STATS_PERIODS).default('week'),
+  /** How many periods, ending with the current one. */
+  count: z.coerce.number().int().min(1).max(24).default(8),
+});
+
 // --- Audit trail ----------------------------------------------------------------
 
 export const listAuditQuerySchema = z.object({

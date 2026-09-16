@@ -19,6 +19,7 @@ const TeamPage = lazy(() => import('@/pages/admin/TeamPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
 const AuditPage = lazy(() => import('@/pages/admin/AuditPage'));
 const InvoicingPage = lazy(() => import('@/pages/admin/InvoicingPage'));
+const StatsPage = lazy(() => import('@/pages/stats/StatsPage'));
 const NotificationsPage = lazy(() => import('@/pages/admin/NotificationsPage'));
 const SettingsPage = lazy(() => import('@/pages/admin/SettingsPage'));
 
@@ -70,6 +71,7 @@ export const router = createBrowserRouter([
           { path: 'chat', element: <Page><ChatPage /></Page> },
           { path: 'chat/:conversationId', element: <Page><ChatPage /></Page> },
           { path: 'todos', element: <Page><TodosPage /></Page> },
+          { path: 'stats', element: <Page roles={['founder', 'manager', 'associate']}><StatsPage /></Page> },
           { path: 'invoicing', element: <Page roles={['founder']}><InvoicingPage /></Page> },
           { path: 'profiles', element: <Page><ProfilesPage /></Page> },
           { path: 'platforms', element: <Page roles={['founder', 'manager']}><PlatformsPage /></Page> },

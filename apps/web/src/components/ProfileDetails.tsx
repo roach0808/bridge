@@ -26,6 +26,7 @@ import {
   PLATFORM_REGISTRATION_LABELS,
   type PlatformRegistration,
   type ProfileDTO,
+  type ProfileStatus,
 } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
@@ -204,6 +205,17 @@ export function ProfileActiveToggle({ profile, size = 'small' }: { profile: Prof
       {mutation.isPending ? <CircularProgress size={14} /> : profile.isActive ? 'Deactivate' : 'Activate'}
     </Button>
   );
+}
+
+export const PROFILE_STATUS_META: Record<ProfileStatus, { label: string; color: string }> = {
+  pending: { label: 'Pending review', color: '#e0913a' },
+  approved: { label: 'Approved', color: '#3fb68b' },
+  rejected: { label: 'Rejected', color: '#dc4a4a' },
+};
+
+export function ProfileStatusChip({ status }: { status: ProfileStatus }) {
+  const meta = PROFILE_STATUS_META[status];
+  return <DotPill color={meta.color}>{meta.label}</DotPill>;
 }
 
 export function DeactivatedPill() {

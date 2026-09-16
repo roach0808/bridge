@@ -24,6 +24,7 @@ import { notificationsRouter } from './notifications/notifications.routes';
 import { photosRouter } from './photos/photos.routes';
 import { platformsRouter } from './platforms/platforms.routes';
 import { profilesRouter } from './profiles/profiles.routes';
+import { statsRouter } from './stats/stats.routes';
 import { usersRouter } from './users/users.routes';
 
 export function createApp() {
@@ -81,6 +82,7 @@ export function createApp() {
   api.use(calendarRouter);
   api.use(notificationsRouter);
   api.use(dashboardRouter);
+  api.use(statsRouter);
   api.use(auditRouter);
   app.use('/api/v1', api);
 

@@ -40,6 +40,10 @@ import type {
   UpdateCallInput,
   UserDTO,
   UserRef,
+  AssociateStats,
+  FinanceStats,
+  ProfileStatsRow,
+  StatsPeriodKind,
 } from '@god/shared';
 import { HttpClient, type ClientOptions, type Query } from './http';
 
@@ -205,6 +209,15 @@ export function createApiClient(options: ClientOptions) {
       confirm: (id: string) => post<TodoDTO>(`/todos/${enc(id)}/confirm`),
       /** The giver sends a done or completed task back to the taker. */
       reopen: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/reopen`, note ? { note } : {}),
+    },
+
+    stats: {
+      /** Founders: every Associate. Managers: their team. Associates: themselves. */
+      associates: (query?: { period?: StatsPeriodKind; count?: number }) => get<AssociateStats>('/stats/associates', query),
+      /** Founder only. */
+      profiles: () => get<ProfileStatsRow[]>('/stats/profiles'),
+      /** Founder only. */
+      finance: (query?: { period?: StatsPeriodKind; count?: number }) => get<FinanceStats>('/stats/finance', query),
     },
 
     push: {

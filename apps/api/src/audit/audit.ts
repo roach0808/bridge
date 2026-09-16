@@ -57,7 +57,7 @@ function shape(path: string): string {
 }
 
 /** Reads worth recording: money, personal data and anything that dumps data out. */
-const SENSITIVE_READS = [/^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/, /^audit/];
+const SENSITIVE_READS = [/^stats\/profiles$/, /^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/, /^audit/];
 
 const MUTATIONS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -100,6 +100,7 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^audit/, 'audit'],
   [/^schedule-blocks|^experts\/:id\/schedule-blocks/, 'schedule'],
   [/^push/, 'push'],
+  [/^stats\/profiles$/, 'stats.profiles', true],
 ];
 
 const VERBS: Record<string, { key: string; word: string }> = {
@@ -139,6 +140,7 @@ const SUMMARIES: Record<string, string> = {
   'todo.confirm': 'confirmed a task complete',
   'todo.reopen': 'reopened a task',
   'audit.read': 'read the audit trail',
+  'stats.profiles': 'looked at profile statistics (emails and banks)',
 };
 
 function describe(method: string, shaped: string): { action: string; summary: string } {

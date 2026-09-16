@@ -444,6 +444,90 @@ export interface TodoDTO extends TodoSummary {
   createdAt: string;
 }
 
+// --- Statistics ------------------------------------------------------------------
+
+export type StatsPeriodKind = 'week' | 'biweek' | 'month';
+
+/** One reporting period in the team time zone: [start, end) as dates. */
+export interface StatsPeriod {
+  start: string;
+  end: string;
+  label: string;
+}
+
+/**
+ * Calls counted by their scheduled time. `potential` is rate × duration: the
+ * real duration once the Expert finished the call, the booked one before.
+ * Calls whose Profile has no rate on the platform are in `unpriced`.
+ */
+export interface AssociateStatsCell {
+  calls: number;
+  finishedCalls: number;
+  potential: number;
+  unpriced: number;
+}
+
+export interface AssociateStatsRow {
+  associate: UserRef & { isActive: boolean };
+  manager: UserRef | null;
+  periods: AssociateStatsCell[];
+  total: AssociateStatsCell;
+}
+
+/** Founders see every Associate, Managers their team, Associates themselves. */
+export interface AssociateStats {
+  zone: string;
+  periods: StatsPeriod[];
+  rows: AssociateStatsRow[];
+  totals: AssociateStatsCell[];
+  total: AssociateStatsCell;
+}
+
+/** Founder only: every Profile, including pending, rejected and deactivated ones. */
+export interface ProfileStatsRow {
+  profile: { id: string; name: string; avatarId: string; photoId: string | null };
+  status: ProfileStatus;
+  isActive: boolean;
+  onboardedAt: string | null;
+  email: string | null;
+  /** The primary (or first) bank account, and how many there are. */
+  bank: { bankName: string; country: string | null; currency: string | null; count: number } | null;
+  calls: number;
+  paidCalls: number;
+  /** Expected price of its finished calls. */
+  expectedIncome: number;
+  /** Real income that reached the bank. */
+  totalIncome: number;
+  /** The most recent call that has already started. */
+  lastCallAt: string | null;
+}
+
+/**
+ * Founder only. `expected` is the expected price of finished calls; `paidExpected`
+ * and `real` cover only calls processed to bank, and `gap` = paidExpected − real.
+ */
+export interface FinanceCell {
+  calls: number;
+  finishedCalls: number;
+  paidCalls: number;
+  expected: number;
+  paidExpected: number;
+  real: number;
+  gap: number;
+  /** Finished calls without a rate, so without an expected price. */
+  unpriced: number;
+}
+
+export interface FinanceStats {
+  zone: string;
+  periods: StatsPeriod[];
+  byPeriod: FinanceCell[];
+  total: FinanceCell;
+  /** Over all the periods, largest real income first. */
+  byPlatform: Array<{ platform: { id: string; name: string }; cell: FinanceCell }>;
+  byProfile: Array<{ profile: { id: string; name: string; isActive: boolean }; cell: FinanceCell }>;
+}
+
 /** Someone's presence, sent to the people who may chat with them. */
 export interface PresenceDTO {
   userId: string;

@@ -1,4 +1,5 @@
 import AccountTreeRounded from '@mui/icons-material/AccountTreeRounded';
+import InsightsRounded from '@mui/icons-material/InsightsRounded';
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
 import ChatRounded from '@mui/icons-material/ChatRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
@@ -33,6 +34,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/calendar', label: 'Calendar', icon: CalendarMonthRounded, roles: ALL, section: 'work' },
   { to: '/chat', label: 'Chat', icon: ChatRounded, roles: ALL, section: 'work', badge: 'chat' },
   { to: '/todos', label: 'Tasks', icon: ChecklistRounded, roles: ALL, section: 'work', badge: 'todos' },
+  { to: '/stats', label: 'Statistics', icon: InsightsRounded, roles: ['founder', 'manager', 'associate'], section: 'work' },
   { to: '/invoicing', label: 'Invoicing', icon: ReceiptLongRounded, roles: ['founder'], section: 'work' },
   { to: '/profiles', label: 'Profiles', icon: AccountTreeRounded, roles: ALL, section: 'admin' },
   { to: '/platforms', label: 'Platforms', icon: HubRounded, roles: ['founder', 'manager'], section: 'admin' },

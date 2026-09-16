@@ -1001,7 +1001,19 @@ A dump runs every night at 03:00 team time, checked every 15 minutes, and
 catches up on start when a day was missed (the API sleeps on free hosting).
 `DB_DUMPS_ENABLED=false` turns the schedule off.
 
-### 6.14 Health
+### 6.14 Statistics **[Implementation]**
+
+Periods are weeks (Monday start), two-week blocks (aligned on Monday 2026-01-05) or calendar months in the team time zone (America/New_York). A call belongs to the period of its scheduled time. Query for the period endpoints: `period` = week (default) \| biweek \| month, `count` = 1–24 periods ending with the current one (default 8).
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /stats/associates | Founder (all Associates), Manager (own team), Associate (self) | Per Associate and period: calls, finished calls, potential money and unpriced calls, plus totals. Potential money = rate × duration, the real duration once the Expert finished the call and the booked duration before; the rate is the call's special rate or the Profile's platform rate. Calls without a rate count as unpriced. Deactivated Associates appear only with calls in the range. Experts: 403 |
+| GET | /stats/profiles | Founder | Every Profile including pending, rejected and deactivated: status, active, onboard date, email, primary bank (name, country, currency, count), calls, paid calls, expected income (finished calls), total income (sum of real income), last call already started. Audited as a sensitive read |
+| GET | /stats/finance | Founder | Per period, and over the range per platform and per Profile: calls, finished calls, paid calls, expected (expected price of finished calls), paidExpected and real (calls with real income), gap = paidExpected − real, unpriced |
+
+Web: **Statistics** (Founder, Manager, Associate) with Weekly / Bi-weekly / Monthly. Founders also get the *By profile* table (filters All / Active / Deactivated / Pending / Rejected, sort, search) and *Finance* (Expected, Real income, Gap on paid calls, Not paid yet; tables by period, platform and Profile with expected-vs-real bars).
+
+### 6.15 Health
 
 `GET /healthz` (outside `/api/v1`) returns `{ status, db, uptime }`; 503 when
 the database is unreachable.
@@ -1423,3 +1435,4 @@ Container alternative:
 | 2026-09-16 | Presence (online / away / offline with "last seen") for everyone you may chat with. Nightly database dumps, kept for 7 days, with Run now and Download on the Founder dashboard. Profiles can be deactivated: Founder-only visibility and unbookable. A platform rate is now required only when a Profile is marked registered and stays editable, and one Call can carry a special rate. New `gpt_link` on a Call, readable only by the Founder and the Expert. Associates can change the Expert for the whole scheduling stage. Required fields marked on the New Call form |
 | 2026-09-15 | Chat narrowed: no chats between Associates or between Experts. Experts chat only with Founders; Managers with Founders, Managers and Associates; Associates with Founders and Managers. Older chats that are no longer allowed are read-only |
 | 2026-09-16 | Tasks: Founders give tasks to anyone, Managers to Associates on their own team, from a chat message or with New task. The taker marks a task done, the giver confirms it (completed, hidden from the default list) or reopens it |
+| 2026-09-16 | Statistics: by Associate (weekly, bi-weekly, monthly calls and potential money; Founders see all, Managers their team, Associates themselves), by Profile for the Founder (onboard date, status incl. deactivated, email, bank, total income) and Finance for the Founder (expected vs real income per period, platform and Profile, and the gap) |
