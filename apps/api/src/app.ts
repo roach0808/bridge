@@ -4,6 +4,8 @@ import cors from 'cors';
 import express, { Router } from 'express';
 import helmet from 'helmet';
 import { pinoHttp } from 'pino-http';
+import { auditRequests } from './audit/audit';
+import { auditRouter } from './audit/audit.routes';
 import { authRouter } from './auth/auth.routes';
 import { avatarsRouter } from './avatars/avatars.routes';
 import { banksRouter } from './banks/banks.routes';
@@ -63,6 +65,8 @@ export function createApp() {
   });
 
   const api = Router();
+  // Records changes and sensitive reads once each response is known.
+  api.use(auditRequests);
   api.use(authRouter);
   api.use(avatarsRouter);
   api.use(usersRouter);
@@ -77,6 +81,7 @@ export function createApp() {
   api.use(calendarRouter);
   api.use(notificationsRouter);
   api.use(dashboardRouter);
+  api.use(auditRouter);
   app.use('/api/v1', api);
 
   app.use(notFoundHandler);

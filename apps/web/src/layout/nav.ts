@@ -4,6 +4,7 @@ import ChatRounded from '@mui/icons-material/ChatRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import DashboardRounded from '@mui/icons-material/DashboardRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
+import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import HubRounded from '@mui/icons-material/HubRounded';
 import ManageAccountsRounded from '@mui/icons-material/ManageAccountsRounded';
 import NotificationsRounded from '@mui/icons-material/NotificationsRounded';
@@ -37,6 +38,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/platforms', label: 'Platforms', icon: HubRounded, roles: ['founder', 'manager'], section: 'admin' },
   { to: '/team', label: 'Team', icon: GroupsRounded, roles: ['manager'], section: 'admin' },
   { to: '/users', label: 'Users', icon: ManageAccountsRounded, roles: ['founder'], section: 'admin' },
+  { to: '/audit', label: 'Audit', icon: HistoryRounded, roles: ['founder'], section: 'admin' },
   { to: '/notifications', label: 'Notifications', icon: NotificationsRounded, roles: ALL, section: 'account' },
   { to: '/settings', label: 'Settings', icon: SettingsRounded, roles: ALL, section: 'account' },
 ];

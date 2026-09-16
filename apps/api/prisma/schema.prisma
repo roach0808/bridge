@@ -122,6 +122,7 @@ model User {
   chatMessages       ChatMessage[]       @relation("ChatMessageSender")
   assignedTodos      Todo[]              @relation("TodoAssignee")
   createdTodos       Todo[]              @relation("TodoCreatedBy")
+  auditLogs          AuditLog[]
 
   @@index([role])
   @@index([managerId])
@@ -332,6 +333,39 @@ model DeviceToken {
 
   @@index([userId])
   @@map("device_tokens")
+}
+
+/// Who did what, when, and from where. Written for every change and for reads of sensitive data.
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// Null for anonymous attempts, e.g. a failed sign-in.
+  userId      String?  @map("user_id") @db.Uuid
+  actorRole   Role?    @map("actor_role")
+  /// Kept even if the account is later renamed.
+  actorName   String?  @map("actor_name")
+  /// Dotted name of what happened, e.g. `call.transition` or `bank.read`.
+  action      String
+  summary     String
+  entityType  String?  @map("entity_type")
+  entityId    String?  @map("entity_id") @db.Uuid
+  method      String
+  path        String
+  statusCode  Int      @map("status_code")
+  ip          String?
+  country     String?  @db.Char(2)
+  deviceType  String?  @map("device_type")
+  userAgent   String?  @map("user_agent")
+  sessionId   String?  @map("session_id") @db.Uuid
+  /// Extra detail: changed fields, the target user, the attempted email.
+  meta        Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
 }
 
 model RefreshToken {

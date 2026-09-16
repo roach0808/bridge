@@ -16,6 +16,7 @@ import { prisma } from '../db';
 import { HttpError, badRequest, forbidden, unauthenticated } from '../errors';
 import { iso, param, parseBody } from '../http';
 import { meSelect, toMeDTO } from '../serializers';
+import { record } from '../audit/audit';
 import { deviceOf } from './device';
 import { actorOf, requireAuth, requireRole } from './middleware';
 import { hashToken, issueRefreshToken, refreshTokenTtlMs, signAccessToken } from './tokens';
@@ -72,6 +73,8 @@ authRouter.post('/auth/login', loginLimiter, async (req, res) => {
 
   const { passwordHash: _hash, ...me } = user;
   const refresh = await issueRefreshToken(prisma, user.id, undefined, deviceOf(req));
+  // So the audit trail attributes this sign-in to them (no requireAuth here).
+  req.actor = { id: user.id, role: user.role, nickname: user.nickname, managerId: user.managerId, timeZone: user.timeZone, avatarId: user.avatarId, sessionId: refresh.familyId };
   setRefreshCookie(res, refresh.token);
   res.json({
     accessToken: signAccessToken(user.id, user.role, refresh.familyId),
@@ -93,7 +96,7 @@ authRouter.post('/auth/refresh', async (req, res) => {
         where: { familyId: row.familyId, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      return { error: 'Refresh token was already used' } as const;
+      return { error: 'Refresh token was already used', reuse: row.userId } as const;
     }
     if (row.expiresAt <= new Date()) return { error: 'Refresh token expired' } as const;
     const user = await tx.user.findUnique({ where: { id: row.userId }, select: meSelect });
@@ -115,6 +118,13 @@ authRouter.post('/auth/refresh', async (req, res) => {
   });
 
   if ('error' in result) {
+    if ('reuse' in result) {
+      record(req, res, {
+        action: 'auth.token_reuse',
+        summary: 'A used refresh token was presented again; every session of that account was ended',
+        userId: result.reuse,
+      });
+    }
     res.clearCookie(REFRESH_COOKIE, { path: COOKIE_PATH });
     throw unauthenticated(result.error, 'code' in result ? result.code : ERROR_CODES.unauthenticated);
   }

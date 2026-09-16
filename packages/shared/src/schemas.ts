@@ -295,6 +295,19 @@ export const listTodosQuerySchema = z.object({
   status: z.enum(TODO_STATUSES).optional(),
 });
 
+// --- Audit trail ----------------------------------------------------------------
+
+export const listAuditQuerySchema = z.object({
+  userId: uuid.optional(),
+  /** Matches a whole family: `call` covers `call.transition`, `call.update`… */
+  action: z.string().trim().max(60).optional(),
+  from: isoDateTime.optional(),
+  to: isoDateTime.optional(),
+  q: z.string().trim().max(200).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+});
+
 // --- Notifications & devices -------------------------------------------------
 
 export const markReadSchema = z.union([

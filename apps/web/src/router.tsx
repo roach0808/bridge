@@ -17,6 +17,7 @@ const ProfilesPage = lazy(() => import('@/pages/admin/ProfilesPage'));
 const PlatformsPage = lazy(() => import('@/pages/admin/PlatformsPage'));
 const TeamPage = lazy(() => import('@/pages/admin/TeamPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
+const AuditPage = lazy(() => import('@/pages/admin/AuditPage'));
 const InvoicingPage = lazy(() => import('@/pages/admin/InvoicingPage'));
 const NotificationsPage = lazy(() => import('@/pages/admin/NotificationsPage'));
 const SettingsPage = lazy(() => import('@/pages/admin/SettingsPage'));
@@ -74,6 +75,7 @@ export const router = createBrowserRouter([
           { path: 'platforms', element: <Page roles={['founder', 'manager']}><PlatformsPage /></Page> },
           { path: 'team', element: <Page roles={['manager']}><TeamPage /></Page> },
           { path: 'users', element: <Page roles={['founder']}><UsersPage /></Page> },
+          { path: 'audit', element: <Page roles={['founder']}><AuditPage /></Page> },
           { path: 'notifications', element: <Page><NotificationsPage /></Page> },
           { path: 'settings', element: <Page><SettingsPage /></Page> },
           { path: '*', element: <EmptyState title="Page not found" description="The page you are looking for does not exist." /> },

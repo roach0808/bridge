@@ -295,6 +295,27 @@ export interface SessionDTO {
   lastUsedAt: string;
 }
 
+/** One line of the audit trail. Founders only. */
+export interface AuditEntryDTO {
+  id: string;
+  userId: string | null;
+  actorName: string | null;
+  actorRole: Role | null;
+  /** Dotted family and verb, e.g. `call.transition` or `bank.read`. */
+  action: string;
+  summary: string;
+  entityType: string | null;
+  entityId: string | null;
+  method: string;
+  path: string;
+  statusCode: number;
+  ip: string | null;
+  country: string | null;
+  deviceType: string | null;
+  meta: Record<string, unknown> | null;
+  createdAt: string;
+}
+
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }

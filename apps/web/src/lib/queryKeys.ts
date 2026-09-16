@@ -28,6 +28,11 @@ export const qk = {
   },
   notifications: ['notifications'] as const,
   sessions: ['sessions'] as const,
+  audit: {
+    all: ['audit'] as const,
+    list: (params?: object) => ['audit', 'list', params ?? {}] as const,
+    actions: ['audit', 'actions'] as const,
+  },
   presence: ['presence'] as const,
   dbDumps: ['db-dumps'] as const,
   chat: {

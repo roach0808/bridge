@@ -115,6 +115,17 @@ export async function readDump(id: string) {
   return prisma.dbDump.findUnique({ where: { id }, select: { id: true, data: true, createdAt: true, succeeded: true } });
 }
 
+/** How long the audit trail is kept. */
+const AUDIT_RETENTION_DAYS = 365;
+
+/** Drops audit entries older than a year, with the nightly dump. */
+export async function trimAuditTrail(): Promise<number> {
+  const cutoff = new Date(Date.now() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  const { count } = await prisma.auditLog.deleteMany({ where: { createdAt: { lt: cutoff } } });
+  if (count) logger.info({ count }, 'trimmed audit trail');
+  return count;
+}
+
 /** The hour (team time) the nightly dump runs at. */
 const DUMP_HOUR = 3;
 
@@ -135,7 +146,10 @@ export function startDumpSchedule(everyMs = 15 * 60_000): NodeJS.Timeout {
       // Today's run is due once it is past the dump hour and nothing ran since.
       const dueToday = now.hour >= DUMP_HOUR && (!lastAt || lastAt < now.startOf('day').plus({ hours: DUMP_HOUR }));
       const missedADay = lastAt !== null && now.diff(lastAt, 'hours').hours >= 24;
-      if (!last || dueToday || missedADay) await createDump('scheduled');
+      if (!last || dueToday || missedADay) {
+        await createDump('scheduled');
+        await trimAuditTrail();
+      }
     } catch (err) {
       logger.warn({ err }, 'dump schedule tick failed');
     }

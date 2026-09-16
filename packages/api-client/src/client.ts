@@ -1,4 +1,5 @@
 import type {
+  AuditEntryDTO,
   AuthResponse,
   ChatMessageDTO,
   ConversationDTO,
@@ -221,6 +222,13 @@ export function createApiClient(options: ClientOptions) {
       /** Founder: anyone's signed-in sessions. */
       ofUser: (userId: string) => get<SessionDTO[]>(`/users/${enc(userId)}/sessions`),
       signOutUser: (userId: string) => del<{ signedOut: number }>(`/users/${enc(userId)}/sessions`),
+    },
+
+    audit: {
+      /** Founder: who did what, newest first. `action` matches a family, e.g. `call`. */
+      list: (query?: { userId?: string; action?: string; from?: string; to?: string; q?: string; page?: number; pageSize?: number }) =>
+        get<Paginated<AuditEntryDTO>>('/audit', query),
+      actions: () => get<string[]>('/audit/actions'),
     },
 
     notifications: {
