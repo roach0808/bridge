@@ -1,8 +1,10 @@
 import AddTaskRounded from '@mui/icons-material/AddTaskRounded';
 import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRounded';
+import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
+import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import VerifiedOutlined from '@mui/icons-material/VerifiedOutlined';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
@@ -21,7 +23,17 @@ import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { formatDateTime, relativeTime } from '@/lib/time';
 import { FilterChips } from '../admin/adminShared';
-import { NewTaskDialog, TodoReopenDialog, todoText, useRefreshTodos } from './todoShared';
+import { NewTaskDialog, TODO_COLORS, TodoReopenDialog, todoText, useRefreshTodos } from './todoShared';
+
+/** A ticked box keeps its colour even when it is no longer yours to change. */
+const TICK_SX = (color: string) => ({
+  p: 0.5,
+  // Yours to tick: clearly clickable. Ticked: the status colour, even once it is out of your hands.
+  color: 'text.secondary',
+  '&:hover': { color },
+  '&.Mui-checked, &.Mui-checked.Mui-disabled': { color },
+  '&.Mui-disabled:not(.Mui-checked)': { color: 'action.disabled', opacity: 0.5 },
+});
 
 /** `active` = not completed yet, the default view. */
 type Filter = 'active' | 'open' | 'done' | 'completed' | 'all';
@@ -221,7 +233,16 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
   const canDelete = iGave && (t.status === 'open' || t.status === 'completed');
 
   return (
-    <Box sx={{ px: 1, py: 0.25, bgcolor: t.status === 'completed' ? 'action.hover' : undefined }}>
+    <Box
+      sx={{
+        px: 1,
+        py: 0.25,
+        // A colour bar makes the state readable at a glance: waiting, ticked, confirmed.
+        borderLeft: 3,
+        borderLeftColor: TODO_COLORS[t.status],
+        bgcolor: t.status === 'completed' ? 'action.hover' : undefined,
+      }}
+    >
       <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minHeight: 40 }}>
         <Tooltip title={t.status === 'open' ? (mine ? 'Tick when you have finished it' : `Waiting for ${t.assignee.nickname}`) : `Done ${t.doneAt ? relativeTime(t.doneAt) : ''}`}>
           <span>
@@ -230,8 +251,10 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
               checked={t.status !== 'open'}
               disabled={!mine || t.status !== 'open' || busy}
               onChange={() => done.mutate()}
+              icon={<RadioButtonUncheckedRounded fontSize="small" />}
+              checkedIcon={<CheckCircleRounded fontSize="small" />}
               inputProps={{ 'aria-label': `Mark “${text}” done` }}
-              sx={{ p: 0.5 }}
+              sx={TICK_SX(TODO_COLORS.done)}
             />
           </span>
         </Tooltip>
@@ -256,7 +279,7 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
               icon={<VerifiedOutlined fontSize="small" />}
               checkedIcon={<VerifiedRounded fontSize="small" />}
               inputProps={{ 'aria-label': `Confirm “${text}”` }}
-              sx={{ p: 0.5 }}
+              sx={TICK_SX(TODO_COLORS.completed)}
             />
           </span>
         </Tooltip>
