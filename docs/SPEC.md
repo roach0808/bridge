@@ -744,6 +744,8 @@ when the Expert already has a call at that time), 429 rate limited.
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | POST | /auth/login | { email, password } | Returns { accessToken, refreshToken, user }; also sets the refresh cookie |
+| GET | /auth/config | — | { googleClientId } for the login page; null when Google sign-in is off (`GOOGLE_CLIENT_ID` unset) |
+| POST | /auth/google | { credential } | **[Implementation]** Sign in with Google. The API verifies the Google ID token (signature, audience = our client ID, expiry, verified email). A Google account already linked (`auth_identities`, matched by Google's `sub`) signs that user in; otherwise it links to the user whose sign-in email equals the Google address, once. Unknown addresses, a second Google account for the same user and deactivated users are refused. Same response and session as /auth/login |
 | POST | /auth/refresh | { refreshToken } or cookie | Rotates refresh token |
 | POST | /auth/logout | { refreshToken } or cookie | Revokes the token family |
 | GET | /me | | Current user incl. email |
@@ -929,6 +931,8 @@ Response: { from, to, expert, canEditBlocks, calls, busy, occurrences, rules }.
 
 Profile responses carry `photoId`, and for the Founder `bankCount` and
 `needsBank` (null for everyone else).
+
+**[Implementation] Sign-in details (Founder).** `GET /users/:id/sign-in` (audited) returns { email, google }; `PATCH /users/:id/sign-in` { email } changes the sign-in email; `DELETE /users/:id/google` unlinks the Google account so the next Google sign-in links again by email. `GET /me/google` shows the caller's own link. These are the only endpoints besides /me and sign-in that return an email, and only to the Founder.
 
 ### 6.10 Dashboard **[Implementation]**
 
@@ -1437,3 +1441,4 @@ Container alternative:
 | 2026-09-16 | Tasks: Founders give tasks to anyone, Managers to Associates on their own team, from a chat message or with New task. The taker marks a task done, the giver confirms it (completed, hidden from the default list) or reopens it |
 | 2026-09-16 | Statistics: by Associate (weekly, bi-weekly, monthly calls and potential money; Founders see all, Managers their team, Associates themselves), by Profile for the Founder (onboard date, status incl. deactivated, email, bank, total income) and Finance for the Founder (expected vs real income per period, platform and Profile, and the gap) |
 | 2026-09-16 | Chat threads load older and newer messages automatically while scrolling and keep only a 200-message window in memory (`after` cursor on chat messages) |
+| 2026-09-17 | Sign in with Google: Google accounts link to existing users by their sign-in email the first time and by Google's account id afterwards; the Founder sees and edits a user's sign-in email and can unlink Google |

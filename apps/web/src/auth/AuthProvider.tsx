@@ -13,6 +13,7 @@ interface AuthContextValue {
   /** The zone this user sees times in (§9.3). */
   zone: string;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: (credential: string) => Promise<void>;
   logout: () => Promise<void>;
   setUser: (user: MeDTO) => void;
   hasRole: (...roles: Role[]) => boolean;
@@ -70,6 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('authenticated');
   }, []);
 
+  const loginWithGoogle = useCallback(async (credential: string) => {
+    const auth = await api.auth.google(credential);
+    setUser(auth.user);
+    setStatus('authenticated');
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await detachNotificationsOnSignOut();
@@ -85,11 +92,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       user,
       zone: viewerZone(user),
       login,
+      loginWithGoogle,
       logout,
       setUser,
       hasRole: (...roles) => Boolean(user && roles.includes(user.role)),
     }),
-    [status, user, login, logout],
+    [status, user, login, loginWithGoogle, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

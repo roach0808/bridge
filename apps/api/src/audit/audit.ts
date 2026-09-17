@@ -57,7 +57,7 @@ function shape(path: string): string {
 }
 
 /** Reads worth recording: money, personal data and anything that dumps data out. */
-const SENSITIVE_READS = [/^stats\/profiles$/, /^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/, /^audit/];
+const SENSITIVE_READS = [/^users\/:id\/sign-in$/, /^stats\/profiles$/, /^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/, /^audit/];
 
 const MUTATIONS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -83,6 +83,8 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^profiles/, 'profile'],
   [/^banks\/:id$/, 'bank'],
   [/^users\/:id\/sessions$/, 'session'],
+  [/^users\/:id\/sign-in$/, 'user.sign_in'],
+  [/^users\/:id\/google$/, 'user.google'],
   [/^users/, 'user'],
   [/^platforms/, 'platform'],
   [/^chat\/messages\/:id\/todo$/, 'todo'],
@@ -96,6 +98,7 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^me\/password$/, 'password.change', true],
   [/^me/, 'me'],
   [/^auth\/login$/, 'auth.login', true],
+  [/^auth\/google$/, 'auth.google', true],
   [/^auth\/logout$/, 'auth.logout', true],
   [/^audit/, 'audit'],
   [/^schedule-blocks|^experts\/:id\/schedule-blocks/, 'schedule'],
@@ -114,6 +117,7 @@ const VERBS: Record<string, { key: string; word: string }> = {
 /** Plain wording for the actions that deserve it; the rest read "changed calls/:id". */
 const SUMMARIES: Record<string, string> = {
   'auth.login': 'signed in',
+  'auth.google': 'signed in with Google',
   'auth.logout': 'signed out',
   'password.change': 'changed their password',
   'call.transition': 'moved a call to its next status',
@@ -134,6 +138,9 @@ const SUMMARIES: Record<string, string> = {
   'session.read': 'looked at signed-in devices',
   'user.create': 'created a user',
   'user.update': 'changed a user',
+  'user.sign_in.read': 'looked at someone’s sign-in email and Google account',
+  'user.sign_in.update': 'changed someone’s sign-in email',
+  'user.google.delete': 'unlinked someone’s Google account',
   'todo.create': 'gave a task',
   'todo.delete': 'removed a task',
   'todo.done': 'marked a task done',
@@ -165,7 +172,14 @@ export const auditRequests: RequestHandler = (req: Request, res: Response, next:
   res.on('finish', () => {
     // A failed sign-in has no actor: keep the attempted address, and only then.
     const failed = res.statusCode >= 400;
-    const email = failed && shaped === 'auth/login' ? (req.body as { email?: string } | undefined)?.email : undefined;
+    const signIn = shaped === 'auth/login' || shaped === 'auth/google';
+    const email = !failed
+      ? undefined
+      : shaped === 'auth/login'
+        ? (req.body as { email?: string } | undefined)?.email
+        : shaped === 'auth/google'
+          ? (res.locals.signInEmail as string | undefined)
+          : undefined;
     const { action, summary } = describe(req.method, shaped);
     const id = (req.params?.id ?? null) as string | null;
     record(req, res, {
@@ -173,7 +187,7 @@ export const auditRequests: RequestHandler = (req: Request, res: Response, next:
       summary: failed ? `${summary} — refused (${res.statusCode})` : summary,
       entityId: id && /^[0-9a-f-]{36}$/i.test(id) ? id : null,
       meta: email ? { email } : undefined,
-      ...(failed && shaped === 'auth/login' ? { userId: null } : {}),
+      ...(failed && signIn ? { userId: null } : {}),
     });
   });
   next();

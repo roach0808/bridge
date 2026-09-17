@@ -109,6 +109,7 @@ model User {
   associateCalls     Call[]              @relation("CallAssociate")
   expertCalls        Call[]              @relation("CallExpert")
   createdCalls       Call[]              @relation("CallCreatedBy")
+  identities         AuthIdentity[]
   statusChanges      CallStatusHistory[]
   messages           Message[]
   notifications      Notification[]
@@ -580,4 +581,27 @@ model ProfileAddress {
 
   @@index([profileId, sortOrder])
   @@map("profile_addresses")
+}
+
+/// A way to sign in besides the password, such as a Google account.
+enum AuthProvider {
+  google
+}
+
+/// Links a user to an outside account. The provider's stable `subject` (Google's `sub`) identifies it;
+/// the email is only a record of which address it had when linked or last used.
+model AuthIdentity {
+  id         String       @id @default(uuid()) @db.Uuid
+  userId     String       @map("user_id") @db.Uuid
+  provider   AuthProvider
+  subject    String
+  email      String?
+  createdAt  DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  lastUsedAt DateTime?    @map("last_used_at") @db.Timestamptz(3)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+  @@unique([userId, provider])
+  @@map("auth_identities")
 }

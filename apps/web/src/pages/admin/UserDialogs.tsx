@@ -4,6 +4,7 @@ import {
   Alert,
   Box,
   Button,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -558,6 +559,110 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
           )
         )}
       </Box>
+      {me.role === 'founder' && <SignInSection userId={current.id} nickname={current.nickname} />}
     </FormDialog>
+  );
+}
+
+/**
+ * Founder only: the email someone signs in with and their linked Google account.
+ * Loaded on request, because each look is recorded in the audit trail.
+ */
+function SignInSection({ userId, nickname }: { userId: string; nickname: string }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [shown, setShown] = useState(false);
+  const [email, setEmail] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const key = ['users', 'sign-in', userId];
+  const details = useQuery({ queryKey: key, queryFn: () => api.users.signIn(userId), enabled: shown, staleTime: 0, gcTime: 0 });
+  useEffect(() => {
+    if (details.data) setEmail(details.data.email);
+  }, [details.data]);
+  useEffect(() => setShown(false), [userId]);
+
+  const saveEmail = useMutation({
+    mutationFn: () => api.users.setSignInEmail(userId, email.trim()),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(key, saved);
+      setEmailError(null);
+      toast.success(`${nickname} now signs in with ${saved.email}`);
+    },
+    onError: (err) => setEmailError(isApiError(err) && err.status === 409 ? 'That email is already in use' : errorMessage(err)),
+  });
+  const unlink = useMutation({
+    mutationFn: () => api.users.unlinkGoogle(userId),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(key, saved);
+      toast.success('Google account unlinked');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  return (
+    <Box sx={{ borderTop: 1, borderColor: 'divider', pt: 2 }}>
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+        Sign-in
+      </Typography>
+      {!shown ? (
+        <>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+            The email {nickname} signs in with, and their Google account. Viewing it is recorded in the audit trail.
+          </Typography>
+          <Button size="small" variant="outlined" onClick={() => setShown(true)}>
+            Show sign-in details
+          </Button>
+        </>
+      ) : details.isLoading ? (
+        <CircularProgress size={18} />
+      ) : details.isError || !details.data ? (
+        <Alert severity="error">{errorMessage(details.error)}</Alert>
+      ) : (
+        <Stack spacing={1.5} sx={{ mt: 1 }}>
+          <Stack direction="row" spacing={1} alignItems="flex-start">
+            <TextField
+              label="Sign-in email"
+              type="email"
+              size="small"
+              fullWidth
+              value={email}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                setEmailError(null);
+              }}
+              error={Boolean(emailError)}
+              helperText={emailError ?? 'Also used to link their Google account the first time they use it.'}
+              slotProps={{ htmlInput: { spellCheck: false } }}
+            />
+            <Button
+              variant="outlined"
+              onClick={() => saveEmail.mutate()}
+              disabled={saveEmail.isPending || !email.trim() || email.trim().toLowerCase() === details.data.email}
+              sx={{ flexShrink: 0, height: 40 }}
+            >
+              Save
+            </Button>
+          </Stack>
+          {details.data.google ? (
+            <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between">
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="body2">Google: {details.data.google.email ?? 'linked'}</Typography>
+                <Typography variant="caption" color="text.secondary">
+                  Linked {DateTime.fromISO(details.data.google.linkedAt).toFormat('LLL d, yyyy')}
+                  {details.data.google.lastUsedAt ? ` · last used ${DateTime.fromISO(details.data.google.lastUsedAt).toRelative()}` : ''}
+                </Typography>
+              </Box>
+              <Button size="small" color="inherit" onClick={() => unlink.mutate()} disabled={unlink.isPending} sx={{ color: 'text.secondary', flexShrink: 0 }}>
+                Unlink
+              </Button>
+            </Stack>
+          ) : (
+            <Typography variant="body2" color="text.secondary">
+              Google: not linked yet. It links the first time {nickname} uses “Sign in with Google” with the email above.
+            </Typography>
+          )}
+        </Stack>
+      )}
+    </Box>
   );
 }

@@ -4,6 +4,8 @@ import {
   defaultAvatarFor,
   isAvatarForAudience,
   listUsersQuerySchema,
+  signInEmailSchema,
+  type SignInDetailsDTO,
   updateUserSchema,
 } from '@god/shared';
 import type { Prisma } from '@prisma/client';
@@ -12,7 +14,7 @@ import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middlewar
 import { hashPassword } from '../auth/auth.routes';
 import { prisma } from '../db';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
-import { idParam, parseBody, parseQuery } from '../http';
+import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
 import { disconnectUser } from '../realtime/hub';
 import { toUserDTO, userSelect } from '../serializers';
 
@@ -120,6 +122,47 @@ usersRouter.post('/users', async (req, res) => {
 usersRouter.get('/users/:id', async (req, res) => {
   const user = await loadVisibleUser(actorOf(req), idParam(req));
   res.json(toUserDTO(user));
+});
+
+async function signInDetails(id: string): Promise<SignInDetailsDTO> {
+  const user = await prisma.user.findUnique({
+    where: { id },
+    select: { email: true, identities: { where: { provider: 'google' } } },
+  });
+  if (!user) throw notFound('User');
+  const link = user.identities[0];
+  return {
+    email: user.email,
+    google: link ? { email: link.email, linkedAt: iso(link.createdAt), lastUsedAt: isoOrNull(link.lastUsedAt) } : null,
+  };
+}
+
+/** Founder only: the sign-in email and the linked Google account. Recorded in the audit trail. */
+usersRouter.get('/users/:id/sign-in', requireRole('founder'), async (req, res) => {
+  const id = idParam(req);
+  if (!id) throw notFound('User');
+  res.json(await signInDetails(id));
+});
+
+/** Founder only: changes the sign-in email, which Google sign-in is matched against the first time. */
+usersRouter.patch('/users/:id/sign-in', requireRole('founder'), async (req, res) => {
+  const id = idParam(req);
+  if (!id) throw notFound('User');
+  const { email } = parseBody(signInEmailSchema, req);
+  const taken = await prisma.user.findFirst({ where: { email, NOT: { id } }, select: { id: true } });
+  if (taken) throw conflict('That email is already in use', 'conflict', { field: 'email' });
+  const exists = await prisma.user.findUnique({ where: { id }, select: { id: true } });
+  if (!exists) throw notFound('User');
+  await prisma.user.update({ where: { id }, data: { email } });
+  res.json(await signInDetails(id));
+});
+
+/** Founder only: unlinks the Google account, e.g. when someone switches Gmail addresses. */
+usersRouter.delete('/users/:id/google', requireRole('founder'), async (req, res) => {
+  const id = idParam(req);
+  if (!id) throw notFound('User');
+  await prisma.authIdentity.deleteMany({ where: { userId: id, provider: 'google' } });
+  res.json(await signInDetails(id));
 });
 
 usersRouter.patch('/users/:id', async (req, res) => {

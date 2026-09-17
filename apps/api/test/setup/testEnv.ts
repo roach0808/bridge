@@ -39,5 +39,6 @@ export function testEnv(): Record<string, string> {
     LOG_LEVEL: 'silent',
     PUSH_ENABLED: 'false',
     CORS_ORIGINS: 'http://localhost:5173',
+    GOOGLE_CLIENT_ID: 'test-client.apps.googleusercontent.com',
   };
 }

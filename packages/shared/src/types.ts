@@ -30,6 +30,25 @@ export interface MeDTO extends UserDTO {
   email: string;
 }
 
+/** What the login page needs before anyone signs in. */
+export interface AuthConfigDTO {
+  /** Null when Google sign-in is not set up. */
+  googleClientId: string | null;
+}
+
+/** A Google account linked to a user. */
+export interface GoogleLinkDTO {
+  email: string | null;
+  linkedAt: string;
+  lastUsedAt: string | null;
+}
+
+/** Founder only: how someone signs in. */
+export interface SignInDetailsDTO {
+  email: string;
+  google: GoogleLinkDTO | null;
+}
+
 export interface AuthResponse {
   accessToken: string;
   refreshToken: string;

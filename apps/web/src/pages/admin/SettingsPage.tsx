@@ -17,13 +17,13 @@ import {
 import { AVATAR_CREDITS, ROLE_LABELS, TEAM_TIME_ZONE, avatarAudienceForRole, password as passwordSchema } from '@god/shared';
 import { BrowserNotificationsSettings } from '@/components/BrowserNotifications';
 import { SessionsCard } from '@/components/SessionsCard';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { AvatarPicker } from '@/components/AvatarPicker';
 import { PhotoUpload } from '@/components/PhotoUpload';
-import { PageHeader } from '@/components/common';
+import { ErrorState, PageHeader } from '@/components/common';
 import { RoleBadge, UserAvatar } from '@/components/identity';
 import { TimeZoneSelect } from '@/components/TimeZoneSelect';
 import { useToast } from '@/components/ToastProvider';
@@ -426,6 +426,9 @@ export default function SettingsPage() {
         <Grid size={{ xs: 12, lg: 6 }}>
           <Stack spacing={2.5}>
             <PasswordSection />
+            <SectionCard id="settings-google" title="Sign in with Google">
+              <GoogleLinkStatus />
+            </SectionCard>
             <TimeZoneSection />
             <SectionCard id="settings-sessions" title="Signed-in devices">
               <SessionsCard />
@@ -439,5 +442,24 @@ export default function SettingsPage() {
         </Grid>
       </Grid>
     </Box>
+  );
+}
+
+/** Whether the caller's Google account is linked. */
+function GoogleLinkStatus() {
+  const me = useMe();
+  const link = useQuery({ queryKey: ['me', 'google'], queryFn: api.auth.googleLink });
+  if (link.isLoading) return <CircularProgress size={18} />;
+  if (link.isError) return <ErrorState error={link.error} onRetry={() => void link.refetch()} />;
+  return link.data ? (
+    <Typography variant="body2">
+      Linked to <strong>{link.data.email ?? 'your Google account'}</strong>
+      {link.data.lastUsedAt ? `, last used ${DateTime.fromISO(link.data.lastUsedAt).toRelative()}` : ''}. You can sign in with Google or your password.
+    </Typography>
+  ) : (
+    <Typography variant="body2" color="text.secondary">
+      Not linked yet. On the sign-in page, choose “Sign in with Google” with the Google account for <strong>{me.email}</strong>; it links the first time.
+      If you use a different Gmail address, ask the Founder to change your sign-in email.
+    </Typography>
   );
 }

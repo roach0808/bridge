@@ -3,21 +3,26 @@ import {
   type SessionDTO,
   avatarSchema,
   changePasswordSchema,
+  googleSignInSchema,
+  type AuthConfigDTO,
+  type GoogleLinkDTO,
   isAvatarForAudience,
   loginSchema,
   refreshSchema,
   timeZoneSchema,
 } from '@god/shared';
 import argon2 from 'argon2';
+import type { Prisma } from '@prisma/client';
 import { Router, type Request, type Response } from 'express';
 import rateLimit from 'express-rate-limit';
 import { config, cookieSecure } from '../config';
 import { prisma } from '../db';
 import { HttpError, badRequest, forbidden, unauthenticated } from '../errors';
-import { iso, param, parseBody } from '../http';
+import { iso, isoOrNull, param, parseBody } from '../http';
 import { meSelect, toMeDTO } from '../serializers';
 import { record } from '../audit/audit';
 import { deviceOf } from './device';
+import { verifyGoogleCredential } from './google';
 import { actorOf, requireAuth, requireRole } from './middleware';
 import { hashToken, issueRefreshToken, refreshTokenTtlMs, signAccessToken } from './tokens';
 
@@ -72,6 +77,13 @@ authRouter.post('/auth/login', loginLimiter, async (req, res) => {
   if (!user.isActive) throw new HttpError(401, ERROR_CODES.inactive, 'This account has been deactivated');
 
   const { passwordHash: _hash, ...me } = user;
+  await startSession(req, res, me);
+});
+
+type MeRow = Prisma.UserGetPayload<{ select: typeof meSelect }>;
+
+/** Signs the user in on this device, whichever way they proved who they are. */
+async function startSession(req: Request, res: Response, user: MeRow) {
   const refresh = await issueRefreshToken(prisma, user.id, undefined, deviceOf(req));
   // So the audit trail attributes this sign-in to them (no requireAuth here).
   req.actor = { id: user.id, role: user.role, nickname: user.nickname, managerId: user.managerId, timeZone: user.timeZone, avatarId: user.avatarId, sessionId: refresh.familyId };
@@ -79,8 +91,58 @@ authRouter.post('/auth/login', loginLimiter, async (req, res) => {
   res.json({
     accessToken: signAccessToken(user.id, user.role, refresh.familyId),
     refreshToken: refresh.token,
-    user: toMeDTO(me),
+    user: toMeDTO(user),
   });
+}
+
+authRouter.get('/auth/config', (_req, res) => {
+  const body: AuthConfigDTO = { googleClientId: config.GOOGLE_CLIENT_ID ?? null };
+  res.json(body);
+});
+
+/**
+ * Sign in with Google. A Google account already linked to a user signs that user in.
+ * Otherwise it links to the user whose sign-in email is the Google address, the first time
+ * only; nobody else gets in, so accounts are still created by the Founder or a Manager.
+ */
+authRouter.post('/auth/google', loginLimiter, async (req, res) => {
+  if (!config.GOOGLE_CLIENT_ID) throw new HttpError(404, ERROR_CODES.googleUnavailable, 'Google sign-in is not set up');
+  const { credential } = parseBody(googleSignInSchema, req);
+  const account = await verifyGoogleCredential(credential);
+  if (!account) throw new HttpError(401, ERROR_CODES.invalidCredentials, 'Google could not confirm this sign-in. Try again.');
+  // For the audit trail of refused attempts.
+  res.locals.signInEmail = account.email;
+
+  const linked = await prisma.authIdentity.findUnique({
+    where: { provider_subject: { provider: 'google', subject: account.subject } },
+    select: { id: true, user: { select: meSelect } },
+  });
+  let user = linked?.user ?? null;
+  if (!user) {
+    const byEmail = await prisma.user.findUnique({
+      where: { email: account.email },
+      select: { ...meSelect, identities: { where: { provider: 'google' }, select: { id: true } } },
+    });
+    if (!byEmail) {
+      throw new HttpError(401, ERROR_CODES.invalidCredentials, `No account uses ${account.email}. Ask the Founder to add it to your account.`);
+    }
+    if (byEmail.identities.length) {
+      throw new HttpError(401, ERROR_CODES.invalidCredentials, 'Your account is linked to a different Google account. Ask the Founder to unlink it.');
+    }
+    const { identities: _none, ...rest } = byEmail;
+    user = rest;
+  }
+  if (!user.isActive) throw new HttpError(401, ERROR_CODES.inactive, 'This account has been deactivated');
+
+  const now = new Date();
+  if (linked) {
+    await prisma.authIdentity.update({ where: { id: linked.id }, data: { email: account.email, lastUsedAt: now } });
+  } else {
+    await prisma.authIdentity.create({
+      data: { userId: user.id, provider: 'google', subject: account.subject, email: account.email, lastUsedAt: now },
+    });
+  }
+  await startSession(req, res, user);
 });
 
 authRouter.post('/auth/refresh', async (req, res) => {
@@ -207,6 +269,15 @@ authRouter.delete('/users/:id/sessions', requireAuth, requireRole('founder'), as
 authRouter.get('/me', requireAuth, async (req, res) => {
   const me = await prisma.user.findUniqueOrThrow({ where: { id: actorOf(req).id }, select: meSelect });
   res.json(toMeDTO(me));
+});
+
+/** The Google account linked to the caller, if any. */
+authRouter.get('/me/google', requireAuth, async (req, res) => {
+  const link = await prisma.authIdentity.findUnique({
+    where: { userId_provider: { userId: actorOf(req).id, provider: 'google' } },
+  });
+  const body: GoogleLinkDTO | null = link ? { email: link.email, linkedAt: iso(link.createdAt), lastUsedAt: isoOrNull(link.lastUsedAt) } : null;
+  res.json(body);
 });
 
 authRouter.patch('/me/password', requireAuth, async (req, res) => {

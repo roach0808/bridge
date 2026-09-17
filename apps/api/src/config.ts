@@ -23,6 +23,8 @@ const schema = z.object({
   TRUST_PROXY: z.coerce.number().int().min(0).default(1),
   HOST: z.string().default('0.0.0.0'),
   PUBLIC_API_URL: z.string().url().default('http://localhost:4000'),
+  /** OAuth client ID from Google Cloud (Google Auth Platform → Clients). Google sign-in is off without it. */
+  GOOGLE_CLIENT_ID: z.preprocess((v) => (v === '' ? undefined : v), z.string().endsWith('.apps.googleusercontent.com').optional()),
   LOGIN_RATE_LIMIT: z.coerce.number().int().min(1).default(5),
   COOKIE_SECURE: z
     .enum(['true', 'false'])

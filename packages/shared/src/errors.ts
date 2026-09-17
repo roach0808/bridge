@@ -13,6 +13,7 @@ export const ERROR_CODES = {
   rateRequired: 'rate_required',
   rateLimited: 'rate_limited',
   inactive: 'user_inactive',
+  googleUnavailable: 'google_unavailable',
   internal: 'internal_error',
 } as const;
 

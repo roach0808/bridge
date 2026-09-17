@@ -6,18 +6,41 @@ import {
   Button,
   Card,
   CircularProgress,
+  Divider,
   IconButton,
   InputAdornment,
   Stack,
   TextField,
   Typography,
 } from '@mui/material';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { useAuth } from '@/auth/AuthProvider';
+import { GoogleSignInButton } from '@/components/GoogleSignInButton';
+import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
+  const [googleClientId, setGoogleClientId] = useState<string | null>(null);
+  useEffect(() => {
+    // Without the setting (or an older API), the page just shows the password form.
+    api.auth
+      .config()
+      .then((c) => setGoogleClientId(c.googleClientId))
+      .catch(() => setGoogleClientId(null));
+  }, []);
+
+  const signInWithGoogle = async (credential: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await loginWithGoogle(credential);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [show, setShow] = useState(false);
@@ -80,11 +103,17 @@ export default function LoginPage() {
           </Typography>
           <Stack spacing={2}>
             {error && <Alert severity="error">{error}</Alert>}
+            {googleClientId && (
+              <>
+                <GoogleSignInButton clientId={googleClientId} onCredential={(c) => void signInWithGoogle(c)} onError={setError} width={300} />
+                <Divider sx={{ typography: 'caption', color: 'text.secondary' }}>or use your password</Divider>
+              </>
+            )}
             <TextField
               label="Email"
               type="email"
               autoComplete="email"
-              autoFocus
+              autoFocus={!googleClientId}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required

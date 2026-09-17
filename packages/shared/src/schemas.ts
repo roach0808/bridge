@@ -58,6 +58,10 @@ export const loginSchema = z.object({
   password: z.string().min(1, 'Password is required'),
 });
 
+/** The ID token the "Sign in with Google" button returns. */
+export const googleSignInSchema = z.object({ credential: z.string().min(20).max(4096) });
+/** Founder only: the email someone signs in with (and that Google sign-in is matched against). */
+export const signInEmailSchema = z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email') });
 export const refreshSchema = z.object({ refreshToken: z.string().min(1).optional() });
 
 export const changePasswordSchema = z.object({ current: z.string().min(1), next: password });

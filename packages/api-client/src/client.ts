@@ -41,6 +41,9 @@ import type {
   UpdateCallInput,
   UserDTO,
   UserRef,
+  AuthConfigDTO,
+  GoogleLinkDTO,
+  SignInDetailsDTO,
   AssociateStats,
   FinanceStats,
   ProfileStatsRow,
@@ -101,6 +104,14 @@ export function createApiClient(options: ClientOptions) {
         await http.applyAuth(auth);
         return auth;
       },
+      /** Public settings for the login page, such as the Google client ID. */
+      config: () => get<AuthConfigDTO>('/auth/config'),
+      /** Signs in with the ID token the "Sign in with Google" button returned. */
+      async google(credential: string): Promise<AuthResponse> {
+        const auth = await http.request<AuthResponse>('POST', '/auth/google', { body: { credential } });
+        await http.applyAuth(auth);
+        return auth;
+      },
       /** Restores a session from the stored refresh token (or cookie). */
       restore: () => http.refresh(),
       async logout(): Promise<void> {
@@ -111,6 +122,8 @@ export function createApiClient(options: ClientOptions) {
         }
       },
       me: () => get<MeDTO>('/me'),
+      /** The Google account linked to the caller, or null. */
+      googleLink: () => get<GoogleLinkDTO | null>('/me/google'),
       changePassword: (current: string, next: string) => patch<void>('/me/password', { current, next }),
       setAvatar: (avatarId: string) => patch<MeDTO>('/me/avatar', { avatarId }),
       setTimeZone: (timeZone: string) => patch<MeDTO>('/me/time-zone', { timeZone }),
@@ -145,6 +158,10 @@ export function createApiClient(options: ClientOptions) {
       get: (id: string) => get<UserDTO>(`/users/${enc(id)}`),
       create: (body: CreateUserBody) => post<UserDTO>('/users', body),
       update: (id: string, body: UpdateUserBody) => patch<UserDTO>(`/users/${enc(id)}`, body),
+      /** Founder only, audited: sign-in email and linked Google account. */
+      signIn: (id: string) => get<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`),
+      setSignInEmail: (id: string, email: string) => patch<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`, { email }),
+      unlinkGoogle: (id: string) => del<SignInDetailsDTO>(`/users/${enc(id)}/google`),
     },
 
     platforms: {
