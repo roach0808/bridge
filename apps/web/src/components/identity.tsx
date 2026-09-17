@@ -2,7 +2,7 @@ import AdminPanelSettingsRounded from '@mui/icons-material/AdminPanelSettingsRou
 import PsychologyRounded from '@mui/icons-material/PsychologyRounded';
 import SupervisorAccountRounded from '@mui/icons-material/SupervisorAccountRounded';
 import SupportAgentRounded from '@mui/icons-material/SupportAgentRounded';
-import { Avatar, Box, Stack, Tooltip, Typography, type SvgIconProps } from '@mui/material';
+import { Avatar, Box, Stack, Typography, type SvgIconProps } from '@mui/material';
 import { ROLE_LABELS, type Role, type UserRef } from '@god/shared';
 import type { ComponentType } from 'react';
 import { avatarUrl, photoUrl } from '@/lib/api';
@@ -76,7 +76,6 @@ export function RoleBadge({ role, size = 'small' }: { role: Role; size?: 'small'
         whiteSpace: 'nowrap',
       }}
     >
-      <RoleDot role={role} />
       {ROLE_LABELS[role]}
     </Box>
   );
@@ -110,11 +109,10 @@ export function UserChip({
             {user.nickname}
           </Typography>
           {showRole && (
-            <Tooltip title={ROLE_LABELS[user.role]}>
-              <span style={{ display: 'inline-flex' }}>
-                <RoleDot role={user.role} size={6} />
-              </span>
-            </Tooltip>
+            // The role as text: a coloured dot here read like an online status.
+            <Typography variant="caption" color="text.secondary" noWrap sx={{ flexShrink: 0 }}>
+              {ROLE_LABELS[user.role]}
+            </Typography>
           )}
         </Stack>
         {subtitle && (

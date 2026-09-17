@@ -34,7 +34,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
-import { RoleDot, UserAvatar } from '@/components/identity';
+import { UserAvatar } from '@/components/identity';
 import { zoneCity } from '@/lib/time';
 import { useRealtime } from '@/realtime/RealtimeProvider';
 import { NAV_ITEMS, type NavItem } from './nav';
@@ -237,12 +237,9 @@ function UserMenu() {
           <Typography variant="body2" fontWeight={600}>
             {me.nickname}
           </Typography>
-          <Stack direction="row" spacing={0.75} alignItems="center">
-            <RoleDot role={me.role} size={6} />
-            <Typography variant="caption" color="text.secondary">
-              {ROLE_LABELS[me.role]} · {me.email}
-            </Typography>
-          </Stack>
+          <Typography variant="caption" color="text.secondary" component="div">
+            {ROLE_LABELS[me.role]} · {me.email}
+          </Typography>
         </Box>
         <Divider />
         <MenuItem
