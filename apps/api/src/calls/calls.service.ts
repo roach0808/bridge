@@ -82,6 +82,21 @@ async function assertActiveUser(id: string, role: 'associate' | 'expert', field:
   return user;
 }
 
+/**
+ * Who may run a call (be its Associate): an active Associate, or an active Manager.
+ * A Manager chooses themselves or an Associate on their team.
+ */
+async function assertCallOwner(actor: Actor, id: string) {
+  const user = await prisma.user.findUnique({ where: { id }, select: { role: true, isActive: true, managerId: true } });
+  if (!user || !user.isActive || (user.role !== 'associate' && user.role !== 'manager')) {
+    throw badRequest('Choose an active Associate or Manager', { issues: [{ path: 'associateId', message: 'Not an active Associate or Manager' }] });
+  }
+  if (actor.role === 'manager' && id !== actor.id && !(user.role === 'associate' && user.managerId === actor.id)) {
+    throw forbidden('Managers choose themselves or their own team');
+  }
+  return user;
+}
+
 /** Re-throws database conflicts inside a transaction with a typed error. */
 function rethrowOverlap(err: unknown): never {
   if (err instanceof Error && err.message.includes('calls_expert_no_overlap')) {
@@ -166,14 +181,14 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
       throw forbidden('Associates create calls for themselves');
     }
     associateId = actor.id;
+  } else if (actor.role === 'manager' && (!input.associateId || input.associateId === actor.id)) {
+    // Managers run calls themselves too.
+    associateId = actor.id;
   } else {
     if (!input.associateId) {
       throw badRequest('Choose the Associate for this call', { issues: [{ path: 'associateId', message: 'Required' }] });
     }
-    const associate = await assertActiveUser(input.associateId, 'associate', 'associateId');
-    if (actor.role === 'manager' && associate.managerId !== actor.id) {
-      throw forbidden('Managers create calls for their own team');
-    }
+    await assertCallOwner(actor, input.associateId);
     associateId = input.associateId;
   }
   if (input.expertId) await assertActiveUser(input.expertId, 'expert', 'expertId');
@@ -247,10 +262,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
   }
   if (input.associateId !== undefined && input.associateId !== current.associateId) {
     if (!perms.reassignAssociate) throw forbidden('You cannot reassign the Associate');
-    const associate = await assertActiveUser(input.associateId, 'associate', 'associateId');
-    if (actor.role === 'manager' && associate.managerId !== actor.id) {
-      throw forbidden('Managers reassign within their own team');
-    }
+    await assertCallOwner(actor, input.associateId);
   }
   if (input.expertId !== undefined && input.expertId !== current.expertId) {
     if (!perms.reassignExpert) throw forbidden('You cannot reassign the Expert at this stage');
@@ -409,7 +421,7 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
         fromStatus: from,
         toStatus: to,
         actorId: actor.id,
-        isOverride: isOverride(actor.role, from, to),
+        isOverride: isOverride(actor.role, from, to, { isCallAssociate: current.associateId === actor.id }),
         comment: comment ?? null,
       },
     });

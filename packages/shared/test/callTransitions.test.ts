@@ -104,11 +104,23 @@ describe('canTransition: every role × from × to with relationship NOT satisfie
 describe('canTransition: the wrong relationship does not stand in for the right one', () => {
   const others: Array<[Role, TransitionContext]> = [
     ['associate', { ...NONE, isCallExpert: true, managesCallAssociate: true }],
-    ['manager', { ...NONE, isCallAssociate: true, isCallExpert: true }],
+    ['manager', { ...NONE, isCallExpert: true }],
     ['expert', { ...NONE, isCallAssociate: true, managesCallAssociate: true }],
   ];
   it.each(others)('%s with only other roles’ relationships is refused everywhere', (role, ctx) => {
     for (const [from, to] of SPEC) expect(canTransition(role, from, to, ctx)).toBe(false);
+  });
+});
+
+describe('a manager running their own call', () => {
+  const own: TransitionContext = { ...NONE, isCallAssociate: true, hasExpert: true };
+  it('moves it like its associate, and it is not an override', () => {
+    expect(canTransition('manager', 'on_scheduling', 'scheduled', own)).toBe(true);
+    expect(isOverride('manager', 'on_scheduling', 'scheduled', own)).toBe(false);
+    expect(isOverride('manager', 'on_scheduling', 'scheduled')).toBe(true);
+    // Expert and Founder steps stay theirs.
+    expect(canTransition('manager', 'scheduled', 'confirmed', own)).toBe(false);
+    expect(isOverride('manager', 'finished', 'invoice_submit', own)).toBe(true);
   });
 });
 

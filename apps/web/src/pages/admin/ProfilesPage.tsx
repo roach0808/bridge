@@ -84,7 +84,7 @@ export default function ProfilesPage() {
   const me = useMe();
   const isFounder = me.role === 'founder';
   const isExpert = me.role === 'expert';
-  const canAdd = isFounder || me.role === 'associate';
+  const canAdd = isFounder || me.role === 'associate' || me.role === 'manager';
   const phone = useIsPhone();
   const [view, setView] = useProfilesView(isFounder);
   const [detailsId, setDetailsId] = useState<string | null>(null);
@@ -216,7 +216,7 @@ export default function ProfilesPage() {
           <Hint icon={<InfoOutlined sx={{ fontSize: 17 }} />}>
             {isExpert
               ? 'Open a profile to read its personal details and history.'
-              : me.role === 'associate'
+              : me.role === 'associate' || me.role === 'manager'
                 ? 'Profiles you submit are reviewed by a Founder before they can be used for calls. Open a profile to see its details and platform statuses.'
                 : 'Associates submit profiles and a Founder approves them. Open a profile to see its details and platform statuses.'}
           </Hint>

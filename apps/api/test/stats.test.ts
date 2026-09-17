@@ -78,8 +78,11 @@ describe('statistics by associate', () => {
   it('founders see everyone, managers their team, associates themselves, experts nothing', async () => {
     const ids = async (user: typeof fx.a1) =>
       (await (await as(user)).get('/stats/associates')).body.rows.map((r: { associate: { id: string } }) => r.associate.id).sort();
+    // Managers appear once they run calls themselves; a Manager always sees their own row.
     expect(await ids(fx.founder)).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
-    expect(await ids(fx.m1)).toEqual([fx.a1.id, fx.a2.id].sort());
+    expect(await ids(fx.m1)).toEqual([fx.a1.id, fx.a2.id, fx.m1.id].sort());
+    await makeCall(fx, { associate: fx.m2, status: 'scheduled', scheduledAt: '2026-09-17T14:00:00Z' });
+    expect(await ids(fx.founder)).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id, fx.m2.id].sort());
     expect(await ids(fx.a3)).toEqual([fx.a3.id]);
     expectError(await (await as(fx.e1)).get('/stats/associates'), 403);
   });

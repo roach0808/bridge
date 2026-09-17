@@ -30,8 +30,17 @@ describe('POST /profiles', () => {
     });
   });
 
-  it.each(['m1', 'e1'] as const)('%s cannot create profiles', async (who) => {
-    expectError(await (await as(fx[who])).post('/profiles', profileBody()), 403, 'forbidden');
+  it('experts cannot create profiles', async () => {
+    expectError(await (await as(fx.e1)).post('/profiles', profileBody()), 403, 'forbidden');
+  });
+
+  it('a manager submits a pending profile like an associate', async () => {
+    const res = await (await as(fx.m1)).post('/profiles', profileBody());
+    expect(res.status, res.text).toBe(201);
+    expect(res.body).toMatchObject({ status: 'pending', createdBy: { id: fx.m1.id }, reviewedBy: null });
+    expect(await prisma.notification.count({ where: { type: 'profile.submitted', userId: fx.founder.id } })).toBe(1);
+    expect((await (await as(fx.m1)).get(`/profiles/${res.body.id}`)).status).toBe(200);
+    expectError(await (await as(fx.m2)).get(`/profiles/${res.body.id}`), 404);
   });
 
   it('an associate submits a pending profile and every active founder is notified', async () => {

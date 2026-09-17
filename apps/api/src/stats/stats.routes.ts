@@ -132,12 +132,17 @@ statsRouter.get('/stats/associates', async (req, res) => {
   const from = periods[0]!.start.toJSDate();
   const to = periods.at(-1)!.end.toJSDate();
 
-  const scope =
-    actor.role === 'founder' ? {} : actor.role === 'manager' ? { managerId: actor.id } : { id: actor.id };
+  // Managers run calls too, so they have a row of their own.
+  const where: Prisma.UserWhereInput =
+    actor.role === 'founder'
+      ? { role: { in: ['associate', 'manager'] } }
+      : actor.role === 'manager'
+        ? { OR: [{ role: 'associate', managerId: actor.id }, { id: actor.id }] }
+        : { id: actor.id };
   const associates = await prisma.user.findMany({
-    where: { role: 'associate', ...scope },
+    where,
     select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } },
-    orderBy: { nickname: 'asc' },
+    orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
   });
   const calls = await pricedCalls(from, to, actor.role === 'founder' ? undefined : associates.map((a) => a.id));
 
@@ -169,8 +174,12 @@ statsRouter.get('/stats/associates', async (req, res) => {
         const cells = byAssociate.get(a.id)!;
         return { associate: { ...toUserRef(a), isActive: a.isActive }, manager: a.manager ? toUserRef(a.manager) : null, periods: cells, total: sum(cells) };
       })
-      // Deactivated Associates only while they have calls in the range.
-      .filter((r) => r.associate.isActive || r.total.calls > 0),
+      // Deactivated people only while they have calls in the range; other Managers only when they ran calls.
+      .filter((r) =>
+        r.associate.role === 'manager' && r.associate.id !== actor.id
+          ? r.total.calls > 0
+          : r.associate.isActive || r.total.calls > 0,
+      ),
     totals,
     total: sum(totals),
   };

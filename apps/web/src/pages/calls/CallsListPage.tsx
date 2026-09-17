@@ -154,7 +154,8 @@ export default function CallsListPage() {
     enabled: canFilterPeople,
     staleTime: 5 * 60_000,
   });
-  const associates = useMemo(() => (users ?? []).filter((u) => u.role === 'associate'), [users]);
+  // Managers run calls too.
+  const associates = useMemo(() => (users ?? []).filter((u) => u.role === 'associate' || u.role === 'manager'), [users]);
   const experts = useMemo(() => (users ?? []).filter((u) => u.role === 'expert'), [users]);
 
   const activeFilters = statuses.length + (associateId ? 1 : 0) + (expertId ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) + (q ? 1 : 0);

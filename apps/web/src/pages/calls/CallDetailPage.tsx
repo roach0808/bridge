@@ -61,6 +61,7 @@ import { errorMessage, fieldErrors, isApiError } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { patchCallInCache } from '@/realtime/RealtimeProvider';
 import { formatDateTime, formatUsd, inZone, relativeTime, zoneAbbr, zoneCity } from '@/lib/time';
+import { useCallOwners } from './callOwners';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertAvailability';
 import { MessageThread } from './MessageThread';
 import { StatusProgress } from './StatusProgress';
@@ -164,7 +165,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
     <>
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent={{ md: 'flex-end' }}>
         {call.allowedTransitions.map((to) => {
-          const override = isOverride(me.role, call.status, to);
+          const override = isOverride(me.role, call.status, to, { isCallAssociate: call.associate.id === me.id });
           const backwards = to === 'on_rescheduling';
           // One primary action: the first forward move. Everything else stays quiet.
           const primary = !backwards && to === call.allowedTransitions.find((t) => t !== 'on_rescheduling');
@@ -233,7 +234,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   add your new availability, so the Associate can find a slot that works.
                 </Alert>
               )}
-              {isOverride(me.role, call.status, target) && (
+              {isOverride(me.role, call.status, target, { isCallAssociate: call.associate.id === me.id }) && (
                 <Alert severity="warning" sx={{ mb: 2 }}>
                   You are acting on behalf of the {edgeOwner(call.status, target)}. This is recorded as an override.
                 </Alert>
@@ -479,11 +480,7 @@ function ReassignDialog({
   }, [open, kind, call.expert?.id, call.associate.id]);
 
   const experts = useExpertsAround(open && kind === 'expert' ? call.scheduledAt : null, call.endsAt, me.role);
-  const associates = useQuery({
-    queryKey: me.role === 'manager' ? qk.users.team : qk.users.list({ role: 'associate', active: 'true' }),
-    queryFn: () => (me.role === 'manager' ? api.users.team() : api.users.list({ role: 'associate', active: 'true' })),
-    enabled: open && kind === 'associate',
-  });
+  const associates = useCallOwners(open && kind === 'associate');
 
   const options: Array<UserRef & { hint?: string; free?: boolean }> =
     kind === 'expert'
@@ -495,7 +492,7 @@ function ReassignDialog({
             hint: `${inZone(call.scheduledAt, col.expert.timeZone).toFormat('h:mm a ZZZZ')} · ${AVAILABILITY_LABEL[a.state]}`,
           };
         })
-      : (associates.data ?? []).filter((u) => u.isActive);
+      : associates.data;
   const value = options.find((o) => o.id === selected) ?? null;
   const loading = kind === 'expert' ? experts.isLoading : associates.isLoading;
 

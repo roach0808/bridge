@@ -28,7 +28,8 @@ import {
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { CALL_DURATIONS, type ExpertColumn, type ProfileDTO, type UserDTO } from '@god/shared';
+import { CALL_DURATIONS, type ExpertColumn, type ProfileDTO } from '@god/shared';
+import { useCallOwners } from './callOwners';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useMemo, useState, type ReactNode } from 'react';
@@ -203,7 +204,8 @@ export default function NewCallPage() {
     return {
       profile: null,
       platformId: '',
-      associateId: null,
+      // A Manager runs the call themselves unless they pick someone on their team.
+      associateId: me.role === 'manager' ? me.id : null,
       platformAssociateName: '',
       projectDetails: '',
       notes: '',
@@ -212,7 +214,7 @@ export default function NewCallPage() {
       durationMinutes: (CALL_DURATIONS as readonly number[]).includes(duration) ? duration : 60,
       expertId: params.get('expertId'),
     };
-  }, [params, zone]);
+  }, [params, zone, me.role, me.id]);
   const [form, setForm] = useState<FormState>(initial);
   const [confirm, setConfirm] = useState<string[] | null>(null);
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -220,11 +222,7 @@ export default function NewCallPage() {
   const profiles = useQuery({ queryKey: qk.profiles.list({ status: 'approved' }), queryFn: () => api.profiles.list({ status: 'approved' }) });
   const platforms = useQuery({ queryKey: qk.platforms, queryFn: api.platforms.list });
   const needsAssociate = me.role === 'founder' || me.role === 'manager';
-  const associates = useQuery<UserDTO[]>({
-    queryKey: me.role === 'manager' ? qk.users.team : qk.users.list({ role: 'associate', active: 'true' }),
-    queryFn: () => (me.role === 'manager' ? api.users.team() : api.users.list({ role: 'associate', active: 'true' })),
-    enabled: needsAssociate,
-  });
+  const associates = useCallOwners(needsAssociate);
 
   const start = useMemo(() => {
     if (!form.date?.isValid || !form.time?.isValid) return null;
@@ -403,9 +401,9 @@ export default function NewCallPage() {
               {needsAssociate && (
                 <Autocomplete
                   sx={{ gridColumn: '1 / -1' }}
-                  options={(associates.data ?? []).filter((a) => a.isActive)}
+                  options={associates.data}
                   loading={associates.isLoading}
-                  value={(associates.data ?? []).find((a) => a.id === form.associateId) ?? null}
+                  value={associates.data.find((a) => a.id === form.associateId) ?? null}
                   onChange={(_, v) => set('associateId', v?.id ?? null)}
                   getOptionLabel={(a) => a.nickname}
                   isOptionEqualToValue={(a, b) => a.id === b.id}
@@ -413,7 +411,12 @@ export default function NewCallPage() {
                     <li key={key} {...props}>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <UserAvatar avatarId={a.avatarId} photoId={a.photoId} label={a.nickname} size={24} />
-                        <span>{a.nickname}</span>
+                        <span>{a.id === me.id ? `${a.nickname} (you)` : a.nickname}</span>
+                        {a.role === 'manager' && (
+                          <Typography variant="caption" color="text.secondary">
+                            · Manager
+                          </Typography>
+                        )}
                         {me.role === 'founder' && a.manager && (
                           <Typography variant="caption" color="text.secondary">
                             · {a.manager.nickname}&apos;s team
@@ -423,7 +426,7 @@ export default function NewCallPage() {
                     </li>
                   )}
                   renderInput={(p) => (
-                    <TextField {...p} label="Associate" required helperText={errors.associateId ?? 'Owns scheduling for this call'} error={Boolean(errors.associateId)} />
+                    <TextField {...p} label="Associate" required helperText={errors.associateId ?? 'Runs this call and owns its scheduling. Managers can run calls too.'} error={Boolean(errors.associateId)} />
                   )}
                 />
               )}
@@ -535,7 +538,7 @@ export default function NewCallPage() {
             <Stack spacing={1.25}>
               <SummaryRow label="Profile" value={form.profile?.name} />
               <SummaryRow label="Platform" value={platforms.data?.find((p) => p.id === form.platformId)?.name} />
-              {needsAssociate && <SummaryRow label="Associate" value={associates.data?.find((a) => a.id === form.associateId)?.nickname} />}
+              {needsAssociate && <SummaryRow label="Associate" value={associates.data.find((a) => a.id === form.associateId)?.nickname} />}
               <SummaryRow label="When" value={start ? `${start.toFormat('LLL d, h:mm a ZZZZ')} · ${form.durationMinutes}m` : undefined} />
               <SummaryRow
                 label="Expert"

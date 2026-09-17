@@ -79,8 +79,8 @@ grouped under Managers; they are assigned per Call.
 | Create Expert | ✓ | | | |
 | Deactivate user | ✓ | ✓ (own team) | | |
 | Create / edit Platform | ✓ | ✓ | | |
-| Add Profile | ✓ (approved at once) | | ✓ (pending until a Founder approves) | |
-| Edit Profile | ✓ | | own pending or rejected submission (sends it back for review) | |
+| Add Profile | ✓ (approved at once) | ✓ (pending until a Founder approves) | ✓ (pending until a Founder approves) | |
+| Edit Profile | ✓ | own pending or rejected submission | own pending or rejected submission (sends it back for review) | |
 | View Profile details | all | shared + own team's submissions | shared + own submissions | Profiles of assigned Calls, without platform statuses |
 | Set a Profile's status and rate on a platform | ✓ | | | |
 | Deactivate a Profile / see deactivated ones | ✓ | | | |
@@ -90,16 +90,16 @@ grouped under Managers; they are assigned per Call.
 | Approve / reject a pending Profile | ✓ | | | |
 | Choose own avatar (from own role's set) | ✓ | ✓ | ✓ | ✓ |
 | Create Call | ✓ | ✓ | ✓ | |
-| View Call | all | own team's | own | assigned |
-| Reassign Associate on a Call | ✓ | ✓ (own team) | | |
-| Reassign Expert on a Call | ✓ | ✓ (own team) | ✓ (own, whole scheduling stage) | |
-| Set scheduling statuses | override | override | ✓ | request rescheduling only |
+| View Call | all | own team's + own | own | assigned |
+| Reassign Associate on a Call | ✓ (to any Associate or Manager) | ✓ (own team's and own calls, to self or own team) | | |
+| Reassign Expert on a Call | ✓ | ✓ (own team + own) | ✓ (own, whole scheduling stage) | |
+| Set scheduling statuses | override | override (own calls: ✓) | ✓ | request rescheduling only |
 | Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
 | See invoice statuses and amounts | ✓ | ✓ (own team) | own | |
 | See a Profile's platform rates | ✓ | ✓ | ✓ | |
-| Set a special rate for one Call | ✓ | ✓ (own team) | own | |
+| Set a special rate for one Call | ✓ | ✓ (own team + own) | own | |
 | Set the Call's GPT link | ✓ | | | |
 | Read the Call's GPT link | ✓ | | | ✓ (assigned) |
 | See who is online (§7.6) | people they may chat with | same | same | same |
@@ -108,6 +108,10 @@ grouped under Managers; they are assigned per Call.
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders only |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ own-team Associates | | |
 | View audit history | ✓ | ✓ (own team) | own | assigned (without invoicing steps) |
+
+**[Implementation]** Managers have every Associate function: a Call's Associate may be a
+Manager, who then runs it exactly like an Associate (no overrides on their own Call), sees
+it in their lists, calendar and statistics, and may hand it to their team.
 
 "override" means the role may perform the transition on behalf of the normal
 owner. Every override is recorded in the status history with the actor.
@@ -1442,3 +1446,4 @@ Container alternative:
 | 2026-09-16 | Statistics: by Associate (weekly, bi-weekly, monthly calls and potential money; Founders see all, Managers their team, Associates themselves), by Profile for the Founder (onboard date, status incl. deactivated, email, bank, total income) and Finance for the Founder (expected vs real income per period, platform and Profile, and the gap) |
 | 2026-09-16 | Chat threads load older and newer messages automatically while scrolling and keep only a 200-message window in memory (`after` cursor on chat messages) |
 | 2026-09-17 | Sign in with Google: Google accounts link to existing users by their sign-in email the first time and by Google's account id afterwards; the Founder sees and edits a user's sign-in email and can unlink Google |
+| 2026-09-17 | Managers have every Associate function: they run calls themselves (as the call's Associate), add profiles for review, and see their own row in Statistics |

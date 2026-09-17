@@ -57,11 +57,44 @@ describe('POST /calls', () => {
     expectError(await (await as(fx.a1)).post('/calls', body({ associateId: fx.a2.id })), 403);
   });
 
-  it('manager creates for own team only', async () => {
+  it('manager creates for their own team or runs the call themselves', async () => {
     const m1 = await as(fx.m1);
     expect((await m1.post('/calls', body({ associateId: fx.a2.id }))).status).toBe(201);
     expectError(await m1.post('/calls', body({ associateId: fx.a3.id })), 403);
-    expectError(await m1.post('/calls', body()), 400, 'validation_error');
+    expectError(await m1.post('/calls', body({ associateId: fx.m2.id })), 403);
+    // Without an Associate, or choosing themselves, the Manager owns the call.
+    const own = await m1.post('/calls', body());
+    expect(own.status, own.text).toBe(201);
+    expect(own.body.associate).toMatchObject({ id: fx.m1.id, role: 'manager' });
+    expect((await m1.post('/calls', body({ associateId: fx.m1.id }))).body.associate.id).toBe(fx.m1.id);
+  });
+
+  it('a manager runs their own call like an associate: scheduling without override, hand-off to the team', async () => {
+    const m1 = await as(fx.m1);
+    const call = (await m1.post('/calls', body({ expertId: fx.e1.id }))).body;
+    expect(call.permissions).toMatchObject({ edit: true, reassignAssociate: true, reassignExpert: true });
+    expect(call.allowedTransitions).toEqual(['scheduled']);
+
+    const moved = await m1.post(`/calls/${call.id}/transition`, { to: 'scheduled' });
+    expect(moved.status, moved.text).toBe(200);
+    const history = await prisma.callStatusHistory.findFirstOrThrow({ where: { callId: call.id, toStatus: 'scheduled' } });
+    expect(history.isOverride).toBe(false);
+
+    // Other managers and associates don't see it; the founder and the expert do.
+    expectError(await (await as(fx.m2)).get(`/calls/${call.id}`), 404);
+    expectError(await (await as(fx.a1)).get(`/calls/${call.id}`), 404);
+    expect((await (await as(fx.founder)).get(`/calls/${call.id}`)).status).toBe(200);
+    expect((await m1.get('/calls')).body.items.map((c: { id: string }) => c.id)).toContain(call.id);
+
+    expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.a3.id }), 403);
+    expect((await m1.patch(`/calls/${call.id}`, { associateId: fx.a2.id })).body.associate.id).toBe(fx.a2.id);
+  });
+
+  it('the founder can give a call to a manager, but not to an expert', async () => {
+    const founder = await as(fx.founder);
+    expect((await founder.post('/calls', body({ associateId: fx.m2.id }))).body.associate.id).toBe(fx.m2.id);
+    expectError(await founder.post('/calls', body({ associateId: fx.e1.id })), 400, 'validation_error');
+    expectError(await founder.post('/calls', body()), 400, 'validation_error');
   });
 
   it('expert cannot create calls', async () => {

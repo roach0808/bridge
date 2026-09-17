@@ -72,7 +72,8 @@ function hasRelationship(role: Role, ctx: TransitionContext): boolean {
     case 'founder':
       return true;
     case 'manager':
-      return ctx.managesCallAssociate;
+      // A Manager may also run calls of their own, like an Associate.
+      return ctx.managesCallAssociate || ctx.isCallAssociate;
     case 'associate':
       return ctx.isCallAssociate;
     case 'expert':
@@ -102,10 +103,15 @@ export function allowedTransitions(
   );
 }
 
-/** True when the actor is not the edge's normal owner. */
-export function isOverride(role: Role, from: CallStatus, to: CallStatus): boolean {
+/**
+ * True when the actor is not the edge's normal owner. Whoever owns the call
+ * (a Manager running their own call too) acts as its Associate.
+ */
+export function isOverride(role: Role, from: CallStatus, to: CallStatus, ctx?: Pick<TransitionContext, 'isCallAssociate'>): boolean {
   const owners = EDGE_OWNERS[`${from}>${to}`];
-  return owners !== undefined && !owners.includes(role);
+  if (owners === undefined) return false;
+  if (ctx?.isCallAssociate && owners.includes('associate')) return false;
+  return !owners.includes(role);
 }
 
 /** The primary owner of an edge. */

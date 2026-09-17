@@ -62,7 +62,7 @@ export default function StatsPage() {
           me.role === 'founder'
             ? 'Calls and money by Associate and by Profile, and expected against real income.'
             : me.role === 'manager'
-              ? 'Scheduled calls and potential money for your team.'
+              ? 'Scheduled calls and potential money for you and your team.'
               : 'Your scheduled calls and the money they can bring in.'
         }
       />
@@ -193,7 +193,7 @@ function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
       </Grid>
 
       <SectionTitle hint="Calls by their scheduled time. Potential money is rate × duration: the real duration once finished, the booked one before.">
-        {me.role === 'associate' ? 'Your calls' : me.role === 'manager' ? 'Your team' : 'Associates'}
+        {me.role === 'associate' ? 'Your calls' : me.role === 'manager' ? 'You and your team' : 'Associates and Managers'}
       </SectionTitle>
 
       {rows.length === 0 ? (
@@ -221,7 +221,7 @@ function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
                 <TableRow key={r.associate.id} hover>
                   <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>
                     <Stack direction="row" spacing={1} alignItems="center">
-                      <UserChip user={r.associate} size={26} subtitle={r.manager ? `Team ${r.manager.nickname}` : 'No manager'} />
+                      <UserChip user={r.associate} size={26} subtitle={r.associate.role === 'manager' ? 'Manager' : r.manager ? `Team ${r.manager.nickname}` : 'No manager'} />
                       {!r.associate.isActive && <DeactivatedPill />}
                     </Stack>
                   </TableCell>

@@ -23,7 +23,8 @@ export function visibleCallsWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.Cal
     case 'founder':
       return {};
     case 'manager':
-      return { associate: { managerId: actor.id } };
+      // Their team's calls, and the calls they run themselves.
+      return { OR: [{ associate: { managerId: actor.id } }, { associateId: actor.id }] };
     case 'associate':
       return { associateId: actor.id };
     case 'expert':
@@ -41,7 +42,7 @@ export function canViewCall(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessS
     case 'founder':
       return true;
     case 'manager':
-      return call.associate.managerId === actor.id;
+      return call.associate.managerId === actor.id || call.associateId === actor.id;
     case 'associate':
       return call.associateId === actor.id;
     case 'expert':
@@ -73,11 +74,11 @@ export function allowedTransitionsFor(actor: Pick<Actor, 'id' | 'role'>, call: C
  */
 export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape): CallPermissions {
   const scheduling = STATUS_STAGE[call.status] === 'scheduling';
-  const ownsScheduling =
+  // A Manager supervises their team's calls and their own (which they may hand to their team).
+  const supervises =
     actor.role === 'founder' ||
-    (actor.role === 'manager' && call.associate.managerId === actor.id) ||
-    (actor.role === 'associate' && call.associateId === actor.id);
-  const supervises = actor.role === 'founder' || (actor.role === 'manager' && call.associate.managerId === actor.id);
+    (actor.role === 'manager' && (call.associate.managerId === actor.id || call.associateId === actor.id));
+  const ownsScheduling = supervises || (actor.role === 'associate' && call.associateId === actor.id);
 
   return {
     edit: ownsScheduling && (scheduling || actor.role === 'founder'),

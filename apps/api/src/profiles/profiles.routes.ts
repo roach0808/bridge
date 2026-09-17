@@ -115,8 +115,8 @@ async function notifyFounders(tx: Tx, actor: Actor, profile: { id: string; name:
   });
 }
 
-/** The Founder's profiles are approved at once; an Associate's wait for a Founder's review. */
-profilesRouter.post('/profiles', requireRole('founder', 'associate'), async (req, res) => {
+/** The Founder's profiles are approved at once; an Associate's or Manager's wait for a Founder's review. */
+profilesRouter.post('/profiles', requireRole('founder', 'manager', 'associate'), async (req, res) => {
   const actor = actorOf(req);
   const input = parseBody(profileSchema, req);
   assertProfileAvatar(input.avatarId);
