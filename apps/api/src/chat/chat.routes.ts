@@ -1,7 +1,9 @@
 import {
   canChat,
+  CHAT_IMAGE_MAX_BYTES,
   canGiveTask,
   chatMessageSchema,
+  chatReactionSchema,
   createTodoSchema,
   chatMessagesQuerySchema,
   listTodosQuerySchema,
@@ -24,6 +26,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import { sendWebPush } from '../notifications/webPush';
+import { decodeImageDataUrl } from '../images';
 import { emitToUser } from '../realtime/hub';
 import { toUserRef, userRefSelect } from '../serializers';
 
@@ -47,8 +50,10 @@ const todoSummaryInclude = {
 
 const messageInclude = {
   sender: { select: userRefSelect },
-  replyTo: { select: { id: true, body: true, sender: { select: userRefSelect } } },
+  replyTo: { select: { id: true, body: true, imageId: true, deletedAt: true, sender: { select: userRefSelect } } },
   todo: { include: todoSummaryInclude },
+  image: { select: { id: true, width: true, height: true } },
+  reactions: { select: { emoji: true, userId: true }, orderBy: [{ createdAt: 'asc' }, { userId: 'asc' }] },
 } satisfies Prisma.ChatMessageInclude;
 type MessageRow = Prisma.ChatMessageGetPayload<{ include: typeof messageInclude }>;
 
@@ -73,10 +78,27 @@ const toMessageDTO = (m: MessageRow): ChatMessageDTO => ({
   sender: toUserRef(m.sender),
   body: m.body,
   kind: m.kind,
-  replyTo: m.replyTo ? { id: m.replyTo.id, body: m.replyTo.body, sender: toUserRef(m.replyTo.sender) } : null,
+  replyTo: m.replyTo
+    ? {
+        id: m.replyTo.id,
+        body: m.replyTo.body,
+        sender: toUserRef(m.replyTo.sender),
+        deleted: m.replyTo.deletedAt !== null,
+        hasImage: m.replyTo.imageId !== null,
+      }
+    : null,
   todo: m.todo ? toTodoSummary(m.todo) : null,
+  image: m.image,
+  deleted: m.deletedAt !== null,
+  reactions: groupReactions(m.reactions),
   createdAt: iso(m.createdAt),
 });
+
+function groupReactions(rows: Array<{ emoji: string; userId: string }>): ChatMessageDTO['reactions'] {
+  const groups = new Map<string, string[]>();
+  for (const r of rows) groups.set(r.emoji, [...(groups.get(r.emoji) ?? []), r.userId]);
+  return [...groups].map(([emoji, userIds]) => ({ emoji, userIds }));
+}
 
 const toTodoDTO = (t: TodoRow): TodoDTO => ({
   ...toTodoSummary(t),
@@ -117,8 +139,10 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
   const [lastMessages, unread, openTodos] = await Promise.all([
-    db.$queryRaw<Array<{ id: string; conversation_id: string; sender_id: string; body: string; kind: ChatMessageDTO['kind']; created_at: Date }>>`
-      SELECT DISTINCT ON (conversation_id) id, conversation_id, sender_id, body, kind, created_at
+    db.$queryRaw<
+      Array<{ id: string; conversation_id: string; sender_id: string; body: string; kind: ChatMessageDTO['kind']; image_id: string | null; deleted_at: Date | null; created_at: Date }>
+    >`
+      SELECT DISTINCT ON (conversation_id) id, conversation_id, sender_id, body, kind, image_id, deleted_at, created_at
       FROM chat_messages WHERE conversation_id = ANY(${ids}::uuid[])
       ORDER BY conversation_id, created_at DESC, id DESC`,
     db.$queryRaw<Array<{ id: string; count: bigint }>>`
@@ -140,7 +164,15 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
       id: c.id,
       other: { ...toUserRef(other), isActive: other.isActive },
       lastMessage: last
-        ? { id: last.id, body: last.body, kind: last.kind, senderId: last.sender_id, createdAt: iso(last.created_at) }
+        ? {
+            id: last.id,
+            body: last.body,
+            kind: last.kind,
+            senderId: last.sender_id,
+            hasImage: last.image_id !== null,
+            deleted: last.deleted_at !== null,
+            createdAt: iso(last.created_at),
+          }
         : null,
       unreadCount: Number(unread.find((u) => u.id === c.id)?.count ?? 0),
       openTodoCount: openTodos.find((t) => t.conversationId === c.id)?._count._all ?? 0,
@@ -278,11 +310,27 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   const actor = actorOf(req);
   const c = await loadConversation(actor, idParam(req));
   if (!canSendIn(c)) throw forbidden('This chat is closed: the other person is no longer available');
-  const { body } = parseBody(chatMessageSchema, req);
+  const { body, image } = parseBody(chatMessageSchema, req);
+  const upload = image ? decodeImageDataUrl(image.dataUrl, CHAT_IMAGE_MAX_BYTES) : null;
   const now = new Date();
   const message = await prisma.$transaction(async (tx) => {
+    const stored =
+      upload && image
+        ? await tx.chatImage.create({
+            data: {
+              conversationId: c.id,
+              uploaderId: actor.id,
+              contentType: upload.contentType,
+              data: new Uint8Array(upload.data),
+              byteSize: upload.data.length,
+              width: image.width,
+              height: image.height,
+            },
+            select: { id: true },
+          })
+        : null;
     const m = await tx.chatMessage.create({
-      data: { conversationId: c.id, senderId: actor.id, body, createdAt: now },
+      data: { conversationId: c.id, senderId: actor.id, body, imageId: stored?.id ?? null, createdAt: now },
       include: messageInclude,
     });
     // Sending counts as reading everything before it.
@@ -296,7 +344,7 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   emitToBoth(c, 'chat:message', dto);
   void sendWebPush([otherOf(c, actor.id).id], {
     title: actor.nickname,
-    body: body.length > 180 ? `${body.slice(0, 177)}…` : body,
+    body: image ? `📷 Photo${body ? `: ${body.length > 160 ? `${body.slice(0, 157)}…` : body}` : ''}` : body.length > 180 ? `${body.slice(0, 177)}…` : body,
     url: `/chat/${c.id}`,
     // One notification per chat: a newer message replaces the older one.
     tag: `chat:${c.id}`,
@@ -319,6 +367,85 @@ chatRouter.post('/chat/conversations/:id/read', async (req, res) => {
   }
   emitToBoth(c, 'chat:read', { conversationId: c.id, userId: actor.id, readAt: iso(readAt) });
   res.status(204).end();
+});
+
+/** A chat picture, for the two people in the chat only. */
+chatRouter.get('/chat/images/:id', async (req, res) => {
+  const actor = actorOf(req);
+  const id = idParam(req);
+  const image = id
+    ? await prisma.chatImage.findUnique({
+        where: { id },
+        select: { contentType: true, data: true, conversation: { select: { userAId: true, userBId: true } } },
+      })
+    : null;
+  if (!image || !isParticipant(image.conversation, actor.id)) throw notFound('Picture');
+  res
+    .type(image.contentType)
+    // Never changes once sent; private so shared caches keep no copy.
+    .set('Cache-Control', 'private, max-age=31536000, immutable')
+    .send(Buffer.from(image.data));
+});
+
+async function loadMessageForReaction(actor: Actor, id: string | null) {
+  if (!id) throw notFound('Message');
+  const m = await prisma.chatMessage.findUnique({
+    where: { id },
+    include: { conversation: { include: conversationInclude }, todo: { select: { id: true } } },
+  });
+  if (!m || !isParticipant(m.conversation, actor.id)) throw notFound('Message');
+  return m;
+}
+
+/**
+ * The sender deletes their message for both people. Its text and picture are erased,
+ * its reactions removed, and a "deleted" placeholder stays in the chat.
+ */
+chatRouter.delete('/chat/messages/:id', async (req, res) => {
+  const actor = actorOf(req);
+  const m = await loadMessageForReaction(actor, idParam(req));
+  if (m.senderId !== actor.id) throw forbidden('You can only delete your own messages');
+  if (m.deletedAt) throw conflict('This message is already deleted');
+  if (m.kind !== 'text') throw conflict('A task’s done reply cannot be deleted');
+  if (m.todo) throw conflict('This message is a task. Remove the task first.');
+  const updated = await prisma.$transaction(async (tx) => {
+    await tx.chatReaction.deleteMany({ where: { messageId: m.id } });
+    const message = await tx.chatMessage.update({
+      where: { id: m.id },
+      data: { body: '', imageId: null, deletedAt: new Date() },
+      include: messageInclude,
+    });
+    // The picture goes too, right away.
+    if (m.imageId) await tx.chatImage.delete({ where: { id: m.imageId } });
+    return message;
+  });
+  const dto = toMessageDTO(updated);
+  emitToBoth(m.conversation, 'chat:message-updated', dto);
+  res.json(dto);
+});
+
+/** Adds the caller's emoji reaction, or takes it back if they had already reacted with it. */
+chatRouter.post('/chat/messages/:id/reactions', async (req, res) => {
+  const actor = actorOf(req);
+  const m = await loadMessageForReaction(actor, idParam(req));
+  const { emoji } = parseBody(chatReactionSchema, req);
+  if (m.deletedAt) throw conflict('This message was deleted');
+  if (!canSendIn(m.conversation)) throw forbidden('This chat is closed: the other person is no longer available');
+  const key = { messageId_userId_emoji: { messageId: m.id, userId: actor.id, emoji } };
+  const existing = await prisma.chatReaction.findUnique({ where: key });
+  if (existing) {
+    await prisma.chatReaction.delete({ where: key });
+  } else {
+    const mine = await prisma.chatReaction.count({ where: { messageId: m.id, userId: actor.id } });
+    if (mine >= 10) throw conflict('That’s enough reactions on one message');
+    await prisma.chatReaction.create({ data: { messageId: m.id, userId: actor.id, emoji } }).catch((err: unknown) => {
+      // A double click racing itself: the reaction is there either way.
+      if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
+    });
+  }
+  const dto = toMessageDTO(await prisma.chatMessage.findUniqueOrThrow({ where: { id: m.id }, include: messageInclude }));
+  emitToBoth(m.conversation, 'chat:message-updated', dto);
+  res.json(dto);
 });
 
 // --- Tasks -----------------------------------------------------------------------------

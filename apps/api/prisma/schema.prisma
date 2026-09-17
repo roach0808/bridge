@@ -110,6 +110,8 @@ model User {
   expertCalls        Call[]              @relation("CallExpert")
   createdCalls       Call[]              @relation("CallCreatedBy")
   identities         AuthIdentity[]
+  chatImages         ChatImage[]         @relation("ChatImageUploader")
+  chatReactions      ChatReaction[]      @relation("ChatReactionUser")
   statusChanges      CallStatusHistory[]
   messages           Message[]
   notifications      Notification[]
@@ -472,6 +474,7 @@ model Conversation {
   userB    User          @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
   messages ChatMessage[]
   todos    Todo[]
+  images   ChatImage[]
 
   @@unique([userAId, userBId])
   @@index([userBId])
@@ -485,6 +488,10 @@ model ChatMessage {
   body           String
   kind           ChatMessageKind @default(text)
   replyToId      String?         @map("reply_to_id") @db.Uuid
+  /// A picture sent with the message (the body is then an optional caption).
+  imageId        String?         @unique @map("image_id") @db.Uuid
+  /// Set when the sender deleted the message; its text and picture are erased.
+  deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(3)
   createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
 
   conversation Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -493,6 +500,8 @@ model ChatMessage {
   replies      ChatMessage[] @relation("ChatMessageReply")
   todo         Todo?         @relation("TodoMessage")
   doneFor      Todo?         @relation("TodoDoneMessage")
+  image        ChatImage?    @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  reactions    ChatReaction[]
 
   @@index([conversationId, createdAt])
   @@map("chat_messages")
@@ -604,4 +613,38 @@ model AuthIdentity {
   @@unique([provider, subject])
   @@unique([userId, provider])
   @@map("auth_identities")
+}
+
+/// A picture sent in a chat, shrunk by the browser before upload. Only the two people in the chat may load it.
+model ChatImage {
+  id             String   @id @default(uuid()) @db.Uuid
+  conversationId String   @map("conversation_id") @db.Uuid
+  uploaderId     String   @map("uploader_id") @db.Uuid
+  contentType    String   @map("content_type")
+  data           Bytes
+  byteSize       Int      @map("byte_size")
+  width          Int
+  height         Int
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  uploader     User         @relation("ChatImageUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  message      ChatMessage?
+
+  @@index([conversationId])
+  @@map("chat_images")
+}
+
+/// One person's emoji reaction to a chat message; each emoji once per person.
+model ChatReaction {
+  messageId String   @map("message_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  emoji     String
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  message ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User        @relation("ChatReactionUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId, emoji])
+  @@map("chat_reactions")
 }

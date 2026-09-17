@@ -1,4 +1,5 @@
 import { PHOTO_MAX_BYTES, photoUploadSchema } from '@god/shared';
+import { decodeImageDataUrl } from '../images';
 import { Router } from 'express';
 import { actorOf, requireAuth, requireRole } from '../auth/middleware';
 import { prisma, type Tx } from '../db';
@@ -9,22 +10,7 @@ import { meSelect, profileFounderCounts, profileInclude, toMeDTO, toProfileDTO }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/** Decodes a data URL and checks the bytes really are the declared image type. */
-function decodePhoto(dataUrl: string): { contentType: string; data: Buffer } {
-  const match = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(dataUrl);
-  if (!match) throw badRequest('Upload a JPEG, PNG or WebP image');
-  const contentType = match[1]!;
-  const data = Buffer.from(match[2]!, 'base64');
-  if (!data.length) throw badRequest('The image is empty');
-  if (data.length > PHOTO_MAX_BYTES) throw badRequest('The image is too large (max 400 KB)');
-
-  const isJpeg = data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff;
-  const isPng = data.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
-  const isWebp = data.subarray(0, 4).toString('ascii') === 'RIFF' && data.subarray(8, 12).toString('ascii') === 'WEBP';
-  const ok = { 'image/jpeg': isJpeg, 'image/png': isPng, 'image/webp': isWebp }[contentType];
-  if (!ok) throw badRequest('The file is not a valid image');
-  return { contentType, data };
-}
+const decodePhoto = (dataUrl: string) => decodeImageDataUrl(dataUrl, PHOTO_MAX_BYTES);
 
 /** Stores a new photo and removes the one it replaces, so old pictures never pile up. */
 async function replacePhoto(

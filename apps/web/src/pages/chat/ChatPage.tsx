@@ -2,7 +2,12 @@ import AddCommentRounded from '@mui/icons-material/AddCommentRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRounded';
+import AddPhotoAlternateOutlined from '@mui/icons-material/AddPhotoAlternateOutlined';
+import AddReactionOutlined from '@mui/icons-material/AddReactionOutlined';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
+import CloseRounded from '@mui/icons-material/CloseRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import EmojiEmotionsOutlined from '@mui/icons-material/EmojiEmotionsOutlined';
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
@@ -42,22 +47,25 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { BrowserNotificationsPrompt } from '@/components/BrowserNotifications';
-import { EmptyState, ErrorState } from '@/components/common';
+import { ConfirmDialog, EmptyState, ErrorState } from '@/components/common';
 import { RoleBadge, UserAvatar } from '@/components/identity';
 import { PresenceBadge, presenceLabel } from '@/components/PresenceDot';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
+import { shrinkChatImage } from '@/lib/image';
 import { inZone } from '@/lib/time';
 import { usePresence } from '@/realtime/PresenceProvider';
-import { appendChatMessage } from '@/realtime/RealtimeProvider';
+import { appendChatMessage, replaceChatMessage } from '@/realtime/RealtimeProvider';
+import { ChatImage, EmojiPickerPopover, QuickReactionBar, ReactionChips, useReact } from './chatExtras';
 import { ROLE_COLORS } from '@/theme/theme';
 import { SearchField, useIsPhone } from '../admin/adminShared';
 import { TODO_COLORS, TodoDoneDialog, TodoPill, useRefreshTodos } from '../todos/todoShared';
 
 type PageParam = { cursor: string } | { after: string } | null;
 type Pages = { pages: ChatMessagePage[]; pageParams: PageParam[] };
+type Attachment = { dataUrl: string; width: number; height: number };
 
 /** Messages per request, and how many requests' worth a thread keeps in memory. */
 const PAGE_SIZE = 40;
@@ -71,7 +79,9 @@ function previewOf(c: ConversationDTO, meId: string): string {
   const m = c.lastMessage;
   if (!m) return 'No messages yet';
   const prefix = m.senderId === meId ? 'You: ' : '';
-  return m.kind === 'todo_done' ? `${prefix}✓ Marked a task done` : `${prefix}${m.body}`;
+  if (m.deleted) return `${prefix}Message deleted`;
+  if (m.kind === 'todo_done') return `${prefix}✓ Marked a task done`;
+  return m.hasImage ? `${prefix}📷 ${m.body || 'Photo'}` : `${prefix}${m.body}`;
 }
 
 function shortTime(iso: string, zone: string): string {
@@ -257,7 +267,15 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
 
 // ---------------------------------------------------------------------------
 
-function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conversation: ConversationDTO }) {
+function MessageMenu({
+  message,
+  conversation,
+  onReact,
+}: {
+  message: ChatMessageDTO;
+  conversation: ConversationDTO;
+  onReact: (anchor: HTMLElement) => void;
+}) {
   const toast = useToast();
   const queryClient = useQueryClient();
   const [anchor, setAnchor] = useState<HTMLElement | null>(null);
@@ -283,13 +301,27 @@ function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conve
     onError: (err) => toast.error(errorMessage(err)),
   });
 
+  const deleteMessage = useMutation({
+    mutationFn: () => api.chat.deleteMessage(message.id),
+    onSuccess: (saved) => {
+      replaceChatMessage(queryClient, saved);
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+      toast.success('Message deleted');
+    },
+  });
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
   const me = useMe();
-  const canMake = !message.todo && conversation.canGiveTask;
+  const canMake = !message.todo && conversation.canGiveTask && !message.image && !message.deleted;
   const canRemove = message.todo?.status === 'open' && message.todo.createdBy.id === me.id;
-  if (!canMake && !canRemove) return null;
+  const canDelete = message.sender.id === me.id && !message.todo && !message.deleted;
+  const canReact = conversation.canSend && !message.deleted;
+  const menuButton = useRef<HTMLButtonElement>(null);
+  if (!canMake && !canRemove && !canDelete && !canReact) return null;
   return (
     <>
       <IconButton
+        ref={menuButton}
         size="small"
         className="msg-menu"
         aria-label="Message actions"
@@ -320,7 +352,39 @@ function MessageMenu({ message, conversation }: { message: ChatMessageDTO; conve
             Remove task
           </MenuItem>
         )}
+        {canReact && (
+          <MenuItem
+            onClick={() => {
+              setAnchor(null);
+              if (menuButton.current) onReact(menuButton.current);
+            }}
+          >
+            <AddReactionOutlined fontSize="small" sx={{ mr: 1.25 }} />
+            React
+          </MenuItem>
+        )}
+        {canDelete && (
+          <MenuItem
+            onClick={() => {
+              setAnchor(null);
+              setConfirmDelete(true);
+            }}
+            sx={{ color: 'error.main' }}
+          >
+            <DeleteOutlineRounded fontSize="small" sx={{ mr: 1.25 }} />
+            Delete
+          </MenuItem>
+        )}
       </Menu>
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete this message?"
+        description={`It will be deleted for you and ${conversation.other.nickname}${message.image ? ', including the picture' : ''}. This cannot be undone.`}
+        confirmLabel="Delete"
+        destructive
+        onClose={() => setConfirmDelete(false)}
+        onConfirm={() => deleteMessage.mutateAsync()}
+      />
     </>
   );
 }
@@ -362,21 +426,26 @@ function MessageBubble({
   const dt = inZone(m.createdAt, zone);
   const isDone = m.kind === 'todo_done';
   const todo = m.todo;
-  const bubbleSx = isDone
-    ? { bgcolor: `${TODO_COLORS.done}1a`, border: 1, borderColor: `${TODO_COLORS.done}55`, color: 'text.primary' }
-    : mine
-      ? { bgcolor: 'primary.main', color: 'primary.contrastText' }
-      : { bgcolor: 'action.hover', color: 'text.primary' };
+  const [pickerAnchor, setPickerAnchor] = useState<HTMLElement | null>(null);
+  const react = useReact(m);
+  const bubbleSx = m.deleted
+    ? { bgcolor: 'transparent', border: 1, borderColor: 'divider', color: 'text.secondary', fontStyle: 'italic' }
+    : isDone
+      ? { bgcolor: `${TODO_COLORS.done}1a`, border: 1, borderColor: `${TODO_COLORS.done}55`, color: 'text.primary' }
+      : mine
+        ? { bgcolor: 'primary.main', color: 'primary.contrastText' }
+        : { bgcolor: 'action.hover', color: 'text.primary' };
+  const canReact = conversation.canSend && !m.deleted;
 
   return (
     <Stack
       direction={mine ? 'row-reverse' : 'row'}
       spacing={0.5}
       alignItems="flex-end"
-      sx={{ mb: 1.25, '&:hover .msg-menu': { opacity: 1 } }}
+      sx={{ mb: 1.25, '&:hover .msg-menu': { opacity: 1 }, '&:hover .msg-actions': { opacity: 1, pointerEvents: 'auto' } }}
     >
       <Box sx={{ maxWidth: { xs: '85%', md: '72%' }, minWidth: 0 }}>
-        <Tooltip title={dt.toFormat('LLL d, h:mm a ZZZZ')} placement={mine ? 'left' : 'right'}>
+        <Tooltip title={dt.toFormat('LLL d, h:mm a ZZZZ')} placement={mine ? 'left' : 'right'} disableHoverListener={Boolean(m.image)}>
           <Box
             sx={{
               px: 1.5,
@@ -387,9 +456,11 @@ function MessageBubble({
               wordBreak: 'break-word',
               typography: 'body2',
               ...(todo ? { boxShadow: `inset 3px 0 0 ${TODO_COLORS[todo.status]}` } : {}),
+              ...(m.image ? { p: 0.5 } : {}),
               ...bubbleSx,
             }}
           >
+            {m.deleted && 'This message was deleted'}
             {isDone && (
               <>
                 <Stack direction="row" spacing={0.5} alignItems="center" sx={{ color: TODO_COLORS.done, fontWeight: 600, mb: 0.5 }}>
@@ -398,15 +469,25 @@ function MessageBubble({
                 </Stack>
                 {m.replyTo && (
                   <Box sx={{ pl: 1, mb: m.body !== 'Done' ? 0.75 : 0, borderLeft: 2, borderColor: 'divider', color: 'text.secondary', fontSize: '0.8rem' }}>
-                    {m.replyTo.body.length > 160 ? `${m.replyTo.body.slice(0, 157)}…` : m.replyTo.body}
+                    {m.replyTo.deleted
+                      ? 'Deleted message'
+                      : m.replyTo.body.length > 160
+                        ? `${m.replyTo.body.slice(0, 157)}…`
+                        : m.replyTo.body || (m.replyTo.hasImage ? '📷 Photo' : '')}
                   </Box>
                 )}
                 {m.body !== 'Done' && m.body}
               </>
             )}
-            {!isDone && m.body}
+            {!isDone && !m.deleted && (
+              <>
+                {m.image && <ChatImage image={m.image} />}
+                {m.body && <Box sx={m.image ? { px: 1, pt: 0.75, pb: 0.25 } : undefined}>{m.body}</Box>}
+              </>
+            )}
           </Box>
         </Tooltip>
+        <ReactionChips message={m} conversation={conversation} align={mine ? 'right' : 'left'} />
         <Stack direction="row" spacing={0.75} alignItems="center" justifyContent={mine ? 'flex-end' : 'flex-start'} sx={{ mt: 0.4, mx: 0.5, flexWrap: 'wrap' }}>
           {todo && (
             <>
@@ -428,7 +509,16 @@ function MessageBubble({
           </Typography>
         </Stack>
       </Box>
-      {m.kind === 'text' && <MessageMenu message={m} conversation={conversation} />}
+      {m.kind === 'text' && !m.deleted && <MessageMenu message={m} conversation={conversation} onReact={setPickerAnchor} />}
+      {canReact && <QuickReactionBar message={m} onMore={setPickerAnchor} />}
+      <EmojiPickerPopover
+        anchor={pickerAnchor}
+        onClose={() => setPickerAnchor(null)}
+        onPick={(emoji) => {
+          setPickerAnchor(null);
+          react.mutate(emoji);
+        }}
+      />
     </Stack>
   );
 }
@@ -526,18 +616,50 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   }, [conversationId, unread]);
 
   const send = useMutation({
-    mutationFn: (body: string) => api.chat.send(conversationId, body),
+    mutationFn: ({ body, image }: { body: string; image: Attachment | null }) =>
+      api.chat.send(conversationId, body, image ? { dataUrl: image.dataUrl, width: image.width, height: image.height } : undefined),
     onSuccess: (message) => {
       if (hasPreviousPage) jumpToLatest();
       else appendChatMessage(queryClient, message);
       stickToBottom.current = true;
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
     },
-    onError: (err, body) => {
+    onError: (err, { body, image }) => {
       setDraft(body);
+      setAttachment(image);
       toast.error(errorMessage(err));
     },
   });
+
+  // A picture waiting to be sent: pasted, dropped, or chosen with the attach button.
+  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const [preparing, setPreparing] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const input = useRef<HTMLTextAreaElement>(null);
+  const [emojiAnchor, setEmojiAnchor] = useState<HTMLElement | null>(null);
+  const attach = async (file: Blob | null | undefined) => {
+    if (!file) return;
+    setPreparing(true);
+    try {
+      setAttachment(await shrinkChatImage(file));
+      input.current?.focus();
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setPreparing(false);
+    }
+  };
+  const insertEmoji = (emoji: string) => {
+    const el = input.current;
+    const start = el?.selectionStart ?? draft.length;
+    const end = el?.selectionEnd ?? draft.length;
+    setDraft(draft.slice(0, start) + emoji + draft.slice(end));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(start + emoji.length, start + emoji.length);
+    });
+  };
 
   useEffect(() => {
     stickToBottom.current = true;
@@ -561,9 +683,10 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
 
   const submit = () => {
     const body = draft.trim();
-    if (!body || send.isPending) return;
+    if ((!body && !attachment) || send.isPending || preparing) return;
     setDraft('');
-    send.mutate(body);
+    setAttachment(null);
+    send.mutate({ body, image: attachment });
   };
 
   const c = conversation.data;
@@ -580,7 +703,36 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   }
 
   return (
-    <Card sx={{ height: PANEL_HEIGHT, minHeight: 420, display: 'flex', flexDirection: 'column' }}>
+    <Card
+      sx={{ height: PANEL_HEIGHT, minHeight: 420, display: 'flex', flexDirection: 'column', position: 'relative' }}
+      onDragOver={(e) => {
+        if (c?.canSend && [...e.dataTransfer.types].includes('Files')) {
+          e.preventDefault();
+          setDragging(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!c?.canSend) return;
+        e.preventDefault();
+        setDragging(false);
+        void attach([...e.dataTransfer.files].find((f) => f.type.startsWith('image/')));
+      }}
+    >
+      {dragging && (
+        <Stack
+          alignItems="center"
+          justifyContent="center"
+          sx={{ position: 'absolute', inset: 8, zIndex: 3, border: 2, borderStyle: 'dashed', borderColor: 'primary.main', borderRadius: 2, bgcolor: 'background.paper', opacity: 0.94, pointerEvents: 'none' }}
+        >
+          <AddPhotoAlternateOutlined color="primary" />
+          <Typography variant="body2" sx={{ mt: 1 }}>
+            Drop the picture to send it
+          </Typography>
+        </Stack>
+      )}
       <Stack direction="row" alignItems="center" spacing={1.5} sx={{ px: 2, py: 1.25, borderBottom: 1, borderColor: 'divider', minHeight: 64 }}>
         {onBack && (
           <IconButton onClick={onBack} aria-label="Back to chats" edge="start">
@@ -691,30 +843,91 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
           </Typography>
         </Box>
       ) : (
-        <Stack direction="row" spacing={1} alignItems="flex-end" sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
-          <TextField
-            placeholder={c ? `Message ${c.other.nickname}…` : 'Write a message…'}
-            multiline
-            maxRows={6}
-            fullWidth
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            slotProps={{ htmlInput: { 'aria-label': 'Message', maxLength: CHAT_MESSAGE_MAX } }}
-          />
-          <Tooltip title="Send (Enter)">
-            <span>
-              <IconButton color="primary" onClick={submit} disabled={!draft.trim() || send.isPending || !c}>
-                <SendRounded fontSize="small" />
-              </IconButton>
-            </span>
-          </Tooltip>
-        </Stack>
+        <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
+          {(attachment || preparing) && (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+              <Box sx={{ position: 'relative', width: 72, height: 72, borderRadius: 1.5, overflow: 'hidden', bgcolor: 'action.hover', flexShrink: 0 }}>
+                {attachment ? (
+                  <Box component="img" src={attachment.dataUrl} alt="Picture to send" sx={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                ) : (
+                  <Stack alignItems="center" justifyContent="center" sx={{ height: '100%' }}>
+                    <CircularProgress size={18} />
+                  </Stack>
+                )}
+                {attachment && (
+                  <IconButton
+                    size="small"
+                    onClick={() => setAttachment(null)}
+                    aria-label="Remove picture"
+                    sx={{ position: 'absolute', top: 2, right: 2, width: 22, height: 22, bgcolor: 'rgba(0,0,0,.6)', color: '#fff', '&:hover': { bgcolor: 'rgba(0,0,0,.8)' } }}
+                  >
+                    <CloseRounded sx={{ fontSize: 14 }} />
+                  </IconButton>
+                )}
+              </Box>
+              <Typography variant="caption" color="text.secondary">
+                {attachment ? 'Add a caption if you like, then send.' : 'Preparing the picture…'}
+              </Typography>
+            </Stack>
+          )}
+          <Stack direction="row" spacing={0.5} alignItems="flex-end">
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              hidden
+              onChange={(e) => {
+                void attach(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+            <Tooltip title="Attach a picture (or paste one)">
+              <span>
+                <IconButton onClick={() => fileInput.current?.click()} disabled={!c || preparing} aria-label="Attach a picture" sx={{ mb: 0.25 }}>
+                  <AddPhotoAlternateOutlined fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Emoji">
+              <span>
+                <IconButton onClick={(e) => setEmojiAnchor(e.currentTarget)} disabled={!c} aria-label="Insert emoji" sx={{ mb: 0.25 }}>
+                  <EmojiEmotionsOutlined fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <TextField
+              placeholder={c ? `Message ${c.other.nickname}…` : 'Write a message…'}
+              multiline
+              maxRows={6}
+              fullWidth
+              value={draft}
+              inputRef={input}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              onPaste={(e) => {
+                const file = [...e.clipboardData.files].find((f) => f.type.startsWith('image/'));
+                if (file) {
+                  e.preventDefault();
+                  void attach(file);
+                }
+              }}
+              slotProps={{ htmlInput: { 'aria-label': 'Message', maxLength: CHAT_MESSAGE_MAX } }}
+            />
+            <Tooltip title="Send (Enter)">
+              <span>
+                <IconButton color="primary" onClick={submit} disabled={(!draft.trim() && !attachment) || send.isPending || preparing || !c} aria-label="Send" sx={{ mb: 0.25 }}>
+                  <SendRounded fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+          <EmojiPickerPopover anchor={emojiAnchor} onClose={() => setEmojiAnchor(null)} onPick={insertEmoji} />
+        </Box>
       )}
 
       <TodoDoneDialog

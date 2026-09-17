@@ -22,6 +22,22 @@ import { qk } from '@/lib/queryKeys';
 
 type ChatPages = { pages: ChatMessagePage[]; pageParams: unknown[] };
 
+/** Swaps in the latest version of a message already in the thread (deleted, or new reactions). */
+export function replaceChatMessage(queryClient: QueryClient, message: ChatMessageDTO) {
+  queryClient.setQueryData<ChatPages>(qk.chat.messages(message.conversationId), (data) =>
+    data
+      ? {
+          ...data,
+          pages: data.pages.map((p) =>
+            p.items.some((m) => m.id === message.id)
+              ? { ...p, items: p.items.map((m) => (m.id === message.id ? message : m)) }
+              : p,
+          ),
+        }
+      : data,
+  );
+}
+
 /**
  * Adds a chat message to the loaded thread, ignoring duplicates. When the thread
  * holds an older window (the newest pages were let go), it arrives on scrolling down.
@@ -124,6 +140,12 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: qk.todos.all });
     };
 
+    const onChatMessageUpdated = (message: ChatMessageDTO) => {
+      replaceChatMessage(queryClient, message);
+      // The chat list preview may be the message that was just deleted.
+      if (message.deleted) void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+    };
+
     const onChatRead = (event: ChatReadEvent) => {
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(event.conversationId) });
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
@@ -147,6 +169,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('chat:message', onChatMessage);
     socket.on('chat:todo', onChatTodo);
     socket.on('chat:read', onChatRead);
+    socket.on('chat:message-updated', onChatMessageUpdated);
     if (socket.connected) setConnected(true);
 
     return () => {
@@ -158,6 +181,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('chat:message', onChatMessage);
       socket.off('chat:todo', onChatTodo);
       socket.off('chat:read', onChatRead);
+      socket.off('chat:message-updated', onChatMessageUpdated);
     };
   }, [queryClient, status, meId]);
 

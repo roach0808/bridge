@@ -37,3 +37,12 @@ export function canGiveTask(
 }
 
 export const CHAT_MESSAGE_MAX = 5000;
+
+/** A chat picture after the browser has shrunk it. */
+export const CHAT_IMAGE_MAX_BYTES = 1024 * 1024;
+/** Longest side of a chat picture, in pixels. */
+export const CHAT_IMAGE_MAX_SIDE = 1600;
+export const CHAT_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+
+/** Offered on hover; the picker allows any other emoji. */
+export const QUICK_REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '🙏'] as const;

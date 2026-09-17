@@ -52,7 +52,8 @@ export function createApp() {
       exposedHeaders: ['X-Unread-Count', 'X-Request-Id'],
     }),
   );
-  app.use(express.json({ limit: '1mb' }));
+  // Chat pictures (up to 1 MB, base64-encoded) are the largest bodies.
+  app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
   app.use(camelizeBody);
 

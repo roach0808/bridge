@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
-import { CHAT_MESSAGE_MAX, TODO_STATUSES } from './chat';
+import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, TODO_STATUSES } from './chat';
 import { ROLES } from './roles';
 import {
   BLOCK_KINDS,
@@ -313,7 +313,30 @@ export const messagesQuerySchema = z.object({
 // --- Chat & to-dos ------------------------------------------------------------
 
 export const startConversationSchema = z.object({ userId: uuid });
-export const chatMessageSchema = z.object({ body: trimmed('Message', CHAT_MESSAGE_MAX) });
+export const chatMessageSchema = z
+  .object({
+    /** Required unless a picture is sent; then it is an optional caption. */
+    body: z.string().trim().max(CHAT_MESSAGE_MAX, 'Message is too long').default(''),
+    image: z
+      .object({
+        dataUrl: z
+          .string()
+          .regex(/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/, 'Send a JPEG, PNG or WebP picture')
+          .max(Math.ceil((CHAT_IMAGE_MAX_BYTES * 4) / 3) + 40, 'The picture is too large'),
+        width: z.number().int().min(1).max(CHAT_IMAGE_MAX_SIDE),
+        height: z.number().int().min(1).max(CHAT_IMAGE_MAX_SIDE),
+      })
+      .optional(),
+  })
+  .refine((m) => m.body !== '' || m.image, { message: 'Message is required', path: ['body'] });
+/** One emoji; sending one you already reacted with takes it back. */
+export const chatReactionSchema = z.object({
+  emoji: z
+    .string()
+    .min(1)
+    .max(16)
+    .refine((e) => /\p{Extended_Pictographic}|\p{Regional_Indicator}|\u20E3/u.test(e) && !/[\p{L}\p{N}\s]/u.test(e.replace(/[\u{1F3FB}-\u{1F3FF}\u{FE0F}\u{200D}\u{20E3}#*0-9]/gu, '')), 'Choose an emoji'),
+});
 export const chatMessagesQuerySchema = z
   .object({
     /** Older messages than this one (a page's `nextCursor`). */

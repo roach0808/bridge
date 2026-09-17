@@ -976,6 +976,10 @@ Associates from before this rule) stays readable, with `canSend: false`.
 | GET | /chat/conversations/:id/messages | the two people | Pages of `limit` (≤ 100) messages, oldest → newest: the latest without cursors, older ones with `cursor` (a page's `nextCursor`), newer ones with `after` (a page's `newerCursor`, while `hasNewer`). Each message: { id, sender, body, kind, replyTo, todo, createdAt } |
 | POST | /chat/conversations/:id/messages | the two people | { body }. 403 when the other person is inactive or no longer allowed (`canSend: false`) |
 | POST | /chat/conversations/:id/read | the two people | Marks the chat read (204) |
+| POST | /chat/conversations/:id/messages (pictures) | the two people | **[Implementation]** { body, image?: { dataUrl, width, height } }. The browser shrinks a picture to at most 1600 px and 1 MB (JPEG, PNG or WebP; the bytes are checked); the body is then an optional caption. Pictures live in `chat_images` |
+| GET | /chat/images/:id | the two people | The picture bytes (`Cache-Control: private`) |
+| DELETE | /chat/messages/:id | the sender | Deletes for both: body erased, picture row deleted at once, reactions removed; a "deleted" placeholder stays. 409 for a message that is a task or a task's done reply. Emits `chat:message-updated` |
+| POST | /chat/messages/:id/reactions | the two people | { emoji }. Toggles the caller's reaction (up to 10 per person per message); not on deleted messages or closed chats. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`). Founder → anyone, Manager → own-team Associates; 403 otherwise, 409 if already a task. Conversations carry `canGiveTask` |
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
 | GET | /todos/assignees | Founder, Manager | People the caller may give a task to |
@@ -1447,3 +1451,4 @@ Container alternative:
 | 2026-09-16 | Chat threads load older and newer messages automatically while scrolling and keep only a 200-message window in memory (`after` cursor on chat messages) |
 | 2026-09-17 | Sign in with Google: Google accounts link to existing users by their sign-in email the first time and by Google's account id afterwards; the Founder sees and edits a user's sign-in email and can unlink Google |
 | 2026-09-17 | Managers have every Associate function: they run calls themselves (as the call's Associate), add profiles for review, and see their own row in Statistics |
+| 2026-09-17 | Chat: delete your own messages for both people (a placeholder stays), paste, drop or attach pictures (shrunk in the browser, stored in the database), an emoji picker, and emoji reactions |

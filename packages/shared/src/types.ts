@@ -439,15 +439,21 @@ export interface ChatMessageDTO {
   body: string;
   /** `todo_done` is the reply posted when the assignee marks a to-do done. */
   kind: ChatMessageKind;
-  replyTo: { id: string; body: string; sender: UserRef } | null;
+  replyTo: { id: string; body: string; sender: UserRef; deleted: boolean; hasImage: boolean } | null;
   todo: TodoSummary | null;
+  /** A picture; load it with its id (the two people in the chat only). Its size avoids layout jumps. */
+  image: { id: string; width: number; height: number } | null;
+  /** Deleted by the sender: the body is empty and there is no picture. */
+  deleted: boolean;
+  /** Grouped by emoji, in the order they were first used. */
+  reactions: Array<{ emoji: string; userIds: string[] }>;
   createdAt: string;
 }
 
 export interface ConversationDTO {
   id: string;
   other: UserRef & { isActive: boolean };
-  lastMessage: Pick<ChatMessageDTO, 'id' | 'body' | 'kind' | 'createdAt'> & { senderId: string } | null;
+  lastMessage: (Pick<ChatMessageDTO, 'id' | 'body' | 'kind' | 'deleted' | 'createdAt'> & { senderId: string; hasImage: boolean }) | null;
   unreadCount: number;
   /** Open to-dos in this chat (assigned to either person). */
   openTodoCount: number;
@@ -610,6 +616,8 @@ export interface ServerToClientEvents {
   'chat:message': (message: ChatMessageDTO) => void;
   'chat:todo': (todo: TodoDTO | TodoRemovedEvent) => void;
   'chat:read': (event: ChatReadEvent) => void;
+  /** A message changed: deleted, or its reactions. */
+  'chat:message-updated': (message: ChatMessageDTO) => void;
   'presence:update': (presence: PresenceDTO[]) => void;
   'user:typing': (payload: { callId: string; userId: string; nickname: string }) => void;
   'session:revoked': () => void;

@@ -210,7 +210,15 @@ export function createApiClient(options: ClientOptions) {
       /** `cursor` loads older messages, `after` newer ones; neither loads the latest. */
       messages: (id: string, query: { cursor?: string | null; after?: string | null; limit?: number } = {}) =>
         get<ChatMessagePage>(`/chat/conversations/${enc(id)}/messages`, query),
-      send: (id: string, body: string) => post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { body }),
+      /** Text, a picture (already shrunk by the browser) with an optional caption, or both. */
+      send: (id: string, body: string, image?: { dataUrl: string; width: number; height: number }) =>
+        post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, image ? { body, image } : { body }),
+      /** Deletes your own message for both people. */
+      deleteMessage: (messageId: string) => del<ChatMessageDTO>(`/chat/messages/${enc(messageId)}`),
+      /** Adds your reaction, or takes it back if you had already reacted with that emoji. */
+      react: (messageId: string, emoji: string) => post<ChatMessageDTO>(`/chat/messages/${enc(messageId)}/reactions`, { emoji }),
+      /** A chat picture as a blob (it needs your token, so an <img> cannot load it directly). */
+      image: async (imageId: string) => (await http.download(`/chat/images/${enc(imageId)}`)).blob,
       markRead: (id: string) => post<void>(`/chat/conversations/${enc(id)}/read`),
       makeTodo: (messageId: string) => post<TodoDTO>(`/chat/messages/${enc(messageId)}/todo`),
       removeTodo: (messageId: string) => del<void>(`/chat/messages/${enc(messageId)}/todo`),
