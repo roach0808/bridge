@@ -91,28 +91,30 @@ grouped under Managers; they are assigned per Call.
 | Approve / reject a pending Profile | ✓ | | | |
 | Choose own avatar (from own role's set) | ✓ | ✓ | ✓ | ✓ |
 | Create Call | ✓ | ✓ | ✓ | |
-| View Call | all | own team's + own | own | assigned |
-| Reassign Associate on a Call | ✓ (to any Associate or Manager) | ✓ (own team's and own calls, to self or own team) | | |
-| Reassign Expert on a Call | ✓ | ✓ (own team + own) | ✓ (own, whole scheduling stage) | |
+| View Call | all | every Associate's + own | own | assigned |
+| Reassign Associate on a Call | ✓ (to any Associate or Manager) | ✓ (to themselves or any Associate) | | |
+| Reassign Expert on a Call | ✓ | ✓ (every Associate's + own) | ✓ (own, whole scheduling stage) | |
 | Set scheduling statuses | override | override (own calls: ✓) | ✓ | request rescheduling only |
 | Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
-| See invoice statuses and amounts | ✓ | ✓ (own team) | own | |
+| See invoice statuses and amounts | ✓ | ✓ (every Associate's) | own | |
 | See a Profile's platform rates | ✓ | ✓ | ✓ | |
-| Set a special rate for one Call | ✓ | ✓ (own team + own) | own | |
+| Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | own | |
 | Set the Call's GPT link | ✓ | | | |
 | Read the Call's GPT link | ✓ | | | ✓ (assigned) |
 | See who is online (§7.6) | people they may chat with | same | same | same |
 | Run / download a database dump | ✓ | | | |
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
-| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders only |
-| Give tasks (chat message or New task) | ✓ anyone | ✓ own-team Associates | | |
-| View audit history | ✓ | ✓ (own team) | own | assigned (without invoicing steps) |
+| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates, Experts | Founders, Managers | Founders, Managers |
+| Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
+| View audit history | ✓ | ✓ (every Associate's) | own | assigned (without invoicing steps) |
 
 **[Implementation]** Managers have every Associate function: a Call's Associate may be a
 Manager, who then runs it exactly like an Associate (no overrides on their own Call), sees
-it in their lists, calendar and statistics, and may hand it to their team.
+it in their lists, calendar and statistics, and may hand it on. A Manager oversees **every**
+Associate, not only their own team; only account changes (create, edit, deactivate) stay
+limited to their team. A Manager's own Calls stay theirs: other Managers never see them.
 
 "override" means the role may perform the transition on behalf of the normal
 owner. Every override is recorded in the status history with the actor.
@@ -989,7 +991,7 @@ Associates from before this rule) stays readable, with `canSend: false`.
 | POST | /todos | Founder, Manager | { assigneeId, title, details? }: a task without a chat message |
 | DELETE | /todos/:id | the giver | Removes a task that is open, or completed and no longer needed. 409 while it waits for confirmation |
 | GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (a Manager's Associates; everyone for the Founder). Each panel: the person, whether the caller may give them tasks, their tasks (whoever gave them) and counts. Query: status as below |
-| GET | /todos | giver or taker | Query: scope = assigned (default) \| created (Founders and Managers), status = active (default: open + done) \| open \| done \| completed \| all. Open first |
+| GET | /todos | giver or taker | Query: scope = assigned (default) \| created (Founders and Managers), status = active (default: open, done, and tasks completed within the last 7 days) \| open \| done \| completed \| all. Open first |
 | POST | /todos/:id/done | the taker | { note? }. open → done; for a chat task posts a `todo_done` reply (body = note or "Done"). The giver gets `todo.done` |
 | POST | /todos/:id/confirm | the giver | done → completed (`confirmed_at`); the taker gets `todo.completed`. Completed tasks leave the default list |
 | POST | /todos/:id/reopen | the giver | { note? }. done or completed → open, clearing the done state; the taker gets `todo.reopened` |
@@ -1004,6 +1006,8 @@ other person's browsers (§7.5); it does not create a bell notification.
 | GET | /presence | all | `[{ userId, status, lastSeenAt }]` for everyone the caller may chat with (§6.11 rules); `lastSeenAt` is filled in only when offline |
 
 Live changes arrive over the socket as `presence:update` (§7.6).
+
+**[Implementation]** Clients show two states: **on the platform** (online or idle) as a blue dot, and **away from it** as a grey dot with "Last seen …".
 
 ### 6.13 Database dumps **[Implementation]**
 
@@ -1025,7 +1029,7 @@ Periods are weeks (Monday start), two-week blocks (aligned on Monday 2026-01-05)
 |---|---|---|---|
 | GET | /stats/associates | Founder (all Associates), Manager (own team), Associate (self) | Per Associate and period: calls, finished calls, potential money and unpriced calls, plus totals. Potential money = rate × duration, the real duration once the Expert finished the call and the booked duration before; the rate is the call's special rate or the Profile's platform rate. Calls without a rate count as unpriced. Deactivated Associates appear only with calls in the range. Experts: 403 |
 | GET | /stats/profiles | Founder | Every Profile including pending, rejected and deactivated: status, active, onboard date, email, primary bank (name, country, currency, count), calls, paid calls, expected income (finished calls), total income (sum of real income), last call already started. Audited as a sensitive read |
-| GET | /stats/finance | Founder | Per period, and over the range per platform and per Profile: calls, finished calls, paid calls, expected (expected price of finished calls), paidExpected and real (calls with real income), gap = paidExpected − real, unpriced |
+| GET | /stats/finance | Founder (everyone), Manager (every Associate's calls and their own), Associate (their own); Experts 403 | Per period, and over the range per platform and per Profile: calls, finished calls, paid calls, expected (expected price of finished calls), paidExpected and real (calls with real income), gap = paidExpected − real, unpriced |
 
 Web: **Statistics** (Founder, Manager, Associate) with Weekly / Bi-weekly / Monthly. Founders also get the *By profile* table (filters All / Active / Deactivated / Pending / Rejected, sort, search) and *Finance* (Expected, Real income, Gap on paid calls, Not paid yet; tables by period, platform and Profile with expected-vs-real bars).
 
@@ -1459,3 +1463,4 @@ Container alternative:
 | 2026-09-17 | Founders can delete a user account: everything personal is erased and the nickname freed, while the person's calls, messages and history stay as a removed user |
 | 2026-09-17 | Tasks are shown as one panel per person (your own first, then the people below you) instead of "Given by me" and "Assigned to me" tabs |
 | 2026-09-17 | A task is one compact line with two tick boxes (the taker's and the giver's); the giver can delete a completed task |
+| 2026-09-17 | Managers oversee every Associate (calls, calendar, statistics, tasks); Managers and Associates see financial statistics for the calls they can see; Managers and Experts can chat; presence is blue on the platform and grey with a last-seen time away from it; calendar blocks carry a status badge; completed tasks stay in view for a week |

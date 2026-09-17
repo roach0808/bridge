@@ -57,10 +57,10 @@ describe('POST /calls', () => {
     expectError(await (await as(fx.a1)).post('/calls', body({ associateId: fx.a2.id })), 403);
   });
 
-  it('manager creates for their own team or runs the call themselves', async () => {
+  it('manager creates for any associate or runs the call themselves', async () => {
     const m1 = await as(fx.m1);
     expect((await m1.post('/calls', body({ associateId: fx.a2.id }))).status).toBe(201);
-    expectError(await m1.post('/calls', body({ associateId: fx.a3.id })), 403);
+    expect((await m1.post('/calls', body({ associateId: fx.a3.id }))).status).toBe(201);
     expectError(await m1.post('/calls', body({ associateId: fx.m2.id })), 403);
     // Without an Associate, or choosing themselves, the Manager owns the call.
     const own = await m1.post('/calls', body());
@@ -80,13 +80,13 @@ describe('POST /calls', () => {
     const history = await prisma.callStatusHistory.findFirstOrThrow({ where: { callId: call.id, toStatus: 'scheduled' } });
     expect(history.isOverride).toBe(false);
 
-    // Other managers and associates don't see it; the founder and the expert do.
+    // A Manager's own call stays theirs: other Managers and Associates don't see it.
     expectError(await (await as(fx.m2)).get(`/calls/${call.id}`), 404);
     expectError(await (await as(fx.a1)).get(`/calls/${call.id}`), 404);
     expect((await (await as(fx.founder)).get(`/calls/${call.id}`)).status).toBe(200);
     expect((await m1.get('/calls')).body.items.map((c: { id: string }) => c.id)).toContain(call.id);
 
-    expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.a3.id }), 403);
+    expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.m2.id }), 403);
     expect((await m1.patch(`/calls/${call.id}`, { associateId: fx.a2.id })).body.associate.id).toBe(fx.a2.id);
   });
 
@@ -142,7 +142,7 @@ describe('POST /calls', () => {
 });
 
 describe('GET /calls visibility', () => {
-  it('each role sees only its calls', async () => {
+  it('each role sees its calls: managers follow every associate', async () => {
     const c1 = await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: '2027-02-01T09:00:00Z' });
     const c2 = await makeCall(fx, { associate: fx.a2, expert: fx.e2, scheduledAt: '2027-02-02T09:00:00Z' });
     const c3 = await makeCall(fx, { associate: fx.a3, expert: fx.e1, scheduledAt: '2027-02-03T09:00:00Z' });
@@ -153,8 +153,8 @@ describe('GET /calls visibility', () => {
       return res.body.items.map((c: { id: string }) => c.id);
     };
     expect(await ids('founder')).toEqual([c1.id, c2.id, c3.id]);
-    expect(await ids('m1')).toEqual([c1.id, c2.id]);
-    expect(await ids('m2')).toEqual([c3.id]);
+    expect(await ids('m1')).toEqual([c1.id, c2.id, c3.id]);
+    expect(await ids('m2')).toEqual([c1.id, c2.id, c3.id]);
     expect(await ids('a1')).toEqual([c1.id]);
     expect(await ids('e1')).toEqual([c1.id, c3.id]);
     expect(await ids('e3')).toEqual([]);
@@ -253,11 +253,13 @@ describe('PATCH /calls/:id permissions', () => {
     expect((await f.get(`/calls/${call.id}`)).body.expectedPrice).toBe(116.67);
   });
 
-  it('associate reassignment: managers within their team, associates never', async () => {
+  it('associate reassignment: managers to any associate, associates never', async () => {
     const call = await makeCall(fx, { associate: fx.a1 });
     expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { associateId: fx.a2.id }), 403);
     const m1 = await as(fx.m1);
-    expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.a3.id }), 403);
+    // Another team's Associate is fine now; another Manager is not.
+    expect((await m1.patch(`/calls/${call.id}`, { associateId: fx.a3.id })).body.associate.id).toBe(fx.a3.id);
+    expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.m2.id }), 403);
     expect((await m1.patch(`/calls/${call.id}`, { associateId: fx.a2.id })).body.associate.id).toBe(fx.a2.id);
   });
 
@@ -269,6 +271,9 @@ describe('PATCH /calls/:id permissions', () => {
   it('a user who cannot see the call gets 404', async () => {
     const call = await makeCall(fx, { associate: fx.a1 });
     expectError(await (await as(fx.a3)).patch(`/calls/${call.id}`, { notes: 'x' }), 404);
+    // One Manager's own call is invisible to another Manager.
+    const ownCall = await makeCall(fx, { associate: fx.m1 });
+    expectError(await (await as(fx.m2)).patch(`/calls/${ownCall.id}`, { notes: 'x' }), 404);
   });
 
   it('an empty patch is 400', async () => {

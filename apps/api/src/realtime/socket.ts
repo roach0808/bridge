@@ -51,7 +51,7 @@ export function createSocketServer(httpServer: HttpServer): IoServer {
           loadActiveActor(userId),
           prisma.call.findUnique({
             where: { id: callId },
-            select: { status: true, associateId: true, expertId: true, associate: { select: { managerId: true } } },
+            select: { status: true, associateId: true, expertId: true, associate: { select: { role: true, managerId: true } } },
           }),
         ]);
         if (!actor) {

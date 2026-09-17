@@ -3,6 +3,7 @@ import {
   AVATAR_CATALOG,
   canChat,
   canGiveTask,
+  supervisesWork,
   expectedPrice,
   transitionSchema,
   stagesForRole,
@@ -169,9 +170,9 @@ describe('canChat', () => {
     ['associate', 'manager', true],
     ['manager', 'associate', true],
     ['associate', 'expert', false],
-    ['manager', 'expert', false],
+    ['manager', 'expert', true],
     ['expert', 'associate', false],
-    ['expert', 'manager', false],
+    ['expert', 'manager', true],
   ])('%s ↔ %s → %s', (a, b, expected) => {
     expect(canChat(u('a', a), u('b', b))).toBe(expected);
     expect(canChat(u('b', b), u('a', a))).toBe(expected);
@@ -188,13 +189,23 @@ describe('canGiveTask', () => {
     }
     expect(canGiveTask({ id: 'f', role: 'founder' }, { id: 'f', role: 'founder' })).toBe(false);
   });
-  it('a manager gives tasks only to associates on their team', () => {
+  it('a manager gives tasks to any associate, and to nobody else', () => {
     const m = { id: 'm', role: 'manager' as const };
-    expect(canGiveTask(m, { id: 'a', role: 'associate', managerId: 'm' })).toBe(true);
-    expect(canGiveTask(m, { id: 'a', role: 'associate', managerId: 'other' })).toBe(false);
-    expect(canGiveTask(m, { id: 'a', role: 'associate', managerId: null })).toBe(false);
+    expect(canGiveTask(m, { id: 'a', role: 'associate' })).toBe(true);
+    expect(canGiveTask(m, { id: 'b', role: 'associate' })).toBe(true);
     expect(canGiveTask(m, { id: 'm2', role: 'manager' })).toBe(false);
-    expect(canGiveTask(m, { id: 'e', role: 'expert', managerId: 'm' })).toBe(false);
+    expect(canGiveTask(m, { id: 'e', role: 'expert' })).toBe(false);
+    expect(canGiveTask(m, m)).toBe(false);
+  });
+
+  it('supervisesWork: the founder over everyone, a manager over associates and their own work', () => {
+    const m = { id: 'm', role: 'manager' as const };
+    expect(supervisesWork({ id: 'f', role: 'founder' }, { id: 'm2', role: 'manager' })).toBe(true);
+    expect(supervisesWork(m, { id: 'a', role: 'associate' })).toBe(true);
+    expect(supervisesWork(m, m)).toBe(true);
+    expect(supervisesWork(m, { id: 'm2', role: 'manager' })).toBe(false);
+    expect(supervisesWork(m, { id: 'e', role: 'expert' })).toBe(false);
+    expect(supervisesWork({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate' })).toBe(false);
   });
   it('associates and experts give no tasks', () => {
     expect(canGiveTask({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate', managerId: 'a' })).toBe(false);

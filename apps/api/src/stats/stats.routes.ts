@@ -13,7 +13,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { DateTime } from 'luxon';
-import { actorOf, requireAuth, requireRole } from '../auth/middleware';
+import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
 import { prisma } from '../db';
 import { forbidden } from '../errors';
 import { isoOrNull, parseQuery } from '../http';
@@ -132,12 +132,12 @@ statsRouter.get('/stats/associates', async (req, res) => {
   const from = periods[0]!.start.toJSDate();
   const to = periods.at(-1)!.end.toJSDate();
 
-  // Managers run calls too, so they have a row of their own.
+  // Managers run calls too, so they have a row of their own, and they follow every Associate.
   const where: Prisma.UserWhereInput =
     actor.role === 'founder'
       ? { role: { in: ['associate', 'manager'] }, deletedAt: null }
       : actor.role === 'manager'
-        ? { deletedAt: null, OR: [{ role: 'associate', managerId: actor.id }, { id: actor.id }] }
+        ? { deletedAt: null, OR: [{ role: 'associate' }, { id: actor.id }] }
         : { id: actor.id };
   const associates = await prisma.user.findMany({
     where,
@@ -265,10 +265,23 @@ function addToFinanceCell(cell: FinanceCell, c: PricedCall) {
   }
 }
 
-statsRouter.get('/stats/finance', requireRole('founder'), async (req, res) => {
+/** Whose calls someone sees money for: everyone's (Founder), every Associate's and their own (Manager), or their own. */
+async function financeScope(actor: Actor): Promise<string[] | undefined> {
+  if (actor.role === 'founder') return undefined;
+  if (actor.role === 'manager') {
+    const associates = await prisma.user.findMany({ where: { role: 'associate', deletedAt: null }, select: { id: true } });
+    return [actor.id, ...associates.map((a) => a.id)];
+  }
+  return [actor.id];
+}
+
+statsRouter.get('/stats/finance', async (req, res) => {
+  const actor = actorOf(req);
+  // Experts never see money (§2.3).
+  if (actor.role === 'expert') throw forbidden();
   const { period, count } = parseQuery(statsQuerySchema, req);
   const periods = statsPeriods(period, count);
-  const calls = await pricedCalls(periods[0]!.start.toJSDate(), periods.at(-1)!.end.toJSDate());
+  const calls = await pricedCalls(periods[0]!.start.toJSDate(), periods.at(-1)!.end.toJSDate(), await financeScope(actor));
 
   const byPeriod = Array.from({ length: count }, emptyFinanceCell);
   const total = emptyFinanceCell();

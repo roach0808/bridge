@@ -6,18 +6,19 @@ import { qk } from '@/lib/queryKeys';
 
 /**
  * People the caller may give a call to (its "Associate", who runs scheduling):
- * the Founder picks any active Associate or Manager; a Manager picks themselves or their team.
+ * the Founder picks any active Associate or Manager; a Manager themselves or any Associate.
  */
 export function useCallOwners(enabled: boolean) {
   const me = useMe();
   const query = useQuery<UserDTO[]>({
-    queryKey: me.role === 'manager' ? qk.users.team : qk.users.list({ active: 'true', scope: 'call-owners' }),
-    queryFn: () => (me.role === 'manager' ? api.users.team() : api.users.list({ active: 'true' })),
+    queryKey: qk.users.list({ active: 'true', scope: 'call-owners' }),
+    queryFn: () => api.users.list({ active: 'true' }),
     enabled: enabled && (me.role === 'founder' || me.role === 'manager'),
   });
+  const others = (query.data ?? []).filter((u) => u.isActive && u.id !== me.id);
   const data =
     me.role === 'manager'
-      ? [me, ...(query.data ?? []).filter((u) => u.isActive)]
-      : (query.data ?? []).filter((u) => u.isActive && (u.role === 'associate' || u.role === 'manager'));
+      ? [me, ...others.filter((u) => u.role === 'associate')]
+      : others.filter((u) => u.role === 'associate' || u.role === 'manager');
   return { data, isLoading: query.isLoading };
 }

@@ -1,6 +1,7 @@
 import {
   canChat,
   CHAT_IMAGE_MAX_BYTES,
+  COMPLETED_TASK_DAYS,
   canGiveTask,
   chatMessageSchema,
   chatReactionSchema,
@@ -16,6 +17,7 @@ import {
   type Role,
   type ServerToClientEvents,
   type TodoDTO,
+  type TodoStatus,
   type TodoPanel,
   type TodoRemovedEvent,
   type TodoSummary,
@@ -134,7 +136,7 @@ const meIn = (c: ConversationRow, userId: string) => {
   const me = c.userAId === userId ? c.userA : c.userB;
   return { id: me.id, role: me.role as Role };
 };
-const asTaker = (u: { id: string; role: string; managerId: string | null }) => ({ id: u.id, role: u.role as Role, managerId: u.managerId });
+const asTaker = (u: { id: string; role: string }) => ({ id: u.id, role: u.role as Role });
 
 /** Builds the list entries for the given conversations, as `userId` sees them. */
 async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: string): Promise<ConversationDTO[]> {
@@ -536,7 +538,7 @@ chatRouter.get('/todos/assignees', async (req, res) => {
     where: {
       isActive: true,
       id: { not: actor.id },
-      ...(actor.role === 'manager' ? { role: 'associate', managerId: actor.id } : {}),
+      ...(actor.role === 'manager' ? { role: 'associate' } : {}),
     },
     select: userRefSelect,
     orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
@@ -582,6 +584,14 @@ chatRouter.delete('/todos/:id', async (req, res) => {
 });
 
 /** `assigned`: tasks given to me. `created`: tasks I gave. Open first, then done, then completed; newest first. */
+/** `active` keeps a task until a week after it was confirmed, so finished work stays in sight. */
+function todoStatusWhere(status: 'active' | 'all' | TodoStatus): Prisma.TodoWhereInput {
+  if (status === 'all') return {};
+  if (status !== 'active') return { status };
+  const since = new Date(Date.now() - COMPLETED_TASK_DAYS * 24 * 60 * 60 * 1000);
+  return { OR: [{ status: { in: ['open', 'done'] } }, { status: 'completed', confirmedAt: { gte: since } }] };
+}
+
 chatRouter.get('/todos', async (req, res) => {
   const actor = actorOf(req);
   const { scope, status } = parseQuery(listTodosQuerySchema, req);
@@ -591,7 +601,7 @@ chatRouter.get('/todos', async (req, res) => {
   const rows = await prisma.todo.findMany({
     where: {
       ...(scope === 'assigned' ? { assigneeId: actor.id } : { createdById: actor.id }),
-      ...(status === 'all' ? {} : status === 'active' ? { status: { in: ['open', 'done'] } } : { status }),
+      ...todoStatusWhere(status),
     },
     include: todoInclude,
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
@@ -617,7 +627,7 @@ chatRouter.get('/todos/board', async (req, res) => {
         })
       : actor.role === 'manager'
         ? await prisma.user.findMany({
-            where: { deletedAt: null, role: 'associate', managerId: actor.id },
+            where: { deletedAt: null, role: 'associate' },
             select: { ...userRefSelect, isActive: true, managerId: true },
             orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
           })
@@ -628,7 +638,7 @@ chatRouter.get('/todos/board', async (req, res) => {
   const rows = await prisma.todo.findMany({
     where: {
       assigneeId: { in: people.map((p) => p.id) },
-      ...(status === 'all' ? {} : status === 'active' ? { status: { in: ['open', 'done'] } } : { status }),
+      ...todoStatusWhere(status),
     },
     include: todoInclude,
     orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],

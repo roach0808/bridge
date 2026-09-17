@@ -84,15 +84,15 @@ async function assertActiveUser(id: string, role: 'associate' | 'expert', field:
 
 /**
  * Who may run a call (be its Associate): an active Associate, or an active Manager.
- * A Manager chooses themselves or an Associate on their team.
+ * A Manager chooses themselves or any Associate.
  */
 async function assertCallOwner(actor: Actor, id: string) {
   const user = await prisma.user.findUnique({ where: { id }, select: { role: true, isActive: true, managerId: true } });
   if (!user || !user.isActive || (user.role !== 'associate' && user.role !== 'manager')) {
     throw badRequest('Choose an active Associate or Manager', { issues: [{ path: 'associateId', message: 'Not an active Associate or Manager' }] });
   }
-  if (actor.role === 'manager' && id !== actor.id && !(user.role === 'associate' && user.managerId === actor.id)) {
-    throw forbidden('Managers choose themselves or their own team');
+  if (actor.role === 'manager' && id !== actor.id && user.role !== 'associate') {
+    throw forbidden('Managers choose themselves or an Associate');
   }
   return user;
 }

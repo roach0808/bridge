@@ -75,23 +75,24 @@ describe('statistics by associate', () => {
     expect(res.body.total).toEqual({ calls: 1, finishedCalls: 0, potential: 0, unpriced: 1 });
   });
 
-  it('founders see everyone, managers their team, associates themselves, experts nothing', async () => {
+  it('founders see everyone, managers every associate, associates themselves, experts nothing', async () => {
     const ids = async (user: typeof fx.a1) =>
       (await (await as(user)).get('/stats/associates')).body.rows.map((r: { associate: { id: string } }) => r.associate.id).sort();
     // Managers appear once they run calls themselves; a Manager always sees their own row.
     expect(await ids(fx.founder)).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
-    expect(await ids(fx.m1)).toEqual([fx.a1.id, fx.a2.id, fx.m1.id].sort());
+    expect(await ids(fx.m1)).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id, fx.m1.id].sort());
     await makeCall(fx, { associate: fx.m2, status: 'scheduled', scheduledAt: '2026-09-17T14:00:00Z' });
     expect(await ids(fx.founder)).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id, fx.m2.id].sort());
     expect(await ids(fx.a3)).toEqual([fx.a3.id]);
     expectError(await (await as(fx.e1)).get('/stats/associates'), 403);
   });
 
-  it('a manager’s totals leave out other teams’ calls', async () => {
+  it('a manager’s totals cover every associate, but not another manager’s own calls', async () => {
     await setRate(fx.approvedProfile.id, fx.platform.id, 600);
     await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: '2026-09-17T14:00:00Z' });
     await makeCall(fx, { associate: fx.a3, status: 'scheduled', scheduledAt: '2026-09-17T16:00:00Z' });
-    expect((await (await as(fx.m1)).get('/stats/associates')).body.total).toMatchObject({ calls: 1, potential: 600 });
+    await makeCall(fx, { associate: fx.m2, status: 'scheduled', scheduledAt: '2026-09-17T18:00:00Z' });
+    expect((await (await as(fx.m1)).get('/stats/associates')).body.total).toMatchObject({ calls: 2, potential: 1200 });
   });
 
   it('a deactivated associate shows only while they have calls in the range', async () => {
@@ -147,7 +148,7 @@ describe('statistics by profile', () => {
 });
 
 describe('financial statistics', () => {
-  it('compares expected and real income per period, platform and profile; founder only', async () => {
+  it('compares expected and real income per period, platform and profile', async () => {
     await setRate(fx.approvedProfile.id, fx.platform.id, 600);
     const paid = await makeCall(fx, { associate: fx.a1, status: 'process_to_bank', scheduledAt: '2026-09-15T14:00:00Z', realIncome: 570 });
     const approved = await makeCall(fx, { associate: fx.a1, status: 'invoice_approve', scheduledAt: '2026-09-08T14:00:00Z' });
@@ -165,6 +166,10 @@ describe('financial statistics', () => {
     expect(res.body.byPlatform).toEqual([{ platform: fx.platform, cell: res.body.total }]);
     expect(res.body.byProfile[0]).toMatchObject({ profile: { id: fx.approvedProfile.id, isActive: true }, cell: { real: 570 } });
 
-    expectError(await (await as(fx.m1)).get('/stats/finance'), 403);
+    // Managers see every Associate's money, Associates their own, Experts none.
+    expect((await (await as(fx.m1)).get('/stats/finance', { period: 'week', count: 2 })).body.total).toMatchObject({ real: 570 });
+    expect((await (await as(fx.a1)).get('/stats/finance', { period: 'week', count: 2 })).body.total).toMatchObject({ real: 570 });
+    expect((await (await as(fx.a3)).get('/stats/finance', { period: 'week', count: 2 })).body.total).toMatchObject({ real: 0, calls: 0 });
+    expectError(await (await as(fx.e1)).get('/stats/finance'), 403);
   });
 });

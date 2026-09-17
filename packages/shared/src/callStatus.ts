@@ -40,6 +40,19 @@ export const STATUS_LABELS: Record<CallStatus, string> = {
   process_to_bank: 'Processed to bank',
 };
 
+/** Room-saving names for calendar blocks and other tight spots. */
+export const SHORT_STATUS_LABELS: Record<CallStatus, string> = {
+  on_scheduling: 'Scheduling',
+  scheduled: 'Scheduled',
+  confirmed: 'Confirmed',
+  on_rescheduling: 'Rescheduling',
+  ongoing: 'Ongoing',
+  finished: 'Done',
+  invoice_submit: 'Invoiced',
+  invoice_approve: 'Approved',
+  process_to_bank: 'Paid',
+};
+
 export const STAGE_LABELS: Record<Stage, string> = {
   scheduling: 'Scheduling',
   execution: 'Execution',

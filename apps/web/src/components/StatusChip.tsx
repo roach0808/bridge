@@ -8,7 +8,7 @@ import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import { Box, type SvgIconProps } from '@mui/material';
-import { STATUS_LABELS, STATUS_STAGE, type CallStatus } from '@god/shared';
+import { SHORT_STATUS_LABELS, STATUS_LABELS, STATUS_STAGE, type CallStatus } from '@god/shared';
 import type { ComponentType } from 'react';
 import { STAGE_COLORS } from '@/theme/theme';
 
@@ -35,6 +35,39 @@ export const STATUS_COLORS: Record<CallStatus, string> = {
   invoice_approve: '#35a38a',
   process_to_bank: '#6aa84f',
 };
+
+/** A tiny status badge for calendar blocks: the status icon, and its short name when there is room. */
+export function StatusBadge({ status, compact }: { status: CallStatus; compact?: boolean }) {
+  const Icon = STATUS_ICONS[status];
+  const color = STATUS_COLORS[status];
+  return (
+    <Box
+      component="span"
+      aria-label={STATUS_LABELS[status]}
+      data-status={status}
+      sx={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 0.25,
+        flexShrink: 0,
+        maxWidth: '100%',
+        height: 15,
+        px: compact ? 0.25 : 0.5,
+        borderRadius: 99,
+        bgcolor: `${color}26`,
+        color,
+        fontSize: 9.5,
+        fontWeight: 700,
+        letterSpacing: '.02em',
+        textTransform: 'uppercase',
+        lineHeight: 1,
+      }}
+    >
+      <Icon sx={{ fontSize: 11 }} />
+      {!compact && <Box component="span" sx={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{SHORT_STATUS_LABELS[status]}</Box>}
+    </Box>
+  );
+}
 
 export const statusColor = (s: CallStatus) => STATUS_COLORS[s];
 export const stageColor = (s: CallStatus) => STAGE_COLORS[STATUS_STAGE[s]];

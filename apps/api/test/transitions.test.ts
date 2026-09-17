@@ -202,11 +202,18 @@ describe('409 for an invalid edge', () => {
 });
 
 describe('404 for a call the user cannot see', () => {
-  it.each<keyof Fixtures>(['a2', 'a3', 'm2', 'e2'])('%s gets 404 on a1’s call', async (who) => {
+  it.each<keyof Fixtures>(['a2', 'a3', 'e2'])('%s gets 404 on a1’s call', async (who) => {
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
     const client = await as(fx[who] as FixtureUser);
     expectError(await transition(client, call.id, 'on_rescheduling'), 404, 'not_found');
     expectError(await client.get(`/calls/${call.id}`), 404, 'not_found');
+  });
+
+  it('a manager’s own call is 404 for another manager', async () => {
+    const call = await makeCall(fx, { associate: fx.m1, expert: fx.e1, status: 'scheduled' });
+    const m2 = await as(fx.m2);
+    expectError(await transition(m2, call.id, 'on_rescheduling'), 404, 'not_found');
+    expectError(await m2.get(`/calls/${call.id}`), 404, 'not_found');
   });
 
   it('unknown and malformed ids are 404', async () => {

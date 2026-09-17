@@ -3,9 +3,10 @@ import { PRESENCE_LABELS, type PresenceStatus } from '@god/shared';
 import { usePresence } from '@/realtime/PresenceProvider';
 import { relativeTime } from '@/lib/time';
 
+/** On the platform: blue. Away from it: grey, with the last-seen time. */
 export const PRESENCE_COLORS: Record<PresenceStatus, string> = {
-  online: '#3fb68b',
-  away: '#e0913a',
+  online: '#3f8fd6',
+  away: '#3f8fd6',
   offline: '#9aa0a6',
 };
 

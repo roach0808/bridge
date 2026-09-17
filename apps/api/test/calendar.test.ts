@@ -63,12 +63,13 @@ describe('GET /calendar privacy', () => {
     expect(res.text).not.toContain(w.c3.id);
   });
 
-  it('manager: team calls in full, other team as busy, no rules or notes', async () => {
+  it('manager: every associate’s calls in full, but no rules or private notes', async () => {
     const w = await seedExpertWeek();
     const res = await calendarOf(await as(fx.m1), fx.e1.id);
-    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.c4]));
-    expect(res.body.busy).toEqual([{ startsAt: '2027-02-01T12:00:00.000Z', endsAt: '2027-02-01T12:30:00.000Z' }]);
+    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.c2, w.c3, w.c4]));
+    expect(res.body.busy).toEqual([]);
     expect(res.body.rules).toEqual([]);
+    expect(res.body.canEditBlocks).toBe(false);
     expect(res.text).not.toContain('private-block-note');
   });
 

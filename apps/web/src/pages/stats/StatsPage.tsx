@@ -50,7 +50,9 @@ export default function StatsPage() {
   const isFounder = me.role === 'founder';
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab') as TabKey | null;
-  const tab: TabKey = isFounder && (requested === 'profiles' || requested === 'finance') ? requested : 'associates';
+  // Experts never reach this page; everyone else sees money for the calls they can see.
+  const tab: TabKey =
+    (requested === 'profiles' && isFounder) || (requested === 'finance' && me.role !== 'expert') ? requested : 'associates';
   const period = (PERIODS.find((p) => p.value === params.get('period')) ?? PERIODS[0])!;
   const set = (key: string, value: string) => setParams((p) => ({ ...Object.fromEntries(p), [key]: value }), { replace: true });
 
@@ -62,18 +64,16 @@ export default function StatsPage() {
           me.role === 'founder'
             ? 'Calls and money by Associate and by Profile, and expected against real income.'
             : me.role === 'manager'
-              ? 'Scheduled calls and potential money for you and your team.'
-              : 'Your scheduled calls and the money they can bring in.'
+              ? 'Scheduled calls, potential money and income across every Associate.'
+              : 'Your scheduled calls, and what they are expected to bring in against what reached the bank.'
         }
       />
 
-      {isFounder && (
-        <Tabs value={tab} onChange={(_, v: TabKey) => set('tab', v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }} variant="scrollable" allowScrollButtonsMobile>
-          <Tab value="associates" label="By associate" />
-          <Tab value="profiles" label="By profile" />
-          <Tab value="finance" label="Finance" />
-        </Tabs>
-      )}
+      <Tabs value={tab} onChange={(_, v: TabKey) => set('tab', v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }} variant="scrollable" allowScrollButtonsMobile>
+        <Tab value="associates" label="By associate" />
+        {isFounder && <Tab value="profiles" label="By profile" />}
+        <Tab value="finance" label="Finance" />
+      </Tabs>
 
       {tab !== 'profiles' && (
         <Box sx={{ mb: 2 }}>
@@ -598,7 +598,7 @@ function FinanceTab({ period }: { period: (typeof PERIODS)[number] }) {
         </Grid>
       </Grid>
 
-      <SectionTitle hint={`Calls by their scheduled time over the last ${periods.length} periods. The gap compares only calls that were processed to bank.`}>
+      <SectionTitle hint={`Calls by their scheduled time over the last ${periods.length} periods, for the calls you can see. The gap compares only calls that were processed to bank.`}>
         By period
       </SectionTitle>
       <FinanceTable

@@ -7,6 +7,7 @@ import {
   type TransitionContext,
 } from '@god/shared';
 import type { Prisma } from '@prisma/client';
+import { supervisesWork, type Role } from '@god/shared';
 import type { Actor } from '../auth/middleware';
 
 /** The minimal shape of a Call needed for access decisions. */
@@ -14,8 +15,12 @@ export interface CallAccessShape {
   status: CallStatus;
   associateId: string;
   expertId: string | null;
-  associate: { managerId: string | null };
+  associate: { role: string; managerId: string | null };
 }
+
+/** The Founder oversees every call; a Manager every Associate's call, and their own. */
+const supervisesCall = (actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape) =>
+  supervisesWork(actor, { id: call.associateId, role: call.associate.role as Role });
 
 /** Prisma filter for the Calls a user may see (§2.3 "View Call"). */
 export function visibleCallsWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.CallWhereInput {
@@ -23,8 +28,8 @@ export function visibleCallsWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.Cal
     case 'founder':
       return {};
     case 'manager':
-      // Their team's calls, and the calls they run themselves.
-      return { OR: [{ associate: { managerId: actor.id } }, { associateId: actor.id }] };
+      // Every Associate's calls, and the calls they run themselves.
+      return { OR: [{ associate: { role: 'associate' } }, { associateId: actor.id }] };
     case 'associate':
       return { associateId: actor.id };
     case 'expert':
@@ -42,7 +47,7 @@ export function canViewCall(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessS
     case 'founder':
       return true;
     case 'manager':
-      return call.associate.managerId === actor.id || call.associateId === actor.id;
+      return supervisesCall(actor, call);
     case 'associate':
       return call.associateId === actor.id;
     case 'expert':
@@ -50,11 +55,11 @@ export function canViewCall(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessS
   }
 }
 
-export function transitionContext(actor: Pick<Actor, 'id'>, call: CallAccessShape): TransitionContext {
+export function transitionContext(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape): TransitionContext {
   return {
     isCallAssociate: call.associateId === actor.id,
     isCallExpert: call.expertId === actor.id,
-    managesCallAssociate: call.associate.managerId === actor.id,
+    managesCallAssociate: actor.role === 'manager' && supervisesCall(actor, call),
     hasExpert: call.expertId !== null,
   };
 }
@@ -74,10 +79,8 @@ export function allowedTransitionsFor(actor: Pick<Actor, 'id' | 'role'>, call: C
  */
 export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape): CallPermissions {
   const scheduling = STATUS_STAGE[call.status] === 'scheduling';
-  // A Manager supervises their team's calls and their own (which they may hand to their team).
-  const supervises =
-    actor.role === 'founder' ||
-    (actor.role === 'manager' && (call.associate.managerId === actor.id || call.associateId === actor.id));
+  // A Manager runs every Associate's call, and their own (which they may hand on).
+  const supervises = actor.role === 'founder' || (actor.role === 'manager' && supervisesCall(actor, call));
   const ownsScheduling = supervises || (actor.role === 'associate' && call.associateId === actor.id);
 
   return {

@@ -5,7 +5,7 @@ import { Box, ButtonBase, Stack, Tooltip, Typography, alpha, type Theme } from '
 import { STATUS_LABELS, type CalendarCall, type Occurrence } from '@god/shared';
 import { DateTime } from 'luxon';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
-import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
+import { STATUS_COLORS, StatusBadge, StatusChip } from '@/components/StatusChip';
 import { UserChip } from '@/components/identity';
 import { formatRange } from '@/lib/time';
 
@@ -139,17 +139,23 @@ export function CallBlock({
       tooltip={<CallTooltip call={call} zone={zone} />}
     >
       {tiny ? (
-        <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.35, fontSize: 11 }}>
-          {call.profile.name}{' '}
-          <Box component="span" className="cal-sub" sx={{ color: 'text.secondary', fontWeight: 500 }}>
-            {DateTime.fromISO(call.scheduledAt).setZone(zone).toFormat('h:mm')}
-          </Box>
-        </Typography>
+        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+          <StatusBadge status={call.status} compact />
+          <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.35, fontSize: 11, minWidth: 0 }}>
+            {call.profile.name}{' '}
+            <Box component="span" className="cal-sub" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+              {DateTime.fromISO(call.scheduledAt).setZone(zone).toFormat('h:mm')}
+            </Box>
+          </Typography>
+        </Stack>
       ) : (
         <>
-          <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: 12 }}>
-            {call.profile.name}
-          </Typography>
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+            <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: 12, minWidth: 0, flex: 1 }}>
+              {call.profile.name}
+            </Typography>
+            <StatusBadge status={call.status} />
+          </Stack>
           <Typography className="cal-sub" variant="caption" noWrap component="div" sx={{ color: 'text.secondary', lineHeight: 1.3, fontSize: 11 }}>
             {time}
             {!roomy && ` · ${call.platform.name}`}
@@ -236,6 +242,7 @@ export function TimeOffBlock({
 export function EventPill({
   kind,
   title,
+  badge,
   accent,
   tint,
   onClick,
@@ -244,6 +251,8 @@ export function EventPill({
 }: {
   kind: 'call' | 'timeoff' | 'busy';
   title: ReactNode;
+  /** Shown at the end of the pill, e.g. a call's status badge. */
+  badge?: ReactNode;
   accent?: string;
   tint?: string;
   onClick?: () => void;
@@ -293,6 +302,7 @@ export function EventPill({
       <Typography variant="caption" noWrap sx={{ fontSize: 11, fontWeight: 600, flex: 1, minWidth: 0, lineHeight: 1 }}>
         {title}
       </Typography>
+      {badge}
       {repeat && <RepeatRounded sx={{ fontSize: 11, color: 'text.secondary' }} />}
     </ButtonBase>
   );

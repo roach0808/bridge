@@ -3,7 +3,7 @@ import { Box, ButtonBase, Stack, Tooltip, Typography } from '@mui/material';
 import type { Occurrence } from '@god/shared';
 import { DateTime } from 'luxon';
 import { useMemo } from 'react';
-import { STATUS_COLORS } from '@/components/StatusChip';
+import { STATUS_COLORS, StatusBadge } from '@/components/StatusChip';
 import { AVAILABILITY_ENABLED } from '@/lib/features';
 import { buildEvents, overlapsDay, type TimedEvent } from './calendarUtils';
 import { CallTooltip, EventPill, pal, timeOffTitle } from './EventBlocks';
@@ -210,6 +210,7 @@ function SingleDayList({
                   {ev.call.profile.name}
                 </>
               }
+              badge={<StatusBadge status={ev.call.status} compact />}
               tooltip={<CallTooltip call={ev.call} zone={zone} />}
               onClick={() => onOpenCall(ev.call.id)}
             />

@@ -25,6 +25,8 @@ describe('who can chat with whom', () => {
     ['m1', 'm2'],
     ['a1', 'm2'], // any manager, not only their own
     ['m2', 'a1'],
+    ['m1', 'e2'], // managers reach every expert
+    ['e3', 'm2'],
   ])('%s may chat with %s', async (a, b) => {
     const id = await open(await as(fx[a] as FixtureUser), fx[b] as FixtureUser);
     expect((await send(await as(fx[a] as FixtureUser), id, 'Hello')).status).toBe(201);
@@ -36,17 +38,17 @@ describe('who can chat with whom', () => {
     ['e1', 'e2'],
     ['a1', 'e1'],
     ['e1', 'a1'],
-    ['m1', 'e2'],
-    ['e3', 'm2'],
   ])('%s may not chat with %s', async (a, b) => {
     expectError(await (await as(fx[a] as FixtureUser)).post('/chat/conversations', { userId: (fx[b] as FixtureUser).id }), 403);
   });
 
   it('contacts follow the same rules', async () => {
     const nick = async (who: FixtureUser) => (await (await as(who)).get('/chat/contacts')).body.map((u: { nickname: string }) => u.nickname).sort();
-    expect(await nick(fx.e1)).toEqual(['Founder']);
+    expect(await nick(fx.e1)).toEqual(['Founder', 'ManagerOne', 'ManagerTwo']);
     expect(await nick(fx.a1)).toEqual(['Founder', 'ManagerOne', 'ManagerTwo']);
-    expect(await nick(fx.m1)).toEqual(['AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerTwo']);
+    expect(await nick(fx.m1)).toEqual([
+      'AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerTwo',
+    ]);
     expect(await nick(fx.founder)).toHaveLength(fx.users.length - 1);
   });
 
@@ -188,7 +190,7 @@ describe('to-dos', () => {
     expect(res.body.assignee.id).toBe(fx.e1.id);
   });
 
-  it('a manager gives tasks to their own associates only, once per message, in their own chats', async () => {
+  it('a manager gives tasks to any associate, once per message, in their own chats', async () => {
     const m1 = await as(fx.m1);
     const own = await open(m1, fx.a1);
     const ownMsg = (await send(m1, own, 'Confirm the Hanbit slot')).body;
@@ -198,18 +200,18 @@ describe('to-dos', () => {
     expect((await m1.post(`/chat/messages/${ownMsg.id}/todo`)).status).toBe(201);
     expectError(await m1.post(`/chat/messages/${ownMsg.id}/todo`), 409);
 
-    // Another team's associate, and a fellow manager, are off limits.
+    // Another team's associate is fine; a fellow manager is not.
     const otherTeam = await open(m1, fx.a3);
-    expect((await m1.get(`/chat/conversations/${otherTeam}`)).body.canGiveTask).toBe(false);
+    expect((await m1.get(`/chat/conversations/${otherTeam}`)).body.canGiveTask).toBe(true);
     const otherMsg = (await send(m1, otherTeam, 'Can you help?')).body;
-    expectError(await m1.post(`/chat/messages/${otherMsg.id}/todo`), 403);
+    expect((await m1.post(`/chat/messages/${otherMsg.id}/todo`)).status).toBe(201);
     const peers = await open(m1, fx.m2);
     const peerMsg = (await send(m1, peers, 'between managers')).body;
     expectError(await m1.post(`/chat/messages/${peerMsg.id}/todo`), 403);
     // Not a participant: the message doesn't exist for them.
     expectError(await (await as(fx.founder)).post(`/chat/messages/${peerMsg.id}/todo`), 404);
 
-    expect((await m1.get('/todos', { scope: 'created' })).body).toHaveLength(1);
+    expect((await m1.get('/todos', { scope: 'created' })).body).toHaveLength(2);
     expectError(await (await as(fx.a1)).get('/todos', { scope: 'created' }), 403);
   });
 
@@ -282,15 +284,16 @@ describe('the task board', () => {
     await founder.post('/todos', { assigneeId: fx.a1.id, title: 'Send the report' });
 
     const managerBoard = await board(fx.m1);
-    expect(managerBoard.map((p: { person: { id: string }; isMe: boolean }) => [p.person.id, p.isMe])).toEqual([
-      [fx.m1.id, true],
-      [fx.a1.id, false],
-      [fx.a2.id, false],
-    ]);
+    // A Manager follows every Associate, not only their own team.
+    expect(managerBoard[0]).toMatchObject({ person: { id: fx.m1.id }, isMe: true });
+    expect(managerBoard.slice(1).map((p: { person: { id: string } }) => p.person.id).sort()).toEqual(
+      [fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort(),
+    );
     expect(managerBoard[0].tasks.map((t: { title: string }) => t.title)).toEqual(['Plan the quarter']);
     // An Associate's panel holds every task they were given, whoever gave it.
-    expect(managerBoard[1].tasks.map((t: { title: string }) => t.title).sort()).toEqual(['Chase invoices', 'Send the report']);
-    expect(managerBoard[1]).toMatchObject({ canGive: true, counts: { open: 2, done: 0, completed: 0 } });
+    const a1Panel = managerBoard.find((p: { person: { id: string } }) => p.person.id === fx.a1.id);
+    expect(a1Panel.tasks.map((t: { title: string }) => t.title).sort()).toEqual(['Chase invoices', 'Send the report']);
+    expect(a1Panel).toMatchObject({ canGive: true, counts: { open: 2, done: 0, completed: 0 } });
 
     const founderBoard = await board(fx.founder);
     expect(founderBoard[0].person.id).toBe(fx.founder.id);
@@ -307,16 +310,23 @@ describe('the task board', () => {
 
     const own = await board(fx.a3);
     expect(own).toHaveLength(1);
-    expect(own[0]).toMatchObject({ isMe: true, canGive: false, tasks: [], counts: { open: 0, done: 0, completed: 1 } });
+    // A task confirmed just now stays in sight for a week.
+    expect(own[0]).toMatchObject({ isMe: true, canGive: false, counts: { open: 0, done: 0, completed: 1 } });
+    expect(own[0].tasks).toHaveLength(1);
     expect((await board(fx.a3, { status: 'completed' }))[0].tasks).toHaveLength(1);
     expect((await board(fx.a3, { status: 'all' }))[0].tasks).toHaveLength(1);
+
+    // Eight days on, it drops out of the default view but is still there under Completed.
+    await prisma.todo.update({ where: { id: todo.id }, data: { confirmedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) } });
+    expect((await board(fx.a3))[0].tasks).toEqual([]);
+    expect((await board(fx.a3, { status: 'completed' }))[0].tasks).toHaveLength(1);
     // Experts have a panel of their own too.
     expect((await board(fx.e1))).toHaveLength(1);
   });
 });
 
 describe('tasks without a chat message', () => {
-  it('a founder gives anyone a task; a manager only their own associates', async () => {
+  it('a founder gives anyone a task; a manager any associate', async () => {
     const founder = await as(fx.founder);
     const m1 = await as(fx.m1);
     const res = await founder.post('/todos', { assigneeId: fx.e1.id, title: '  Update your availability  ', details: 'For next week' });
@@ -325,14 +335,14 @@ describe('tasks without a chat message', () => {
     expect((await (await as(fx.e1)).get('/notifications')).body.items[0]).toMatchObject({ type: 'todo.assigned', payload: { todoId: res.body.id } });
 
     expect((await m1.post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' })).status).toBe(201);
-    expectError(await m1.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' }), 403);
+    expect((await m1.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' })).status).toBe(201);
     expectError(await m1.post('/todos', { assigneeId: fx.m2.id, title: 'Chase invoices' }), 403);
     expectError(await (await as(fx.a1)).post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' }), 403);
     expectError(await founder.post('/todos', { assigneeId: fx.founder.id, title: 'Myself' }), 403);
     expectError(await founder.post('/todos', { assigneeId: fx.a1.id, title: '   ' }), 400);
 
     const assignees = (await m1.get('/todos/assignees')).body.map((u: { id: string }) => u.id).sort();
-    expect(assignees).toEqual([fx.a1.id, fx.a2.id].sort());
+    expect(assignees).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
     expect((await founder.get('/todos/assignees')).body.map((u: { id: string }) => u.id)).not.toContain(fx.founder.id);
     expect((await (await as(fx.a1)).get('/todos/assignees')).body).toEqual([]);
   });
@@ -356,6 +366,9 @@ describe('tasks without a chat message', () => {
     expect(confirmed.body.confirmedAt).not.toBeNull();
     expect((await a1.get('/notifications')).body.items[0]).toMatchObject({ type: 'todo.completed', payload: { todoId: todo.id } });
 
+    // Completed work stays on the list for a week, then only under Completed.
+    expect((await a1.get('/todos')).body).toHaveLength(1);
+    await prisma.todo.update({ where: { id: todo.id }, data: { confirmedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000) } });
     expect((await a1.get('/todos')).body).toEqual([]);
     expect((await m1.get('/todos', { scope: 'created' })).body).toEqual([]);
     expect((await a1.get('/todos', { status: 'completed' })).body).toHaveLength(1);
