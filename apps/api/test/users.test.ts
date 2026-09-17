@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { PASSWORD, app, as, expectError, loginRaw, prisma, seedFixtures, type Fixtures } from './helpers';
+import { PASSWORD, app, as, expectError, loginRaw, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -170,5 +170,59 @@ describe('PATCH /users/:id and deactivation', () => {
     const f = await as(fx.founder);
     expect((await f.patch(`/users/${fx.e2.id}`, { timeZone: 'America/Chicago' })).body.timeZone).toBe('America/Chicago');
     expectError(await f.patch(`/users/${fx.m1.id}`, { timeZone: 'America/Chicago' }), 400);
+  });
+});
+
+describe('DELETE /users/:id', () => {
+  it('erases the account and frees the email, while their past work stays', async () => {
+    const founder = await as(fx.founder);
+    const call = await makeCall(fx, { associate: fx.a2, expert: fx.e2, status: 'process_to_bank' });
+    const conversation = await prisma.conversation.create({
+      data: { userAId: [fx.a2.id, fx.founder.id].sort()[0]!, userBId: [fx.a2.id, fx.founder.id].sort()[1]!, lastMessageAt: new Date() },
+    });
+    await prisma.chatMessage.create({ data: { conversationId: conversation.id, senderId: fx.a2.id, body: 'my last word' } });
+
+    expect((await founder.delete(`/users/${fx.a2.id}`)).status).toBe(204);
+    const gone = await prisma.user.findUniqueOrThrow({ where: { id: fx.a2.id } });
+    expect(gone.deletedAt).not.toBeNull();
+    expect(gone.isActive).toBe(false);
+    expect(gone.nickname).toMatch(/^Removed user /);
+    expect(gone.email).not.toBe(fx.a2.email);
+    expect(await prisma.refreshToken.count({ where: { userId: fx.a2.id, revokedAt: null } })).toBe(0);
+
+    // Their work is untouched, and names them as a removed user.
+    expect(await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).toMatchObject({ associateId: fx.a2.id });
+    expect(await prisma.chatMessage.count({ where: { senderId: fx.a2.id } })).toBe(1);
+    expect((await founder.get(`/calls/${call.id}`)).body.associate.nickname).toMatch(/^Removed user /);
+
+    // Gone from every list, and they cannot sign in or be reached.
+    expect((await founder.get('/users')).body.some((u: { id: string }) => u.id === fx.a2.id)).toBe(false);
+    expectError(await founder.get(`/users/${fx.a2.id}`), 404);
+    expect((await founder.get('/chat/contacts')).body.some((u: { id: string }) => u.id === fx.a2.id)).toBe(false);
+    expect((await founder.get('/stats/associates')).body.rows.some((r: { associate: { id: string } }) => r.associate.id === fx.a2.id)).toBe(false);
+    expect((await loginRaw(fx.a2.email)).status).toBe(401);
+
+    // The email is free for a new account.
+    const reused = await founder.post('/users', newUser({ role: 'associate', managerId: fx.m1.id, email: fx.a2.email }));
+    expect(reused.status, reused.text).toBe(201);
+  });
+
+  it('refuses yourself, a Manager with a team, and unfinished calls', async () => {
+    const founder = await as(fx.founder);
+    expectError(await founder.delete(`/users/${fx.founder.id}`), 400);
+    expectError(await founder.delete(`/users/${fx.m1.id}`), 409);
+
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    expectError(await founder.delete(`/users/${fx.a1.id}`), 409);
+    expectError(await founder.delete(`/users/${fx.e1.id}`), 409);
+    expectError(await (await as(fx.m1)).delete(`/users/${fx.a1.id}`), 403);
+    expectError(await founder.delete(`/users/${fx.founder.id.replace(/.$/, '0')}`), 404);
+  });
+
+  it('a Manager can be deleted once their Associates have moved', async () => {
+    const founder = await as(fx.founder);
+    for (const a of [fx.a1, fx.a2]) await founder.patch(`/users/${a.id}`, { managerId: fx.m2.id });
+    expect((await founder.delete(`/users/${fx.m1.id}`)).status).toBe(204);
+    expect((await founder.get('/users')).body.some((u: { id: string }) => u.id === fx.m1.id)).toBe(false);
   });
 });

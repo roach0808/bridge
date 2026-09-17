@@ -158,6 +158,8 @@ export function createApiClient(options: ClientOptions) {
       get: (id: string) => get<UserDTO>(`/users/${enc(id)}`),
       create: (body: CreateUserBody) => post<UserDTO>('/users', body),
       update: (id: string, body: UpdateUserBody) => patch<UserDTO>(`/users/${enc(id)}`, body),
+      /** Founder only: erases the account; their past work stays under a removed name. */
+      remove: (id: string) => del<void>(`/users/${enc(id)}`),
       /** Founder only, audited: sign-in email and linked Google account. */
       signIn: (id: string) => get<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`),
       setSignInEmail: (id: string, email: string) => patch<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`, { email }),

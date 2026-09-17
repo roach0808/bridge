@@ -10,6 +10,7 @@ import {
 } from '@god/shared';
 import type { Prisma } from '@prisma/client';
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
 import { hashPassword } from '../auth/auth.routes';
 import { prisma } from '../db';
@@ -18,13 +19,17 @@ import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
 import { disconnectUser } from '../realtime/hub';
 import { toUserDTO, userSelect } from '../serializers';
 
+/** Calls that need nobody any more. */
+const DONE_STATUSES = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'] as const;
+
 export const usersRouter = Router();
 usersRouter.use('/users', requireAuth, requireRole('founder', 'manager'));
 
 /** Users a Manager may see: their own Associates plus every Expert (§6.2). */
 function visibleUsersWhere(actor: Actor): Prisma.UserWhereInput {
-  if (actor.role === 'founder') return {};
-  return { OR: [{ role: 'associate', managerId: actor.id }, { role: 'expert' }] };
+  // Deleted accounts are gone from every list; only their past work still names them.
+  if (actor.role === 'founder') return { deletedAt: null };
+  return { deletedAt: null, OR: [{ role: 'associate', managerId: actor.id }, { role: 'expert' }] };
 }
 
 async function loadVisibleUser(actor: Actor, id: string | null) {
@@ -45,7 +50,7 @@ async function assertManager(managerId: string | null | undefined) {
 usersRouter.get('/users/me/team', requireRole('manager'), async (req, res) => {
   const actor = actorOf(req);
   const team = await prisma.user.findMany({
-    where: { role: 'associate', managerId: actor.id },
+    where: { role: 'associate', managerId: actor.id, deletedAt: null },
     select: userSelect,
     orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
   });
@@ -122,6 +127,52 @@ usersRouter.post('/users', async (req, res) => {
 usersRouter.get('/users/:id', async (req, res) => {
   const user = await loadVisibleUser(actorOf(req), idParam(req));
   res.json(toUserDTO(user));
+});
+
+/**
+ * Founder only: deletes the account. Everything personal goes (email, password, Google,
+ * sessions, devices, picture, notifications) and the nickname is freed, while their calls,
+ * messages and audit entries stay, showing a removed user.
+ */
+usersRouter.delete('/users/:id', requireRole('founder'), async (req, res) => {
+  const actor = actorOf(req);
+  const id = idParam(req);
+  const target = id ? await prisma.user.findFirst({ where: { id, deletedAt: null }, select: userSelect }) : null;
+  if (!target) throw notFound('User');
+  if (target.id === actor.id) throw badRequest('You cannot delete your own account');
+
+  const [team, openCalls, founders] = await Promise.all([
+    prisma.user.count({ where: { managerId: target.id, deletedAt: null } }),
+    prisma.call.count({ where: { status: { notIn: [...DONE_STATUSES] }, OR: [{ associateId: target.id }, { expertId: target.id }] } }),
+    target.role === 'founder' ? prisma.user.count({ where: { role: 'founder', deletedAt: null } }) : Promise.resolve(2),
+  ]);
+  if (team) throw conflict(`Move ${target.nickname}’s ${team === 1 ? 'Associate' : 'Associates'} to another Manager first`);
+  if (openCalls) throw conflict(`${target.nickname} still has ${openCalls} call${openCalls === 1 ? '' : 's'} to finish or hand over`);
+  if (founders < 2) throw conflict('The last Founder cannot be deleted');
+
+  const suffix = target.id.replace(/-/g, '').slice(0, 6);
+  await prisma.$transaction(async (tx) => {
+    // Erase everything that could sign them in or identify them.
+    await tx.authIdentity.deleteMany({ where: { userId: target.id } });
+    await tx.refreshToken.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: new Date() } });
+    await tx.webPushSubscription.deleteMany({ where: { userId: target.id } });
+    await tx.notification.deleteMany({ where: { userId: target.id } });
+    await tx.user.update({
+      where: { id: target.id },
+      data: {
+        deletedAt: new Date(),
+        isActive: false,
+        nickname: `Removed user ${suffix}`,
+        email: `deleted-${target.id}@deleted.invalid`,
+        passwordHash: await hashPassword(randomUUID()),
+        photoId: null,
+        managerId: null,
+      },
+    });
+    if (target.photoId) await tx.photo.deleteMany({ where: { id: target.photoId } });
+  });
+  disconnectUser(target.id);
+  res.status(204).end();
 });
 
 async function signInDetails(id: string): Promise<SignInDetailsDTO> {

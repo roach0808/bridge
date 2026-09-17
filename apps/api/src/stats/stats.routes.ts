@@ -135,9 +135,9 @@ statsRouter.get('/stats/associates', async (req, res) => {
   // Managers run calls too, so they have a row of their own.
   const where: Prisma.UserWhereInput =
     actor.role === 'founder'
-      ? { role: { in: ['associate', 'manager'] } }
+      ? { role: { in: ['associate', 'manager'] }, deletedAt: null }
       : actor.role === 'manager'
-        ? { OR: [{ role: 'associate', managerId: actor.id }, { id: actor.id }] }
+        ? { deletedAt: null, OR: [{ role: 'associate', managerId: actor.id }, { id: actor.id }] }
         : { id: actor.id };
   const associates = await prisma.user.findMany({
     where,

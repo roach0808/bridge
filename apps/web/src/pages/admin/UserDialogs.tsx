@@ -1,4 +1,5 @@
 import CheckRounded from '@mui/icons-material/CheckRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ContentCopyRounded from '@mui/icons-material/ContentCopyRounded';
 import {
   Alert,
@@ -34,6 +35,7 @@ import { DateTime } from 'luxon';
 import { useEffect, useState } from 'react';
 import { useMe } from '@/auth/AuthProvider';
 import { AvatarPicker } from '@/components/AvatarPicker';
+import { ConfirmDialog } from '@/components/common';
 import { RoleDot, UserAvatar } from '@/components/identity';
 import { TimeZoneSelect } from '@/components/TimeZoneSelect';
 import { useToast } from '@/components/ToastProvider';
@@ -478,6 +480,18 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
     },
   });
 
+  const [deleting, setDeleting] = useState(false);
+  const remove = useMutation({
+    mutationFn: (id: string) => api.users.remove(id),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.users.all });
+      void queryClient.invalidateQueries({ queryKey: qk.dashboard });
+      void queryClient.invalidateQueries({ queryKey: qk.stats.all });
+      toast.success('User deleted');
+      onClose();
+    },
+  });
+
   const current = user ?? target;
   if (!current) return null;
   const isSelf = current.id === me.id;
@@ -516,6 +530,14 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
       onSubmit={submit}
       error={general}
       maxWidth="xs"
+      secondaryAction={
+        me.role === 'founder' &&
+        !isSelf && (
+          <Button color="error" onClick={() => setDeleting(true)} startIcon={<DeleteOutlineRounded />}>
+            Delete user
+          </Button>
+        )
+      }
     >
       <TextField
         label="Nickname"
@@ -560,6 +582,21 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
         )}
       </Box>
       {me.role === 'founder' && <SignInSection userId={current.id} nickname={current.nickname} />}
+      <ConfirmDialog
+        open={deleting}
+        title={`Delete ${current.nickname}?`}
+        description={
+          <>
+            Their email, password, Google sign-in, devices and picture are erased, and they can never sign in again.
+            Their calls, messages and history stay, shown as a removed user. This cannot be undone.
+            {current.role === 'manager' && ' A Manager must have no Associates left on their team.'}
+          </>
+        }
+        confirmLabel="Delete user"
+        destructive
+        onClose={() => setDeleting(false)}
+        onConfirm={() => remove.mutateAsync(current.id)}
+      />
     </FormDialog>
   );
 }

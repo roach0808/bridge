@@ -78,6 +78,7 @@ grouped under Managers; they are assigned per Call.
 | Create Associate | ✓ | ✓ (own team) | | |
 | Create Expert | ✓ | | | |
 | Deactivate user | ✓ | ✓ (own team) | | |
+| Delete user | ✓ (not themselves) | | | |
 | Create / edit Platform | ✓ | ✓ | | |
 | Add Profile | ✓ (approved at once) | ✓ (pending until a Founder approves) | ✓ (pending until a Founder approves) | |
 | Edit Profile | ✓ | own pending or rejected submission | own pending or rejected submission (sends it back for review) | |
@@ -936,6 +937,8 @@ Response: { from, to, expert, canEditBlocks, calls, busy, occurrences, rules }.
 Profile responses carry `photoId`, and for the Founder `bankCount` and
 `needsBank` (null for everyone else).
 
+**[Implementation] Deleting a user.** `DELETE /users/:id` (Founder, audited) erases what identifies the account: email (replaced with an unusable one), password, Google link, sessions, push devices, notifications and picture; the nickname becomes "Removed user <id>" and the account is deactivated for good, freeing the old email and nickname. Their calls, chat messages, tasks, status history and audit entries stay and name the removed user. Refused for yourself, the last Founder, a Manager who still has Associates, and anyone with calls that are not finished.
+
 **[Implementation] Sign-in details (Founder).** `GET /users/:id/sign-in` (audited) returns { email, google }; `PATCH /users/:id/sign-in` { email } changes the sign-in email; `DELETE /users/:id/google` unlinks the Google account so the next Google sign-in links again by email. `GET /me/google` shows the caller's own link. These are the only endpoints besides /me and sign-in that return an email, and only to the Founder.
 
 ### 6.10 Dashboard **[Implementation]**
@@ -1452,3 +1455,4 @@ Container alternative:
 | 2026-09-17 | Sign in with Google: Google accounts link to existing users by their sign-in email the first time and by Google's account id afterwards; the Founder sees and edits a user's sign-in email and can unlink Google |
 | 2026-09-17 | Managers have every Associate function: they run calls themselves (as the call's Associate), add profiles for review, and see their own row in Statistics |
 | 2026-09-17 | Chat: delete your own messages for both people (a placeholder stays), paste, drop or attach pictures (shrunk in the browser, stored in the database), an emoji picker, and emoji reactions |
+| 2026-09-17 | Founders can delete a user account: everything personal is erased and the nickname freed, while the person's calls, messages and history stay as a removed user |

@@ -91,6 +91,8 @@ model User {
   email        String   @unique
   passwordHash String   @map("password_hash")
   isActive     Boolean  @default(true) @map("is_active")
+  /// Set when the Founder deleted the account. The person's work stays, shown as a removed user.
+  deletedAt    DateTime? @map("deleted_at") @db.Timestamptz(3)
   avatarId     String   @map("avatar_id")
   /// An uploaded picture; shown instead of the catalog avatar when set.
   photoId      String?  @unique @map("photo_id") @db.Uuid

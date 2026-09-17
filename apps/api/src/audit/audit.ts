@@ -140,6 +140,7 @@ const SUMMARIES: Record<string, string> = {
   'session.read': 'looked at signed-in devices',
   'user.create': 'created a user',
   'user.update': 'changed a user',
+  'user.delete': 'deleted a user account',
   'user.sign_in.read': 'looked at someone’s sign-in email and Google account',
   'user.sign_in.update': 'changed someone’s sign-in email',
   'user.google.delete': 'unlinked someone’s Google account',
