@@ -3,7 +3,7 @@ import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import { Box, MenuItem, TextField, Typography } from '@mui/material';
-import { ROLE_LABELS, type TodoDTO, type TodoSummary } from '@god/shared';
+import { ROLE_LABELS, type TodoDTO, type TodoSummary, type UserRef } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useToast } from '@/components/ToastProvider';
@@ -169,21 +169,21 @@ export function TodoReopenDialog({ todo, onClose }: { todo: TodoDTO | null; onCl
   );
 }
 
-/** A task that doesn't come from a chat message. */
-export function NewTaskDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** A task that doesn't come from a chat message. With `assignee` it is already decided who it is for. */
+export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assignee?: UserRef; onClose: () => void }) {
   const refresh = useRefreshTodos();
   const toast = useToast();
   const [assigneeId, setAssigneeId] = useState('');
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
-  const assignees = useQuery({ queryKey: [...qk.todos.all, 'assignees'], queryFn: api.todos.assignees, enabled: open });
+  const assignees = useQuery({ queryKey: [...qk.todos.all, 'assignees'], queryFn: api.todos.assignees, enabled: open && !assignee });
   useEffect(() => {
     if (open) {
-      setAssigneeId('');
+      setAssigneeId(assignee?.id ?? '');
       setTitle('');
       setDetails('');
     }
-  }, [open]);
+  }, [open, assignee?.id]);
 
   const mutation = useMutation({
     mutationFn: () => api.todos.create({ assigneeId, title: title.trim(), details: details.trim() || null }),
@@ -199,30 +199,32 @@ export function NewTaskDialog({ open, onClose }: { open: boolean; onClose: () =>
     <FormDialog
       open={open}
       onClose={onClose}
-      title="New task"
+      title={assignee ? `New task for ${assignee.nickname}` : 'New task'}
       icon={<AddTaskRounded />}
       submitLabel="Give task"
       pending={mutation.isPending}
       submitDisabled={!assigneeId || !title.trim()}
       onSubmit={() => mutation.mutate()}
     >
-      <TextField
-        select
-        required
-        label="For"
-        value={assigneeId}
-        onChange={(e) => setAssigneeId(e.target.value)}
-        helperText={assignees.data?.length === 0 ? 'There is nobody you can give tasks to yet.' : undefined}
-      >
-        {(assignees.data ?? []).map((u) => (
-          <MenuItem key={u.id} value={u.id}>
-            {u.nickname}
-            <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
-              {ROLE_LABELS[u.role]}
-            </Typography>
-          </MenuItem>
-        ))}
-      </TextField>
+      {!assignee && (
+        <TextField
+          select
+          required
+          label="For"
+          value={assigneeId}
+          onChange={(e) => setAssigneeId(e.target.value)}
+          helperText={assignees.data?.length === 0 ? 'There is nobody you can give tasks to yet.' : undefined}
+        >
+          {(assignees.data ?? []).map((u) => (
+            <MenuItem key={u.id} value={u.id}>
+              {u.nickname}
+              <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
+                {ROLE_LABELS[u.role]}
+              </Typography>
+            </MenuItem>
+          ))}
+        </TextField>
+      )}
       <TextField
         required
         label="Task"

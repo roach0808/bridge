@@ -562,6 +562,18 @@ export interface FinanceStats {
   byProfile: Array<{ profile: { id: string; name: string; isActive: boolean }; cell: FinanceCell }>;
 }
 
+/** One person's tasks on the task board. */
+export interface TodoPanel {
+  person: UserRef & { isActive: boolean };
+  /** True for the panel of the person looking at the board. */
+  isMe: boolean;
+  /** The caller may give this person tasks. */
+  canGive: boolean;
+  tasks: TodoDTO[];
+  /** Counts over all of this person's tasks, whatever the filter. */
+  counts: { open: number; done: number; completed: number };
+}
+
 /** Someone's presence, sent to the people who may chat with them. */
 export interface PresenceDTO {
   userId: string;

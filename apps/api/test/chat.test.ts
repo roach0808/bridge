@@ -271,6 +271,50 @@ describe('to-dos', () => {
   });
 });
 
+describe('the task board', () => {
+  const board = async (user: typeof fx.a1, query?: Record<string, unknown>) => (await (await as(user)).get('/todos/board', query)).body;
+
+  it('puts your own tasks first, then the people below you', async () => {
+    const founder = await as(fx.founder);
+    const m1 = await as(fx.m1);
+    await founder.post('/todos', { assigneeId: fx.m1.id, title: 'Plan the quarter' });
+    await m1.post('/todos', { assigneeId: fx.a1.id, title: 'Chase invoices' });
+    await founder.post('/todos', { assigneeId: fx.a1.id, title: 'Send the report' });
+
+    const managerBoard = await board(fx.m1);
+    expect(managerBoard.map((p: { person: { id: string }; isMe: boolean }) => [p.person.id, p.isMe])).toEqual([
+      [fx.m1.id, true],
+      [fx.a1.id, false],
+      [fx.a2.id, false],
+    ]);
+    expect(managerBoard[0].tasks.map((t: { title: string }) => t.title)).toEqual(['Plan the quarter']);
+    // An Associate's panel holds every task they were given, whoever gave it.
+    expect(managerBoard[1].tasks.map((t: { title: string }) => t.title).sort()).toEqual(['Chase invoices', 'Send the report']);
+    expect(managerBoard[1]).toMatchObject({ canGive: true, counts: { open: 2, done: 0, completed: 0 } });
+
+    const founderBoard = await board(fx.founder);
+    expect(founderBoard[0].person.id).toBe(fx.founder.id);
+    expect(founderBoard.some((p: { person: { id: string } }) => p.person.id === fx.e1.id)).toBe(true);
+    expect(founderBoard.find((p: { person: { id: string } }) => p.person.id === fx.m1.id).canGive).toBe(true);
+  });
+
+  it('an associate sees only their own panel, and the filter follows the status', async () => {
+    const founder = await as(fx.founder);
+    const a3 = await as(fx.a3);
+    const todo = (await founder.post('/todos', { assigneeId: fx.a3.id, title: 'Fix the photos' })).body;
+    await a3.post(`/todos/${todo.id}/done`);
+    await founder.post(`/todos/${todo.id}/confirm`);
+
+    const own = await board(fx.a3);
+    expect(own).toHaveLength(1);
+    expect(own[0]).toMatchObject({ isMe: true, canGive: false, tasks: [], counts: { open: 0, done: 0, completed: 1 } });
+    expect((await board(fx.a3, { status: 'completed' }))[0].tasks).toHaveLength(1);
+    expect((await board(fx.a3, { status: 'all' }))[0].tasks).toHaveLength(1);
+    // Experts have a panel of their own too.
+    expect((await board(fx.e1))).toHaveLength(1);
+  });
+});
+
 describe('tasks without a chat message', () => {
   it('a founder gives anyone a task; a manager only their own associates', async () => {
     const founder = await as(fx.founder);

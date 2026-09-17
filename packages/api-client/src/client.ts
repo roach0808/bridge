@@ -48,6 +48,7 @@ import type {
   FinanceStats,
   ProfileStatsRow,
   StatsPeriodKind,
+  TodoPanel,
 } from '@god/shared';
 import { HttpClient, type ClientOptions, type Query } from './http';
 
@@ -229,6 +230,8 @@ export function createApiClient(options: ClientOptions) {
     todos: {
       /** `active` (the default) leaves out completed tasks. */
       list: (query?: { scope?: 'assigned' | 'created'; status?: TodoStatus | 'active' | 'all' }) => get<TodoDTO[]>('/todos', query),
+      /** The task board: one panel per person, the caller first. */
+      board: (query?: { status?: TodoStatus | 'active' | 'all' }) => get<TodoPanel[]>('/todos/board', query),
       /** People the caller may give a task to. */
       assignees: () => get<UserRef[]>('/todos/assignees'),
       create: (input: { assigneeId: string; title: string; details?: string | null }) => post<TodoDTO>('/todos', input),

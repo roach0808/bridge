@@ -353,6 +353,10 @@ export const listTodosQuerySchema = z.object({
   /** `active` (the default) is everything not yet completed. */
   status: z.enum([...TODO_STATUSES, 'active', 'all']).default('active'),
 });
+/** The task board: one panel per person. */
+export const todoBoardQuerySchema = z.object({
+  status: z.enum([...TODO_STATUSES, 'active', 'all']).default('active'),
+});
 export const createTodoSchema = z.object({
   assigneeId: uuid,
   title: trimmed('Title', 200),

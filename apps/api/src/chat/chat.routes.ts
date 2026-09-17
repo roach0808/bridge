@@ -8,6 +8,7 @@ import {
   chatMessagesQuerySchema,
   listTodosQuerySchema,
   startConversationSchema,
+  todoBoardQuerySchema,
   todoDoneSchema,
   type ChatMessageDTO,
   type ChatMessagePage,
@@ -15,6 +16,7 @@ import {
   type Role,
   type ServerToClientEvents,
   type TodoDTO,
+  type TodoPanel,
   type TodoRemovedEvent,
   type TodoSummary,
 } from '@god/shared';
@@ -595,6 +597,61 @@ chatRouter.get('/todos', async (req, res) => {
     take: 500,
   });
   res.json(rows.map(toTodoDTO));
+});
+
+/**
+ * The task board: the caller's own tasks first, then a panel for each person below them
+ * (a Manager's Associates, everyone for the Founder). Each panel holds that person's tasks,
+ * whoever gave them.
+ */
+chatRouter.get('/todos/board', async (req, res) => {
+  const actor = actorOf(req);
+  const { status } = parseQuery(todoBoardQuerySchema, req);
+  const below =
+    actor.role === 'founder'
+      ? await prisma.user.findMany({
+          where: { deletedAt: null, id: { not: actor.id } },
+          select: { ...userRefSelect, isActive: true, managerId: true },
+          orderBy: [{ isActive: 'desc' }, { role: 'asc' }, { nickname: 'asc' }],
+        })
+      : actor.role === 'manager'
+        ? await prisma.user.findMany({
+            where: { deletedAt: null, role: 'associate', managerId: actor.id },
+            select: { ...userRefSelect, isActive: true, managerId: true },
+            orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
+          })
+        : [];
+  const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: { ...userRefSelect, isActive: true, managerId: true } });
+  const people = [me, ...below];
+
+  const rows = await prisma.todo.findMany({
+    where: {
+      assigneeId: { in: people.map((p) => p.id) },
+      ...(status === 'all' ? {} : status === 'active' ? { status: { in: ['open', 'done'] } } : { status }),
+    },
+    include: todoInclude,
+    orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    take: 1000,
+  });
+  const counts = await prisma.todo.groupBy({
+    by: ['assigneeId', 'status'],
+    where: { assigneeId: { in: people.map((p) => p.id) } },
+    _count: { _all: true },
+  });
+
+  const body: TodoPanel[] = people.map((person) => ({
+    person: { ...toUserRef(person), isActive: person.isActive },
+    isMe: person.id === actor.id,
+    canGive: canGiveTask(actor, asTaker(person)),
+    tasks: rows.filter((t) => t.assigneeId === person.id).map(toTodoDTO),
+    counts: {
+      open: counts.find((c) => c.assigneeId === person.id && c.status === 'open')?._count._all ?? 0,
+      done: counts.find((c) => c.assigneeId === person.id && c.status === 'done')?._count._all ?? 0,
+      completed: counts.find((c) => c.assigneeId === person.id && c.status === 'completed')?._count._all ?? 0,
+    },
+  }));
+  // Only people with tasks, plus everyone the caller may give tasks to.
+  res.json(body.filter((p) => p.isMe || p.canGive || p.tasks.length > 0));
 });
 
 /** The taker marks a task done. For a chat task this posts a reply to the task message. */

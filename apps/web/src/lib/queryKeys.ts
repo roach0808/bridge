@@ -44,6 +44,7 @@ export const qk = {
   },
   todos: {
     all: ['todos'] as const,
+    board: (status: string) => ['todos', 'board', status] as const,
     list: (params?: object) => ['todos', 'list', params ?? {}] as const,
   },
   stats: {
