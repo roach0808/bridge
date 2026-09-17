@@ -4,9 +4,9 @@ import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
-import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
+import VerifiedOutlined from '@mui/icons-material/VerifiedOutlined';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
-import { Box, Button, Card, Collapse, Divider, IconButton, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
+import { Box, Button, Card, Checkbox, Collapse, Divider, IconButton, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
 import { ROLE_LABELS, type TodoDTO, type TodoPanel, type UserRef } from '@god/shared';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
@@ -21,7 +21,7 @@ import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { formatDateTime, relativeTime } from '@/lib/time';
 import { FilterChips } from '../admin/adminShared';
-import { NewTaskDialog, TODO_COLORS, TodoDoneDialog, TodoPill, TodoReopenDialog, todoText, useRefreshTodos } from './todoShared';
+import { NewTaskDialog, TodoReopenDialog, todoText, useRefreshTodos } from './todoShared';
 
 /** `active` = not completed yet, the default view. */
 type Filter = 'active' | 'open' | 'done' | 'completed' | 'all';
@@ -39,7 +39,6 @@ export default function TodosPage() {
   const [params, setParams] = useSearchParams();
   const filter = (FILTERS.find((f) => f.value === params.get('filter'))?.value ?? 'active') as Filter;
   const [newTaskFor, setNewTaskFor] = useState<UserRef | null>(null);
-  const [doneFor, setDoneFor] = useState<TodoDTO | null>(null);
   const [reopenFor, setReopenFor] = useState<TodoDTO | null>(null);
 
   const query = useQuery({
@@ -87,17 +86,12 @@ export default function TodosPage() {
               panel={panel}
               filter={filter}
               onNewTask={() => setNewTaskFor(panel.person)}
-              onDone={setDoneFor}
               onReopen={setReopenFor}
             />
           ))}
         </Stack>
       )}
 
-      <TodoDoneDialog
-        todo={doneFor ? { id: doneFor.id, conversationId: doneFor.conversationId, instruction: todoText(doneFor) } : null}
-        onClose={() => setDoneFor(null)}
-      />
       <TodoReopenDialog todo={reopenFor} onClose={() => setReopenFor(null)} />
       <NewTaskDialog open={Boolean(newTaskFor)} assignee={newTaskFor ?? undefined} onClose={() => setNewTaskFor(null)} />
       {me.role !== 'expert' && panels.length === 0 && !query.isLoading && !query.isError && (
@@ -114,13 +108,11 @@ function PersonPanel({
   panel,
   filter,
   onNewTask,
-  onDone,
   onReopen,
 }: {
   panel: TodoPanel;
   filter: Filter;
   onNewTask: () => void;
-  onDone: (t: TodoDTO) => void;
   onReopen: (t: TodoDTO) => void;
 }) {
   const { person, counts, tasks, isMe } = panel;
@@ -177,7 +169,7 @@ function PersonPanel({
         ) : (
           <Stack divider={<Divider />}>
             {tasks.map((t) => (
-              <TaskRow key={t.id} todo={t} onDone={() => onDone(t)} onReopen={() => onReopen(t)} />
+              <TaskRow key={t.id} todo={t} onReopen={() => onReopen(t)} />
             ))}
           </Stack>
         )}
@@ -186,7 +178,11 @@ function PersonPanel({
   );
 }
 
-function TaskRow({ todo: t, onDone, onReopen }: { todo: TodoDTO; onDone: () => void; onReopen: () => void }) {
+/**
+ * One task on a single line: the taker's tick, the giver's tick, what it says,
+ * who gave it, and (once both ticked, or before it starts) a way to clear it away.
+ */
+function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void }) {
   const me = useMe();
   const { zone } = useAuth();
   const toast = useToast();
@@ -194,8 +190,17 @@ function TaskRow({ todo: t, onDone, onReopen }: { todo: TodoDTO; onDone: () => v
   const navigate = useNavigate();
   const iGave = t.createdBy.id === me.id;
   const mine = t.assignee.id === me.id;
-  const finished = t.status !== 'open';
+  const [expanded, setExpanded] = useState(false);
+  const text = todoText(t);
 
+  const done = useMutation({
+    mutationFn: () => api.todos.done(t.id),
+    onSuccess: (saved) => {
+      refresh(saved);
+      toast.success(saved.conversationId ? 'Marked done — your reply was posted in the chat' : 'Marked done');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
   const confirm = useMutation({
     mutationFn: () => api.todos.confirm(t.id),
     onSuccess: (saved) => {
@@ -212,86 +217,102 @@ function TaskRow({ todo: t, onDone, onReopen }: { todo: TodoDTO; onDone: () => v
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
+  const busy = done.isPending || confirm.isPending || remove.isPending;
+  const canDelete = iGave && (t.status === 'open' || t.status === 'completed');
 
   return (
-    <Stack
-      direction={{ xs: 'column', sm: 'row' }}
-      spacing={1.5}
-      justifyContent="space-between"
-      alignItems={{ sm: 'flex-start' }}
-      sx={{ p: 2, borderLeft: 3, borderLeftColor: TODO_COLORS[t.status], opacity: t.status === 'completed' ? 0.75 : 1 }}
-    >
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-          <TodoPill todo={t} />
-          <Tooltip title={formatDateTime(t.createdAt, zone)}>
-            <Typography variant="caption" color="text.secondary">
-              {relativeTime(t.createdAt)}
-            </Typography>
-          </Tooltip>
-        </Stack>
-        <Typography
-          variant="body1"
-          sx={{
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-            fontWeight: t.title ? 600 : 400,
-            textDecoration: t.status === 'completed' ? 'line-through' : 'none',
-            color: finished ? 'text.secondary' : 'text.primary',
-          }}
+    <Box sx={{ px: 1, py: 0.25, bgcolor: t.status === 'completed' ? 'action.hover' : undefined }}>
+      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minHeight: 40 }}>
+        <Tooltip title={t.status === 'open' ? (mine ? 'Tick when you have finished it' : `Waiting for ${t.assignee.nickname}`) : `Done ${t.doneAt ? relativeTime(t.doneAt) : ''}`}>
+          <span>
+            <Checkbox
+              size="small"
+              checked={t.status !== 'open'}
+              disabled={!mine || t.status !== 'open' || busy}
+              onChange={() => done.mutate()}
+              inputProps={{ 'aria-label': `Mark “${text}” done` }}
+              sx={{ p: 0.5 }}
+            />
+          </span>
+        </Tooltip>
+        <Tooltip
+          title={
+            t.status === 'completed'
+              ? `Confirmed ${t.confirmedAt ? relativeTime(t.confirmedAt) : ''}`
+              : iGave
+                ? t.status === 'done'
+                  ? 'Confirm it is really done'
+                  : 'Your tick, once they mark it done'
+                : `${t.createdBy.nickname} confirms it`
+          }
         >
-          {todoText(t)}
-        </Typography>
-        {t.details && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-            {t.details}
+          <span>
+            <Checkbox
+              size="small"
+              color="success"
+              checked={t.status === 'completed'}
+              disabled={!iGave || t.status !== 'done' || busy}
+              onChange={() => confirm.mutate()}
+              icon={<VerifiedOutlined fontSize="small" />}
+              checkedIcon={<VerifiedRounded fontSize="small" />}
+              inputProps={{ 'aria-label': `Confirm “${text}”` }}
+              sx={{ p: 0.5 }}
+            />
+          </span>
+        </Tooltip>
+
+        <Box sx={{ minWidth: 0, flex: 1, cursor: t.details || t.doneNote ? 'pointer' : 'default' }} onClick={() => setExpanded((e) => !e)}>
+          <Typography
+            variant="body2"
+            noWrap={!expanded}
+            title={text}
+            sx={{
+              fontWeight: t.title ? 550 : 400,
+              textDecoration: t.status === 'completed' ? 'line-through' : 'none',
+              color: t.status === 'completed' ? 'text.secondary' : 'text.primary',
+              whiteSpace: expanded ? 'pre-wrap' : 'nowrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {text}
           </Typography>
-        )}
-        {finished && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Done {t.doneAt ? relativeTime(t.doneAt) : ''}
-            {t.doneNote ? ` — “${t.doneNote}”` : ''}
-            {t.confirmedAt ? ` · confirmed ${relativeTime(t.confirmedAt)}` : ''}
+          <Typography variant="caption" color="text.secondary" noWrap component="div">
+            {iGave ? 'by you' : `by ${t.createdBy.nickname}`} ·{' '}
+            <Tooltip title={formatDateTime(t.createdAt, zone)}>
+              <span>{relativeTime(t.createdAt)}</span>
+            </Tooltip>
+            {t.doneNote ? ` · “${t.doneNote}”` : ''}
+            {t.details && !expanded ? ' · details' : ''}
           </Typography>
-        )}
-        <Box sx={{ mt: 1 }}>
-          <Stack direction="row" spacing={0.75} alignItems="center">
-            {!iGave && <UserAvatar avatarId={t.createdBy.avatarId} photoId={t.createdBy.photoId} label={t.createdBy.nickname} size={20} />}
-            <Typography variant="caption" color="text.secondary">
-              Given by {iGave ? 'you' : t.createdBy.nickname}
-            </Typography>
-          </Stack>
         </Box>
-      </Box>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ flexShrink: 0 }}>
-        {t.status === 'open' && mine && (
-          <Button variant="contained" color="success" size="small" startIcon={<TaskAltRounded />} onClick={onDone}>
-            Mark done
-          </Button>
-        )}
-        {t.status === 'done' && iGave && (
-          <Button variant="contained" color="success" size="small" startIcon={<VerifiedRounded />} onClick={() => confirm.mutate()} disabled={confirm.isPending}>
-            Confirm
-          </Button>
-        )}
-        {finished && iGave && (
-          <Button size="small" color="inherit" startIcon={<ReplayRounded />} onClick={onReopen} sx={{ color: 'text.secondary' }}>
-            Reopen
-          </Button>
-        )}
-        {t.status === 'open' && iGave && (
-          <Button size="small" color="inherit" startIcon={<DeleteOutlineRounded />} onClick={() => remove.mutate()} disabled={remove.isPending} sx={{ color: 'text.secondary' }}>
-            Remove
-          </Button>
-        )}
+
         {t.conversationId && (
           <Tooltip title="Open the chat">
             <IconButton size="small" onClick={() => navigate(`/chat/${t.conversationId}`)} aria-label="Open the chat">
-              <ChatBubbleOutlineRounded fontSize="small" />
+              <ChatBubbleOutlineRounded sx={{ fontSize: 17 }} />
+            </IconButton>
+          </Tooltip>
+        )}
+        {iGave && t.status !== 'open' && (
+          <Tooltip title="Reopen: send it back">
+            <IconButton size="small" onClick={onReopen} aria-label={`Reopen “${text}”`}>
+              <ReplayRounded sx={{ fontSize: 17 }} />
+            </IconButton>
+          </Tooltip>
+        )}
+        {canDelete && (
+          <Tooltip title={t.status === 'completed' ? 'Delete this finished task' : 'Delete this task'}>
+            <IconButton size="small" onClick={() => remove.mutate()} disabled={busy} aria-label={`Delete “${text}”`}>
+              <DeleteOutlineRounded sx={{ fontSize: 17 }} />
             </IconButton>
           </Tooltip>
         )}
       </Stack>
-    </Stack>
+      {expanded && t.details && (
+        <Typography variant="body2" color="text.secondary" sx={{ pl: 5.5, pb: 1, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {t.details}
+        </Typography>
+      )}
+    </Box>
   );
 }

@@ -360,6 +360,15 @@ describe('tasks without a chat message', () => {
     expect((await m1.get('/todos', { scope: 'created' })).body).toEqual([]);
     expect((await a1.get('/todos', { status: 'completed' })).body).toHaveLength(1);
     expect((await a1.get('/todos', { status: 'all' })).body).toHaveLength(1);
+    // A completed task can be cleared away; one still waiting for confirmation cannot.
+    expect((await m1.delete(`/todos/${todo.id}`)).status).toBe(204);
+    expect((await a1.get('/todos', { status: 'all' })).body).toEqual([]);
+  });
+
+  it('a task waiting for confirmation cannot be removed', async () => {
+    const m1 = await as(fx.m1);
+    const todo = (await m1.post('/todos', { assigneeId: fx.a1.id, title: 'Send the weekly report' })).body;
+    await (await as(fx.a1)).post(`/todos/${todo.id}/done`);
     expectError(await m1.delete(`/todos/${todo.id}`), 409);
   });
 

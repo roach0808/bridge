@@ -987,7 +987,7 @@ Associates from before this rule) stays readable, with `canSend: false`.
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
 | GET | /todos/assignees | Founder, Manager | People the caller may give a task to |
 | POST | /todos | Founder, Manager | { assigneeId, title, details? }: a task without a chat message |
-| DELETE | /todos/:id | the giver | Removes an open task |
+| DELETE | /todos/:id | the giver | Removes a task that is open, or completed and no longer needed. 409 while it waits for confirmation |
 | GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (a Manager's Associates; everyone for the Founder). Each panel: the person, whether the caller may give them tasks, their tasks (whoever gave them) and counts. Query: status as below |
 | GET | /todos | giver or taker | Query: scope = assigned (default) \| created (Founders and Managers), status = active (default: open + done) \| open \| done \| completed \| all. Open first |
 | POST | /todos/:id/done | the taker | { note? }. open → done; for a chat task posts a `todo_done` reply (body = note or "Done"). The giver gets `todo.done` |
@@ -1164,7 +1164,7 @@ Everyone sees whether the people they may chat with are at their screen.
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
 | Profiles | all | Cards with a details window (personal details, history; platform statuses for everyone but Experts; for the Founder a private section with the current address and banks). Founders add profiles (approved at once), review Associate submissions, upload photos, manage banks, deactivate a Profile ("Needs bank" and "Deactivated" filters) and by default see a table of every Profile against every platform, editable in place. Associates submit profiles for review. Experts see the Profiles of their calls |
 | Chat | all | Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
-| Tasks | all | One panel per person: your own tasks first, then the people below you (a Manager's Associates; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person; rows carry "Mark done", "Confirm", "Reopen", "Remove" and a link to the chat. Panels with nothing in them start folded |
+| Tasks | all | One panel per person: your own tasks first, then the people below you (a Manager's Associates; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person. A task is one line: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Panels with nothing in them start folded |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create, deactivate |
 | Users | Founder | All users, create any role |
@@ -1458,3 +1458,4 @@ Container alternative:
 | 2026-09-17 | Chat: delete your own messages for both people (a placeholder stays), paste, drop or attach pictures (shrunk in the browser, stored in the database), an emoji picker, and emoji reactions |
 | 2026-09-17 | Founders can delete a user account: everything personal is erased and the nickname freed, while the person's calls, messages and history stay as a removed user |
 | 2026-09-17 | Tasks are shown as one panel per person (your own first, then the people below you) instead of "Given by me" and "Assigned to me" tabs |
+| 2026-09-17 | A task is one compact line with two tick boxes (the taker's and the giver's); the giver can delete a completed task |

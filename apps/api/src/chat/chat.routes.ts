@@ -511,10 +511,11 @@ chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
   res.status(201).json(dto);
 });
 
-/** The giver takes back a task that is still open. */
+/** The giver removes a task: an open one, or a completed one they no longer need. */
 async function removeTodo(actor: Actor, t: { id: string; status: string; createdById: string; assigneeId: string; conversationId: string | null; messageId: string | null }) {
   if (t.createdById !== actor.id) throw forbidden('Only the person who gave the task can remove it');
-  if (t.status !== 'open') throw conflict('Only an open task can be removed');
+  // Before it starts, or once both sides have ticked it off; not while it waits for confirmation.
+  if (t.status === 'done') throw conflict('Confirm or reopen this task before removing it');
   await prisma.todo.delete({ where: { id: t.id } });
   emitTodo(t, { id: t.id, conversationId: t.conversationId, messageId: t.messageId, removed: true });
 }
