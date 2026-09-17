@@ -42,27 +42,20 @@ import { NotificationBell } from './NotificationBell';
 
 const DRAWER_WIDTH = 240;
 
+/** The signed-in person at the top of the sidebar. */
 function Brand() {
+  const me = useMe();
   return (
-    <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 2.25, height: 60 }}>
-      <Box
-        sx={{
-          width: 28,
-          height: 28,
-          borderRadius: 2,
-          display: 'grid',
-          placeItems: 'center',
-          bgcolor: 'primary.main',
-          color: 'primary.contrastText',
-          fontWeight: 700,
-          fontSize: 14,
-        }}
-      >
-        G
+    <Stack direction="row" spacing={1.25} alignItems="center" sx={{ px: 2.25, height: 60, minWidth: 0 }}>
+      <UserAvatar avatarId={me.avatarId} photoId={me.photoId} label={me.nickname} size={30} />
+      <Box sx={{ minWidth: 0 }}>
+        <Typography fontWeight={650} letterSpacing="-0.01em" noWrap title={me.nickname} sx={{ lineHeight: 1.25 }}>
+          {me.nickname}
+        </Typography>
+        <Typography variant="caption" color="text.secondary" noWrap component="div" sx={{ lineHeight: 1.2 }}>
+          {ROLE_LABELS[me.role]}
+        </Typography>
       </Box>
-      <Typography fontWeight={650} letterSpacing="-0.01em">
-        God System
-      </Typography>
     </Stack>
   );
 }
