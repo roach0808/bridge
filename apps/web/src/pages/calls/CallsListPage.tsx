@@ -20,6 +20,7 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tooltip,
   TextField,
   Typography,
   useMediaQuery,
@@ -46,7 +47,7 @@ import { UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
-import { countdown, formatRange, inZone, relativeTime, soon, zoneAbbr } from '@/lib/time';
+import { countdown, formatRange, inZone, relativeTime, soon, whenAndLength, zoneAbbr } from '@/lib/time';
 import { CallCard } from './CallCard';
 
 function useDebounced<T>(value: T, ms = 300): T {
@@ -358,9 +359,11 @@ export default function CallsListPage() {
                         <Typography variant="body2" fontWeight={soon(c.scheduledAt) ? 600 : 400}>
                           {countdown(c.scheduledAt)}
                         </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {start.toFormat('ccc, LLL d')} · {formatRange(c.scheduledAt, c.endsAt, zone)} · {c.durationMinutes}m
-                        </Typography>
+                        <Tooltip title={`${start.toFormat('cccc, LLL d')} · ${formatRange(c.scheduledAt, c.endsAt, zone)}`}>
+                          <Typography variant="caption" color="text.secondary">
+                            {whenAndLength(c.scheduledAt, zone, c.durationMinutes)}
+                          </Typography>
+                        </Tooltip>
                       </TableCell>
                       <TableCell>
                         <UserChip user={c.associate} size={24} showRole={false} />

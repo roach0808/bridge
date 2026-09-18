@@ -42,10 +42,23 @@ export function whenLabel(iso: string, zone: string): string {
   const relative = at.toRelative({ style: 'long' }) ?? '';
   const daysAway = Math.abs(at.diffNow('days').days);
   // Beyond a week "in 2 months" stops being useful, so the date leads instead.
-  if (daysAway >= 7) return `${formatDateTime(iso, zone)} · ${relative}`;
-  const when = daysAway < 1 ? inZone(iso, zone).toFormat('h:mm a') : inZone(iso, zone).toFormat('ccc h:mm a');
-  return `${relative} · ${when}`;
+  if (daysAway >= 7) return `${dayLabel(iso, zone)} ${timeOfDay(iso, zone)} · ${relative}`;
+  return `${relative} · ${dayLabel(iso, zone)} ${timeOfDay(iso, zone)}`;
 }
+
+/** "8 PM" on the hour, "8:30 PM" otherwise. */
+export const timeOfDay = (iso: string, zone: string) => inZone(iso, zone).toFormat(inZone(iso, zone).minute ? 'h:mm a' : 'h a');
+
+/** "30 min", "1 hr", "1.5 hr": a call's length as people say it. */
+export function durationLabel(minutes: number): string {
+  if (minutes < 60) return `${minutes} min`;
+  const hours = minutes / 60;
+  return `${Number.isInteger(hours) ? hours : hours.toFixed(1)} hr`;
+}
+
+/** "Today 8 PM · 1 hr": when a call is, in plain words. */
+export const whenAndLength = (iso: string, zone: string, minutes: number) =>
+  `${dayLabel(iso, zone)} ${timeOfDay(iso, zone)} · ${durationLabel(minutes)}`;
 
 /** "in 3 hours", "in 2 days", "8 hours ago": how soon something is, on its own. */
 export function countdown(iso: string): string {

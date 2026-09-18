@@ -61,7 +61,7 @@ import { api, socket } from '@/lib/api';
 import { errorMessage, fieldErrors, isApiError } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { patchCallInCache } from '@/realtime/RealtimeProvider';
-import { formatDateTime, formatUsd, inZone, relativeTime, soon, whenLabel, zoneAbbr, zoneCity } from '@/lib/time';
+import { durationLabel, formatDateTime, formatUsd, inZone, relativeTime, soon, timeOfDay, whenLabel, zoneAbbr, zoneCity } from '@/lib/time';
 import { useCallOwners } from './callOwners';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertAvailability';
 import { MessageThread } from './MessageThread';
@@ -963,7 +963,7 @@ export default function CallDetailPage() {
                   </Typography>
                   <Tooltip title={formatDateTime(call.scheduledAt, zone)}>
                     <Typography variant="body2" fontWeight={soon(call.scheduledAt) ? 600 : 400}>
-                      {whenLabel(call.scheduledAt, zone)} · {call.durationMinutes} min
+                      {whenLabel(call.scheduledAt, zone)} · {durationLabel(call.durationMinutes)}
                     </Typography>
                   </Tooltip>
                   {money && (
@@ -1011,7 +1011,7 @@ export default function CallDetailPage() {
               </Field>
               <Field label="Platform">{call.platform.name}</Field>
               <Field label="Duration">
-                {call.durationMinutes} minutes · ends {inZone(call.endsAt, zone).toFormat('h:mm a')}
+                {durationLabel(call.durationMinutes)} · ends {timeOfDay(call.endsAt, zone)}
               </Field>
               {expertZone && expertZone !== zone && (
                 <Field label={`Expert's local time (${zoneCity(expertZone)})`}>
