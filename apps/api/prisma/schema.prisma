@@ -435,6 +435,8 @@ model ProfileBank {
   country       String?  @db.Char(2)
   currency      String?  @db.Char(3)
   notes         String?
+  /// A closed account is kept for history but no longer counts as a way to pay the Profile.
+  isActive      Boolean  @default(true) @map("is_active")
   isPrimary     Boolean  @default(false) @map("is_primary")
   createdById   String   @map("created_by") @db.Uuid
   createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(3)

@@ -117,3 +117,29 @@ describe('reactions', () => {
     expectError(await (await as(fx.a1)).post(`/chat/messages/${msg.id}/reactions`, { emoji: '👍' }), 404);
   });
 });
+
+describe('erasing a chat history', () => {
+  it('clears every message and picture for both people, but keeps the tasks', async () => {
+    const { ca, cb, id } = await chat(fx.founder, fx.a1);
+    const msg = (await send(ca, id, { body: 'Send me the Q3 report' })).body;
+    await send(ca, id, { image });
+    await ca.post(`/chat/messages/${msg.id}/todo`);
+    await cb.post(`/chat/messages/${msg.id}/reactions`, { emoji: '👍' });
+
+    expect((await cb.delete(`/chat/conversations/${id}/history`)).status).toBe(204);
+    expect(await prisma.chatMessage.count({ where: { conversationId: id } })).toBe(0);
+    expect(await prisma.chatImage.count({ where: { conversationId: id } })).toBe(0);
+    expect(await prisma.chatReaction.count()).toBe(0);
+    expect((await ca.get(`/chat/conversations/${id}/messages`)).body.items).toEqual([]);
+    // The chat drops off both lists until someone writes again.
+    expect((await ca.get('/chat/conversations')).body).toEqual([]);
+
+    // The task lives on, with the message's words as its title.
+    const todo = (await ca.get('/todos', { scope: 'created' })).body[0];
+    expect(todo).toMatchObject({ title: 'Send me the Q3 report', conversationId: null, message: null, status: 'open' });
+    expect((await (await as(fx.a1)).post(`/todos/${todo.id}/done`)).status).toBe(200);
+
+    expect((await send(ca, id, { body: 'Fresh start' })).status).toBe(201);
+    expectError(await (await as(fx.m1)).delete(`/chat/conversations/${id}/history`), 404);
+  });
+});

@@ -32,7 +32,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { useAuth } from '@/auth/AuthProvider';
-import { EmptyState, ErrorState, PageHeader } from '@/components/common';
+import { ConfirmDialog, EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
 import { useToast } from '@/components/ToastProvider';
@@ -110,6 +110,11 @@ export default function InvoicingPage() {
   const eligible = next ? selectedRows.filter((c) => c.allowedTransitions.includes(next)) : [];
   // The API refuses to invoice a call whose Profile has no rate yet.
   const withoutRate = next === 'invoice_submit' ? eligible.filter((c) => c.expectedPrice === null) : [];
+  // Money invoiced now has to be paid somewhere later, so flag Profiles with no open bank account.
+  const profiles = useQuery({ queryKey: qk.profiles.list({ scope: 'invoicing' }), queryFn: () => api.profiles.list(), staleTime: 60_000 });
+  const noBank = new Set((profiles.data ?? []).filter((p) => (p.bankCount ?? 1) === 0).map((p) => p.id));
+  const withoutBank = next === 'invoice_submit' ? eligible.filter((c) => noBank.has(c.profile.id)) : [];
+  const [bankWarning, setBankWarning] = useState(false);
 
   const changeTab = (status: InvoiceStatus) => {
     setTab(status);
@@ -172,13 +177,28 @@ export default function InvoicingPage() {
   };
 
   const requestMove = () => {
-    if (next === 'process_to_bank') setPaying(eligible);
+    if (withoutBank.length > 0) setBankWarning(true);
+    else if (next === 'process_to_bank') setPaying(eligible);
     else void runMove();
   };
 
   return (
     <Box>
       <PageHeader title="Invoicing" subtitle="Move finished calls through to payment, and record what reached the bank." />
+
+      <ConfirmDialog
+        open={bankWarning}
+        title="Invoice without bank details?"
+        description={`${withoutBank.length} of these calls ${withoutBank.length === 1 ? 'is' : 'are'} for a Profile with no open bank account (${[
+          ...new Set(withoutBank.map((c) => c.profile.name)),
+        ].join(', ')}). You can invoice now, but there will be nowhere to pay them until a bank account is added.`}
+        confirmLabel="Invoice anyway"
+        onClose={() => setBankWarning(false)}
+        onConfirm={() => {
+          setBankWarning(false);
+          void runMove();
+        }}
+      />
 
       <Grid container spacing={2} sx={{ mb: 3 }}>
         {STAGES.map((s) => {
@@ -266,6 +286,16 @@ export default function InvoicingPage() {
                         <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main' }} />
                         <Typography variant="caption" color="text.secondary">
                           {withoutRate.length} without a rate
+                        </Typography>
+                      </Stack>
+                    </Tooltip>
+                  )}
+                  {withoutBank.length > 0 && (
+                    <Tooltip title="These Profiles have no open bank account, so there is nowhere to pay them">
+                      <Stack direction="row" spacing={0.75} alignItems="center">
+                        <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'error.main' }} />
+                        <Typography variant="caption" color="text.secondary">
+                          {withoutBank.length} without a bank
                         </Typography>
                       </Stack>
                     </Tooltip>

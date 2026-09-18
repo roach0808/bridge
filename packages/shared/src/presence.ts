@@ -4,8 +4,8 @@ export type PresenceStatus = (typeof PRESENCE_STATUSES)[number];
 
 export const PRESENCE_LABELS: Record<PresenceStatus, string> = {
   online: 'Online',
-  // Still on the platform, just idle: shown as online, with the reason in the tooltip.
-  away: 'Online (idle)',
+  // Still on the platform, just idle: shown exactly like online.
+  away: 'Online',
   offline: 'Offline',
 };
 

@@ -480,6 +480,8 @@ export const bankSchema = z.object({
   country: optionalCode(2, 'Use a two-letter country code'),
   currency: optionalCode(3, 'Use a three-letter currency code'),
   notes: optionalText(1000),
+  /** A closed account stays on file but no longer counts as a way to pay. */
+  isActive: z.boolean().default(true),
   isPrimary: z.boolean().default(false),
 });
 export const updateBankSchema = bankSchema.partial();

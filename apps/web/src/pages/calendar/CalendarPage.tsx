@@ -41,6 +41,7 @@ import {
   formatDuration,
   loadClientZone,
   loadView,
+  isPastSlot,
   newCallHref,
   parseAnchor,
   rangeLabel,
@@ -247,6 +248,8 @@ export default function CalendarPage() {
     } else if (selectMode === 'choice') {
       setGridSelection(sel);
       setChoice({ start, end, point });
+    } else if (isPastSlot(start)) {
+      toast.error('That time has passed — pick a later slot');
     } else {
       navigate(newCallHref(start, minutes, subject.type === 'expert' ? subject.id : null));
     }
@@ -597,13 +600,20 @@ export default function CalendarPage() {
         slotProps={{ paper: { sx: { minWidth: 240 } } }}
       >
         {choice && (
-          <MenuItem onClick={() => navigate(newCallHref(choice.start, choice.end.diff(choice.start, 'minutes').minutes, selectedExpert?.id))}>
+          <MenuItem
+            disabled={isPastSlot(choice.start)}
+            onClick={() => navigate(newCallHref(choice.start, choice.end.diff(choice.start, 'minutes').minutes, selectedExpert?.id))}
+          >
             <ListItemIcon>
               <VideoCallRounded fontSize="small" />
             </ListItemIcon>
             <ListItemText
               primary="Schedule a call"
-              secondary={`${callDurationFor(choice.end.diff(choice.start, 'minutes').minutes)} min from ${choice.start.toFormat('h:mm a')}`}
+              secondary={
+                isPastSlot(choice.start)
+                  ? 'That time has passed'
+                  : `${callDurationFor(choice.end.diff(choice.start, 'minutes').minutes)} min from ${choice.start.toFormat('h:mm a')}`
+              }
             />
           </MenuItem>
         )}

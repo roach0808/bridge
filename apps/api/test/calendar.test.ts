@@ -43,9 +43,11 @@ describe('GET /calendar privacy', () => {
     expect(res.body.calls[0]).toMatchObject({ platform: { name: 'GLG' }, profile: { name: 'Dana Approved' }, associate: { id: fx.a1.id } });
     expect(res.body.busy).toEqual([
       { startsAt: '2027-02-01T12:00:00.000Z', endsAt: '2027-02-01T12:30:00.000Z' },
+      // Still being scheduled: shown as taken, but marked as it may yet move.
+      { startsAt: '2027-02-01T14:00:00.000Z', endsAt: '2027-02-01T15:00:00.000Z', tentative: true },
       { startsAt: '2027-02-02T09:00:00.000Z', endsAt: '2027-02-02T09:45:00.000Z' },
     ]);
-    for (const b of res.body.busy) expect(Object.keys(b).sort()).toEqual(['endsAt', 'startsAt']);
+    for (const b of res.body.busy) expect(Object.keys(b).sort()).toEqual(['endsAt', 'startsAt', ...(b.tentative ? ['tentative'] : [])].sort());
     expect(res.body.rules).toEqual([]);
     expect(res.body.occurrences).toEqual([
       expect.objectContaining({ date: '2027-02-01', startsAt: '2027-02-01T01:00:00Z', kind: 'unavailable' }),
@@ -56,10 +58,10 @@ describe('GET /calendar privacy', () => {
     }
   });
 
-  it('on_scheduling calls of others appear neither in calls nor busy', async () => {
+  it('on_scheduling calls of others show as tentative busy time, without their details', async () => {
     const w = await seedExpertWeek();
     const res = await calendarOf(await as(fx.a1), fx.e1.id);
-    expect(res.body.busy.some((b: { startsAt: string }) => b.startsAt.startsWith('2027-02-01T14'))).toBe(false);
+    expect(res.body.busy.find((b: { startsAt: string }) => b.startsAt.startsWith('2027-02-01T14'))).toMatchObject({ tentative: true });
     expect(res.text).not.toContain(w.c3.id);
   });
 
@@ -151,7 +153,8 @@ describe('GET /calendar/experts', () => {
     const col = res.body.experts[0];
     expect(Object.keys(col).sort()).toEqual(['busy', 'calls', 'expert', 'occurrences', 'slot']);
     expect(ids(col.calls)).toEqual([w.c1.id]);
-    expect(col.busy).toHaveLength(2);
+    expect(col.busy).toHaveLength(3);
+    expect(col.busy.filter((b: { tentative?: boolean }) => b.tentative)).toHaveLength(1);
     expect(col.occurrences).toHaveLength(1);
     expect(ids(res.body.experts[1].calls)).toEqual([w.other.id]);
     expect(res.text).not.toContain('private-block-note');

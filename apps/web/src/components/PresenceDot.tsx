@@ -1,6 +1,6 @@
 import { Box, Tooltip } from '@mui/material';
 import { PRESENCE_LABELS, type PresenceStatus } from '@god/shared';
-import { usePresence } from '@/realtime/PresenceProvider';
+import { usePresence, usePresenceKnown } from '@/realtime/PresenceProvider';
 import { relativeTime } from '@/lib/time';
 
 /** On the platform: blue. Away from it: grey, with the last-seen time. */
@@ -10,16 +10,18 @@ export const PRESENCE_COLORS: Record<PresenceStatus, string> = {
   offline: '#9aa0a6',
 };
 
-/** "Online", "Away", or "Last seen 10 minutes ago". */
+/** "Online" or "Last seen 10 minutes ago". */
 export function presenceLabel({ status, lastSeenAt }: { status: PresenceStatus; lastSeenAt: string | null }): string {
   if (status !== 'offline') return PRESENCE_LABELS[status];
   return lastSeenAt ? `Last seen ${relativeTime(lastSeenAt)}` : 'Offline';
 }
 
-/** A small status dot, sized to sit on the corner of an avatar. */
+/** A small status dot, sized to sit on the corner of an avatar. Nothing for people we know nothing about. */
 export function PresenceDot({ userId, size = 10, ring = true }: { userId: string; size?: number; ring?: boolean }) {
   const presence = usePresence(userId);
+  const known = usePresenceKnown(userId);
   const label = presenceLabel(presence);
+  if (!known) return null;
   return (
     <Tooltip title={label}>
       <Box

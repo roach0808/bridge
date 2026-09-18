@@ -33,6 +33,18 @@ export function relativeTime(iso: string): string {
   return DateTime.fromISO(iso).toRelative({ style: 'short' }) ?? '';
 }
 
+/**
+ * How far off a call is when that is what matters: "in 8 hours", "3 hours ago",
+ * and the full date and time once it is more than a day away.
+ */
+export function whenLabel(iso: string, zone: string): string {
+  const at = DateTime.fromISO(iso);
+  const hoursAway = Math.abs(at.diffNow('hours').hours);
+  if (hoursAway >= 24) return formatDateTime(iso, zone);
+  const relative = at.toRelative({ style: 'long' }) ?? '';
+  return `${relative} · ${inZone(iso, zone).toFormat('h:mm a')}`;
+}
+
 /** "Today", "Tomorrow", "Yesterday", or "Mon, Sep 15" in the zone. */
 export function dayLabel(iso: string, zone: string): string {
   const d = inZone(iso, zone).startOf('day');

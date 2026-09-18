@@ -6,6 +6,7 @@ import { Avatar, Box, Stack, Typography, type SvgIconProps } from '@mui/material
 import { ROLE_LABELS, type Role, type UserRef } from '@god/shared';
 import type { ComponentType } from 'react';
 import { avatarUrl, photoUrl } from '@/lib/api';
+import { PresenceDot } from '@/components/PresenceDot';
 import { ROLE_COLORS } from '@/theme/theme';
 
 export const ROLE_ICONS: Record<Role, ComponentType<SvgIconProps>> = {
@@ -22,6 +23,8 @@ export function UserAvatar({
   label,
   ring,
   src,
+  userId,
+  dotSize,
 }: {
   avatarId: string | null | undefined;
   /** An uploaded picture wins over the catalog avatar. */
@@ -32,8 +35,11 @@ export function UserAvatar({
   ring?: string;
   /** Overrides everything, e.g. a not-yet-saved upload preview. */
   src?: string;
+  /** A user's id puts their online dot on the avatar; Profile pictures have none. */
+  userId?: string;
+  dotSize?: number;
 }) {
-  return (
+  const avatar = (
     <Avatar
       src={src ?? (photoId ? photoUrl(photoId) : avatarId ? avatarUrl(avatarId) : undefined)}
       alt={label ?? ''}
@@ -49,6 +55,15 @@ export function UserAvatar({
     >
       {label?.[0]?.toUpperCase()}
     </Avatar>
+  );
+  if (!userId) return avatar;
+  return (
+    <Box sx={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+      {avatar}
+      <Box sx={{ position: 'absolute', right: -1, bottom: -1, display: 'flex' }}>
+        <PresenceDot userId={userId} size={dotSize ?? Math.max(8, Math.round(size * 0.3))} />
+      </Box>
+    </Box>
   );
 }
 
@@ -102,7 +117,7 @@ export function UserChip({
   }
   return (
     <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-      <UserAvatar avatarId={user.avatarId} photoId={user.photoId} size={size} label={user.nickname} />
+      <UserAvatar avatarId={user.avatarId} photoId={user.photoId} size={size} label={user.nickname} userId={user.id} />
       <Box sx={{ minWidth: 0 }}>
         <Stack direction="row" spacing={0.75} alignItems="center">
           <Typography variant="body2" fontWeight={550} noWrap>

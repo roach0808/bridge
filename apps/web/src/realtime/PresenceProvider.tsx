@@ -56,7 +56,7 @@ function useReportActivity(enabled: boolean) {
  * people the viewer may chat with (§7.6).
  */
 export function PresenceProvider({ children }: { children: ReactNode }) {
-  const { status: authStatus } = useAuth();
+  const { status: authStatus, user } = useAuth();
   const enabled = authStatus === 'authenticated';
   const [live, setLive] = useState<Map<string, Presence>>(new Map());
 
@@ -89,12 +89,15 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
     if (!enabled) setLive(new Map());
   }, [enabled]);
 
+  const meId = user?.id;
   const value = useMemo(() => {
     const map = new Map<string, Presence>();
     for (const p of initial.data ?? []) map.set(p.userId, { status: p.status, lastSeenAt: p.lastSeenAt });
     for (const [id, p] of live) map.set(id, p);
+    // You are looking at the screen, so you are on the platform.
+    if (meId) map.set(meId, { status: 'online', lastSeenAt: null });
     return map;
-  }, [initial.data, live]);
+  }, [initial.data, live, meId]);
 
   return <PresenceContext.Provider value={value}>{children}</PresenceContext.Provider>;
 }
@@ -103,4 +106,10 @@ export function PresenceProvider({ children }: { children: ReactNode }) {
 export function usePresence(userId: string | null | undefined): Presence {
   const map = useContext(PresenceContext);
   return (userId && map.get(userId)) || OFFLINE;
+}
+
+/** False for people the server tells us nothing about, so no dot is shown for them. */
+export function usePresenceKnown(userId: string | null | undefined): boolean {
+  const map = useContext(PresenceContext);
+  return Boolean(userId && map.has(userId));
 }

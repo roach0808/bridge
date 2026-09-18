@@ -389,7 +389,7 @@ export function TimeGrid({
                             <CallBlock call={ev.call} zone={zone} heightPx={hPx} tint={ev.tint} onOpen={onOpenCall} />
                           )}
                           {ev.type === 'busy' && (
-                            <BusyBlock start={ev.busy.startsAt} end={ev.busy.endsAt} zone={zone} heightPx={hPx} />
+                            <BusyBlock start={ev.busy.startsAt} end={ev.busy.endsAt} zone={zone} heightPx={hPx} tentative={ev.busy.tentative} />
                           )}
                           {ev.type === 'timeoff' && (
                             <TimeOffBlock

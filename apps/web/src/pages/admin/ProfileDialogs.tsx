@@ -56,16 +56,16 @@ const emptyForm = (): ProfileForm => ({
 });
 
 /**
- * Create (Founder) or edit a profile. When `resubmit` is set the author is
- * editing their own older submission, which sends it back for review.
+ * The profile form, shared by the "Add profile" dialog and the profile page.
+ * With `resubmit` the author is editing their own older submission, which sends it back for review.
  */
-export function ProfileDialog({
-  open,
+export function useProfileForm({
+  open = true,
   profile,
   resubmit,
   onClose,
 }: {
-  open: boolean;
+  open?: boolean;
   profile: ProfileDTO | null;
   resubmit?: boolean;
   onClose: () => void;
@@ -166,18 +166,8 @@ export function ProfileDialog({
     if (Object.keys(clientErrors).length === 0) mutation.mutate(form);
   };
 
-  return (
-    <FormDialog
-      open={open}
-      onClose={onClose}
-      title={profile ? 'Edit profile' : 'Add profile'}
-      subtitle={profile ? profile.name : isFounder ? 'New profiles are approved immediately.' : 'A Founder reviews it before it can be used for calls.'}
-      icon={profile ? <EditRounded /> : <PersonAddAlt1Rounded />}
-      submitLabel={profile ? (resubmit ? 'Save & resubmit' : 'Save changes') : isFounder ? 'Add profile' : 'Submit for review'}
-      pending={mutation.isPending}
-      onSubmit={submit}
-      error={general}
-    >
+  const fields = (
+    <>
       {resubmit && (
         <Alert severity="info" variant="outlined">
           Saving sends this profile back to the Founder for review.
@@ -377,6 +367,37 @@ export function ProfileDialog({
       <FormSection label="Illustration" hint="Used when there is no photo" error={errors.avatarId}>
         <AvatarPicker audience="profile" value={form.avatarId} onChange={(id) => set('avatarId', id)} size={48} />
       </FormSection>
+    </>
+  );
+
+  return {
+    fields,
+    submit,
+    pending: mutation.isPending,
+    general,
+    isFounder,
+    title: profile ? 'Edit profile' : 'Add profile',
+    subtitle: profile ? profile.name : isFounder ? 'New profiles are approved immediately.' : 'A Founder reviews it before it can be used for calls.',
+    submitLabel: profile ? (resubmit ? 'Save & resubmit' : 'Save changes') : isFounder ? 'Add profile' : 'Submit for review',
+  };
+}
+
+/** The same form in a dialog, for adding a profile from the list. */
+export function ProfileDialog(props: { open: boolean; profile: ProfileDTO | null; resubmit?: boolean; onClose: () => void }) {
+  const form = useProfileForm(props);
+  return (
+    <FormDialog
+      open={props.open}
+      onClose={props.onClose}
+      title={form.title}
+      subtitle={form.subtitle}
+      icon={props.profile ? <EditRounded /> : <PersonAddAlt1Rounded />}
+      submitLabel={form.submitLabel}
+      pending={form.pending}
+      onSubmit={form.submit}
+      error={form.general}
+    >
+      {form.fields}
     </FormDialog>
   );
 }

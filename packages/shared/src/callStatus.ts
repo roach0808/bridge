@@ -84,6 +84,17 @@ export function isBlockingStatus(status: CallStatus): boolean {
 /** Statuses at or after `scheduled` that require an expert. */
 export const EXPERT_REQUIRED_STATUSES = BLOCKING_STATUSES;
 
+/**
+ * Whose move it is: the statuses where a role is the one holding the call up.
+ * Managers carry the scheduling steps for the Associates they oversee, as well as their own.
+ */
+export const WAITING_STATUSES: Record<Role, readonly CallStatus[]> = {
+  founder: ['finished', 'invoice_submit', 'invoice_approve'],
+  manager: ['on_scheduling', 'on_rescheduling'],
+  associate: ['on_scheduling', 'on_rescheduling'],
+  expert: ['scheduled', 'confirmed', 'ongoing'],
+};
+
 export const CALL_DURATIONS = [15, 30, 45, 60] as const;
 export type CallDuration = (typeof CALL_DURATIONS)[number];
 

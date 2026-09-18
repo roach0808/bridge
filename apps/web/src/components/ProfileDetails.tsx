@@ -240,7 +240,7 @@ function TextBlock({ label, text }: { label: string; text: string | null }) {
   );
 }
 
-function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
+export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
   const isFounder = useMe().role === 'founder';
   const [banksOpen, setBanksOpen] = useState(false);
   const dash = <Typography component="span" variant="body2" color="text.disabled">—</Typography>;

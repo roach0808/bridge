@@ -5,6 +5,7 @@ import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRound
 import AddPhotoAlternateOutlined from '@mui/icons-material/AddPhotoAlternateOutlined';
 import AddReactionOutlined from '@mui/icons-material/AddReactionOutlined';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
+import DeleteSweepOutlined from '@mui/icons-material/DeleteSweepOutlined';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EmojiEmotionsOutlined from '@mui/icons-material/EmojiEmotionsOutlined';
@@ -13,7 +14,6 @@ import SendRounded from '@mui/icons-material/SendRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import {
-  Badge,
   Box,
   Button,
   Card,
@@ -59,7 +59,6 @@ import { inZone } from '@/lib/time';
 import { usePresence } from '@/realtime/PresenceProvider';
 import { appendChatMessage, replaceChatMessage } from '@/realtime/RealtimeProvider';
 import { ChatImage, EmojiPickerPopover, QuickReactionBar, ReactionChips, useReact } from './chatExtras';
-import { ROLE_COLORS } from '@/theme/theme';
 import { SearchField, useIsPhone } from '../admin/adminShared';
 import { TODO_COLORS, TodoDoneDialog, TodoPill, useRefreshTodos } from '../todos/todoShared';
 
@@ -167,7 +166,20 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [picking, setPicking] = useState(false);
+  const [menu, setMenu] = useState<{ conversation: ConversationDTO; anchor: HTMLElement } | null>(null);
+  const [clearing, setClearing] = useState<ConversationDTO | null>(null);
   const conversations = useQuery({ queryKey: qk.chat.conversations, queryFn: api.chat.conversations });
+
+  const clearHistory = useMutation({
+    mutationFn: (id: string) => api.chat.clearHistory(id),
+    onSuccess: (_result, id) => {
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+      void queryClient.resetQueries({ queryKey: qk.chat.messages(id) });
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+      setClearing(null);
+      toast.success('Chat history cleared');
+    },
+  });
 
   const start = useMutation({
     mutationFn: (userId: string) => api.chat.start(userId),
@@ -221,12 +233,17 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
         ) : (
           <List disablePadding>
             {rows.map((c) => (
-              <ListItemButton key={c.id} selected={c.id === activeId} onClick={() => onOpen(c.id)} sx={{ py: 1.25, px: 2, gap: 1.5, alignItems: 'flex-start' }}>
-                <Badge color="primary" variant="dot" invisible={!c.unreadCount} overlap="circular">
+              <ListItemButton
+                key={c.id}
+                selected={c.id === activeId}
+                onClick={() => onOpen(c.id)}
+                sx={{ py: 1.25, px: 2, gap: 1.5, alignItems: 'flex-start', '&:hover .chat-menu': { opacity: 1 } }}
+              >
+                <Box>
                   <PresenceBadge userId={c.other.id}>
                     <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={40} />
                   </PresenceBadge>
-                </Badge>
+                </Box>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Stack direction="row" alignItems="center" spacing={0.75}>
                     <Typography variant="body2" fontWeight={c.unreadCount ? 700 : 600} noWrap sx={{ flex: 1, minWidth: 0 }}>
@@ -239,7 +256,6 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                     )}
                   </Stack>
                   <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mt: 0.25 }}>
-                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: ROLE_COLORS[c.other.role], flexShrink: 0 }} />
                     <Typography variant="caption" color={c.unreadCount ? 'text.primary' : 'text.secondary'} noWrap sx={{ flex: 1, minWidth: 0 }}>
                       {previewOf(c, me.id)}
                     </Typography>
@@ -255,11 +271,46 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                     )}
                   </Stack>
                 </Box>
+                <IconButton
+                  className="chat-menu"
+                  size="small"
+                  aria-label={`Options for the chat with ${c.other.nickname}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenu({ conversation: c, anchor: e.currentTarget });
+                  }}
+                  sx={{ alignSelf: 'center', opacity: { xs: 1, md: 0 }, transition: 'opacity .15s' }}
+                >
+                  <MoreVertRounded sx={{ fontSize: 18 }} />
+                </IconButton>
               </ListItemButton>
             ))}
           </List>
         )}
       </Box>
+      <Menu anchorEl={menu?.anchor ?? null} open={Boolean(menu)} onClose={() => setMenu(null)}>
+        <MenuItem
+          onClick={() => {
+            setClearing(menu?.conversation ?? null);
+            setMenu(null);
+          }}
+          sx={{ color: 'error.main' }}
+        >
+          <DeleteSweepOutlined fontSize="small" sx={{ mr: 1.25 }} />
+          Clear chat history
+        </MenuItem>
+      </Menu>
+      <ConfirmDialog
+        open={Boolean(clearing)}
+        title={`Clear the chat with ${clearing?.other.nickname ?? ''}?`}
+        description={`Every message and picture in this chat is erased for you and ${clearing?.other.nickname ?? 'them'}. Tasks that came from it are kept. This cannot be undone.`}
+        confirmLabel="Clear history"
+        destructive
+        onClose={() => setClearing(null)}
+        onConfirm={async () => {
+          if (clearing) await clearHistory.mutateAsync(clearing.id);
+        }}
+      />
       <NewChatDialog open={picking} onClose={() => setPicking(false)} onPick={(u) => start.mutate(u.id)} />
     </Card>
   );

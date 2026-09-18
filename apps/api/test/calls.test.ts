@@ -97,6 +97,28 @@ describe('POST /calls', () => {
     expectError(await founder.post('/calls', body()), 400, 'validation_error');
   });
 
+  it('a call cannot be booked in the past, or moved there', async () => {
+    const a1 = await as(fx.a1);
+    expectError(await a1.post('/calls', body({ scheduledAt: '2020-01-01T10:00:00Z' })), 400, 'validation_error');
+    const call = (await a1.post('/calls', body())).body;
+    expectError(await a1.patch(`/calls/${call.id}`, { scheduledAt: '2020-01-01T10:00:00Z' }), 400, 'validation_error');
+    // Five minutes of slack covers a slow form.
+    const justNow = new Date(Date.now() - 60_000).toISOString();
+    expect((await a1.patch(`/calls/${call.id}`, { scheduledAt: justNow })).status).toBe(200);
+  });
+
+  it('counts the calls waiting on each role, for the sidebar badge', async () => {
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'on_scheduling' });
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled', scheduledAt: '2027-03-02T09:00:00Z' });
+    await makeCall(fx, { associate: fx.a3, expert: fx.e2, status: 'finished', scheduledAt: '2027-03-03T09:00:00Z' });
+    const waiting = async (user: typeof fx.a1) => (await (await as(user)).get('/calls/waiting')).body.count;
+    expect(await waiting(fx.a1)).toBe(1); // one to schedule
+    expect(await waiting(fx.e1)).toBe(1); // one to confirm
+    expect(await waiting(fx.founder)).toBe(1); // one to invoice
+    expect(await waiting(fx.m1)).toBe(1); // scheduling steps across every associate
+    expect(await waiting(fx.a2)).toBe(0);
+  });
+
   it('expert cannot create calls', async () => {
     expectError(await (await as(fx.e1)).post('/calls', body()), 403);
   });

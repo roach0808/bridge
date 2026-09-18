@@ -17,12 +17,13 @@ const toBankDTO = (b: Prisma.ProfileBankGetPayload<object>): BankDTO => ({
   country: b.country,
   currency: b.currency,
   notes: b.notes,
+  isActive: b.isActive,
   isPrimary: b.isPrimary,
   createdAt: iso(b.createdAt),
   updatedAt: iso(b.updatedAt),
 });
 
-const bankOrder: Prisma.ProfileBankOrderByWithRelationInput[] = [{ isPrimary: 'desc' }, { createdAt: 'asc' }];
+const bankOrder: Prisma.ProfileBankOrderByWithRelationInput[] = [{ isActive: 'desc' }, { isPrimary: 'desc' }, { createdAt: 'asc' }];
 
 /** Keeps exactly one primary bank whenever a profile has any. */
 async function settlePrimary(tx: Tx, profileId: string, primaryId?: string) {

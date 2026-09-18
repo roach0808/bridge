@@ -84,7 +84,7 @@ export const profileFounderCounts = {
   addresses: { select: { id: true, label: true, address: true }, orderBy: { sortOrder: 'asc' } },
   _count: {
     select: {
-      banks: true,
+      banks: { where: { isActive: true } },
       calls: { where: { status: { in: [...BLOCKING_STATUSES] } } },
     },
   },

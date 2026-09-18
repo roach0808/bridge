@@ -8,6 +8,7 @@ export const qk = {
     all: ['calls'] as const,
     list: (params: ListCallsParams) => ['calls', 'list', params] as const,
     detail: (id: string) => ['calls', 'detail', id] as const,
+    waiting: ['calls', 'waiting'] as const,
     messages: (id: string) => ['calls', 'messages', id] as const,
   },
   calendar: {

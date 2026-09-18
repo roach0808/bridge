@@ -899,6 +899,13 @@ export default function CallDetailPage() {
 
   const expertZone = call.expert?.timeZone ?? null;
   const perms = call.permissions;
+  // Once a call is finished the expected price matters; once it is paid, what really arrived.
+  const money =
+    me.role === 'expert' || call.expectedPrice === null
+      ? null
+      : call.realIncome !== null
+        ? { label: `Real income ${formatUsd(call.realIncome)}`, hint: 'What reached the bank', color: 'success.main' }
+        : { label: `Expected ${formatUsd(call.expectedPrice)}`, hint: 'Rate × the call’s real duration', color: 'text.primary' };
 
   return (
     <>

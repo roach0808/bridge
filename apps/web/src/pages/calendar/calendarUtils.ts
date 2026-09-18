@@ -174,6 +174,9 @@ export function callDurationFor(minutes: number): number {
   return minutes >= 60 ? 60 : best;
 }
 
+/** A call can only be booked ahead of time, so past slots are not offered. */
+export const isPastSlot = (start: DateTime) => start.toMillis() < Date.now();
+
 export function newCallHref(start: DateTime, minutes: number, expertId?: string | null): string {
   const params = new URLSearchParams();
   if (expertId) params.set('expertId', expertId);

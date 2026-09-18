@@ -146,6 +146,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (message.deleted) void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
     };
 
+    const onChatCleared = ({ conversationId }: { conversationId: string }) => {
+      void queryClient.resetQueries({ queryKey: qk.chat.messages(conversationId) });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(conversationId) });
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+    };
+
     const onChatRead = (event: ChatReadEvent) => {
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(event.conversationId) });
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
@@ -170,6 +177,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('chat:todo', onChatTodo);
     socket.on('chat:read', onChatRead);
     socket.on('chat:message-updated', onChatMessageUpdated);
+    socket.on('chat:cleared', onChatCleared);
     if (socket.connected) setConnected(true);
 
     return () => {
@@ -182,6 +190,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('chat:todo', onChatTodo);
       socket.off('chat:read', onChatRead);
       socket.off('chat:message-updated', onChatMessageUpdated);
+      socket.off('chat:cleared', onChatCleared);
     };
   }, [queryClient, status, meId]);
 

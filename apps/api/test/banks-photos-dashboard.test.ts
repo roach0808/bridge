@@ -113,9 +113,20 @@ describe('profile banks', () => {
     const mine = (await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`)).body;
     expect(mine).toMatchObject({ bankCount: null, needsBank: null });
 
-    await founder.post(`/profiles/${fx.approvedProfile.id}/banks`, bankBody());
+    const bank = (await founder.post(`/profiles/${fx.approvedProfile.id}/banks`, bankBody())).body;
+    expect(bank.isActive).toBe(true);
     profile = (await founder.get(`/profiles/${fx.approvedProfile.id}`)).body;
     expect(profile).toMatchObject({ bankCount: 1, needsBank: false });
+
+    // A closed account stays on file but no longer counts: the Profile needs a bank again.
+    const closed = await founder.patch(`/banks/${bank.id}`, { isActive: false });
+    expect(closed.body.isActive).toBe(false);
+    profile = (await founder.get(`/profiles/${fx.approvedProfile.id}`)).body;
+    expect(profile).toMatchObject({ bankCount: 0, needsBank: true });
+    expect((await founder.get(`/profiles/${fx.approvedProfile.id}/banks`)).body).toHaveLength(1);
+
+    expect((await founder.patch(`/banks/${bank.id}`, { isActive: true })).body.isActive).toBe(true);
+    expect((await founder.get(`/profiles/${fx.approvedProfile.id}`)).body).toMatchObject({ bankCount: 1, needsBank: false });
   });
 });
 

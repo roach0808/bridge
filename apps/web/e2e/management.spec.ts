@@ -70,9 +70,9 @@ test('Founder creates a user and approves a pending profile', async ({ browser }
 
   const pending = (await api.get('/profiles?status=pending')) as Array<{ id: string; name: string }>;
   test.skip(pending.length === 0, 'No pending profile in the seed data');
-  await page.goto('/profiles');
-  const card = page.locator('.MuiCard-root', { hasText: pending[0]!.name });
-  await card.getByRole('button', { name: 'Approve' }).click();
+  // The profile opens on its own page, where the Founder approves it.
+  await page.goto(`/profiles/${pending[0]!.id}`);
+  await page.getByRole('button', { name: 'Approve' }).click();
   await expect
     .poll(async () => (await api.get(`/profiles/${pending[0]!.id}`)).status, { timeout: 20_000 })
     .toBe('approved');

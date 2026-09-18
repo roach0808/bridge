@@ -217,7 +217,10 @@ function SingleDayList({
           );
         }
         if (ev.type === 'busy') {
-          return <EventPill key={ev.key} kind="busy" title={`${time} Busy`} tooltip="Busy" />;
+          {
+            const word = ev.busy.tentative ? 'Being scheduled' : 'Busy';
+            return <EventPill key={ev.key} kind="busy" title={`${time} ${word}`} tooltip={word} />;
+          }
         }
         const title = timeOffTitle(ev.occurrence.blockId ? notes?.get(ev.occurrence.blockId) : null);
         return (

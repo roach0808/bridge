@@ -373,6 +373,40 @@ chatRouter.post('/chat/conversations/:id/read', async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * Erases the whole history with someone, for both of them: every message, picture and
+ * reaction. Tasks that came from this chat are kept, each with the message's words as its title.
+ */
+chatRouter.delete('/chat/conversations/:id/history', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadConversation(actor, idParam(req));
+  await prisma.$transaction(async (tx) => {
+    const todos = await tx.todo.findMany({
+      where: { conversationId: c.id },
+      select: { id: true, title: true, message: { select: { body: true } } },
+    });
+    for (const todo of todos) {
+      await tx.todo.update({
+        where: { id: todo.id },
+        data: {
+          title: todo.title ?? clip(todo.message?.body.trim() || 'Task', 200),
+          messageId: null,
+          conversationId: null,
+          doneMessageId: null,
+        },
+      });
+    }
+    await tx.chatMessage.deleteMany({ where: { conversationId: c.id } });
+    await tx.chatImage.deleteMany({ where: { conversationId: c.id } });
+    await tx.conversation.update({
+      where: { id: c.id },
+      data: { lastMessageAt: null, userALastReadAt: null, userBLastReadAt: null },
+    });
+  });
+  emitToBoth(c, 'chat:cleared', { conversationId: c.id });
+  res.status(204).end();
+});
+
 /** A chat picture, for the two people in the chat only. */
 chatRouter.get('/chat/images/:id', async (req, res) => {
   const actor = actorOf(req);

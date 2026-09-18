@@ -23,14 +23,14 @@ export interface NavItem {
   roles: Role[];
   section: 'work' | 'admin' | 'account';
   /** A live count shown next to the label. */
-  badge?: 'chat' | 'todos';
+  badge?: 'chat' | 'todos' | 'calls';
 }
 
 const ALL: Role[] = ['founder', 'manager', 'associate', 'expert'];
 
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Dashboard', icon: DashboardRounded, roles: ALL, section: 'work' },
-  { to: '/calls', label: 'Calls', icon: PhoneInTalkRounded, roles: ALL, section: 'work' },
+  { to: '/calls', label: 'Calls', icon: PhoneInTalkRounded, roles: ALL, section: 'work', badge: 'calls' },
   { to: '/calendar', label: 'Calendar', icon: CalendarMonthRounded, roles: ALL, section: 'work' },
   { to: '/chat', label: 'Chat', icon: ChatRounded, roles: ALL, section: 'work', badge: 'chat' },
   { to: '/todos', label: 'Tasks', icon: ChecklistRounded, roles: ALL, section: 'work', badge: 'todos' },

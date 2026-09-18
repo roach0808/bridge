@@ -171,18 +171,32 @@ export function CallBlock({
   );
 }
 
-export function BusyBlock({ start, end, zone, heightPx }: { start: string; end: string; zone: string; heightPx: number }) {
+export function BusyBlock({
+  start,
+  end,
+  zone,
+  heightPx,
+  tentative,
+}: {
+  start: string;
+  end: string;
+  zone: string;
+  heightPx: number;
+  /** A call someone is still scheduling: the slot may yet move. */
+  tentative?: boolean;
+}) {
+  const word = tentative ? 'Being scheduled' : 'Busy';
   return (
     <BlockShell
       accent={(t) => t.alpha(pal(t).text.primary, 0.25)}
       background={(t) => `${hatch(t)}, ${t.alpha(pal(t).text.primary, 0.04)}`}
-      label={`Busy ${formatRange(start, end, zone)}`}
-      tooltip={`Busy · ${formatRange(start, end, zone)}`}
+      label={`${word} ${formatRange(start, end, zone)}`}
+      tooltip={`${word} · ${formatRange(start, end, zone)}`}
     >
       <Stack direction="row" spacing={0.5} alignItems="center" sx={{ color: 'text.secondary', minWidth: 0 }}>
         <BlockRounded sx={{ fontSize: 12 }} />
         <Typography variant="caption" noWrap sx={{ fontWeight: 600, fontSize: 11, flexShrink: 0 }}>
-          Busy
+          {word}
         </Typography>
         {heightPx >= 30 && (
           <Typography className="cal-sub" variant="caption" noWrap sx={{ fontSize: 11, minWidth: 0 }}>

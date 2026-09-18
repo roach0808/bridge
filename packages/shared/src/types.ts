@@ -121,6 +121,7 @@ export interface ProfileDTO {
    */
   platformStatuses: ProfilePlatformStatusDTO[] | null;
   /** Founder only (null for others): how many banks the Profile has. */
+  /** Accounts that can still be paid into. */
   bankCount: number | null;
   /** Founder only: the Profile has a booked call but no bank. */
   needsBank: boolean | null;
@@ -283,6 +284,8 @@ export interface ExpertRef extends UserRef {
 export interface BusyInterval {
   startsAt: string;
   endsAt: string;
+  /** A call that is still being scheduled: it may yet move. */
+  tentative?: boolean;
 }
 
 export interface CalendarCall {
@@ -375,6 +378,8 @@ export interface BankDTO {
   country: string | null;
   currency: string | null;
   notes: string | null;
+  /** False once the account is closed: kept on file, but the Profile needs another one. */
+  isActive: boolean;
   isPrimary: boolean;
   createdAt: string;
   updatedAt: string;
@@ -630,6 +635,8 @@ export interface ServerToClientEvents {
   'chat:read': (event: ChatReadEvent) => void;
   /** A message changed: deleted, or its reactions. */
   'chat:message-updated': (message: ChatMessageDTO) => void;
+  /** Every message in a chat was erased by one of the two people. */
+  'chat:cleared': (event: { conversationId: string }) => void;
   'presence:update': (presence: PresenceDTO[]) => void;
   'user:typing': (payload: { callId: string; userId: string; nickname: string }) => void;
   'session:revoked': () => void;

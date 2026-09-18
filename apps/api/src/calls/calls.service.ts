@@ -82,6 +82,13 @@ async function assertActiveUser(id: string, role: 'associate' | 'expert', field:
   return user;
 }
 
+/** A call is booked for the future; a few minutes of slack covers a slow form. */
+function assertNotInThePast(scheduledAt: string) {
+  if (new Date(scheduledAt).getTime() < Date.now() - 5 * 60_000) {
+    throw badRequest('Choose a time in the future', { issues: [{ path: 'scheduledAt', message: 'That time has passed' }] });
+  }
+}
+
 /**
  * Who may run a call (be its Associate): an active Associate, or an active Manager.
  * A Manager chooses themselves or any Associate.
@@ -191,6 +198,7 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
     await assertCallOwner(actor, input.associateId);
     associateId = input.associateId;
   }
+  assertNotInThePast(input.scheduledAt);
   if (input.expertId) await assertActiveUser(input.expertId, 'expert', 'expertId');
 
   const [platform, profile] = await Promise.all([
@@ -290,6 +298,9 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     if (!exists) throw badRequest('Choose a platform', { issues: [{ path: 'platformId', message: 'Unknown platform' }] });
   }
 
+  if (input.scheduledAt !== undefined && new Date(input.scheduledAt).getTime() !== current.scheduledAt.getTime()) {
+    assertNotInThePast(input.scheduledAt);
+  }
   // The Expert confirmed a specific time: moving it needs their confirmation again.
   const timeChanged =
     (input.scheduledAt !== undefined && new Date(input.scheduledAt).getTime() !== current.scheduledAt.getTime()) ||

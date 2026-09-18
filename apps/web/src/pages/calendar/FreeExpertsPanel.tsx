@@ -6,7 +6,7 @@ import { useMemo, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { UserAvatar } from '@/components/identity';
 import { expertColor } from '@/theme/theme';
-import { CONFLICT_LABELS, callDurationFor, conflictsFor, formatDuration, newCallHref } from './calendarUtils';
+import { CONFLICT_LABELS, callDurationFor, conflictsFor, formatDuration, isPastSlot, newCallHref } from './calendarUtils';
 
 export interface RangeSelection {
   start: DateTime;
@@ -87,6 +87,7 @@ export function FreeExpertsPanel({
                 variant="outlined"
                 color="inherit"
                 startIcon={<AddRounded />}
+                disabled={isPastSlot(selection.start)}
                 onClick={() => navigate(newCallHref(selection.start, minutes, col.expert.id))}
               >
                 Schedule

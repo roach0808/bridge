@@ -126,8 +126,11 @@ async function buildExpertCalendars(
   for (const call of calls) {
     const entry = result.get(call.expertId!)!;
     if (visibleIds.has(call.id)) entry.calls.push(toCalendarCall(call, actor));
+    // Everyone sees that a slot is taken, including calls still being scheduled.
     else if ((BLOCKING_STATUSES as string[]).includes(call.status))
       entry.busy.push({ startsAt: iso(call.scheduledAt), endsAt: iso(call.endsAt) });
+    else if (call.status === 'on_scheduling')
+      entry.busy.push({ startsAt: iso(call.scheduledAt), endsAt: iso(call.endsAt), tentative: true });
   }
 
   const fromIso = from.toISOString();

@@ -1,5 +1,6 @@
 import {
   FEATURES,
+  WAITING_STATUSES,
   createCallSchema,
   listCallsQuerySchema,
   messageSchema,
@@ -17,7 +18,7 @@ import { idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import { emitToCall } from '../realtime/hub';
 import { historyInclude, messageInclude, toHistoryDTO, toMessageDTO } from '../serializers';
-import { visibleHistoryWhere } from './calls.access';
+import { visibleCallsWhere, visibleHistoryWhere } from './calls.access';
 import {
   createCall,
   getCallDetail,
@@ -37,6 +38,15 @@ callsRouter.get('/calls', async (req, res) => {
 
 callsRouter.post('/calls', async (req, res) => {
   res.status(201).json(await createCall(actorOf(req), parseBody(createCallSchema, req)));
+});
+
+/** How many calls are held up at the caller's own step (§9.3), for the sidebar badge. */
+callsRouter.get('/calls/waiting', async (req, res) => {
+  const actor = actorOf(req);
+  const count = await prisma.call.count({
+    where: { AND: [visibleCallsWhere(actor), { status: { in: [...WAITING_STATUSES[actor.role]] } }] },
+  });
+  res.json({ count });
 });
 
 callsRouter.get('/calls/:id', async (req, res) => {

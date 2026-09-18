@@ -193,6 +193,8 @@ export function createApiClient(options: ClientOptions) {
     calls: {
       list: (query?: ListCallsParams) => get<Paginated<CallDTO>>('/calls', query),
       get: (id: string) => get<CallDetailDTO>(`/calls/${enc(id)}`),
+      /** How many calls are held up at the caller's own step. */
+      waiting: () => get<{ count: number }>('/calls/waiting'),
       create: (body: CreateCallInput) => post<CallDTO>('/calls', body),
       update: (id: string, body: UpdateCallInput) => patch<CallDTO>(`/calls/${enc(id)}`, body),
       /** `ongoing` needs `ninjaLink`; `finished` needs `actualDurationMinutes` and `rating`. */
@@ -223,6 +225,8 @@ export function createApiClient(options: ClientOptions) {
       /** A chat picture as a blob (it needs your token, so an <img> cannot load it directly). */
       image: async (imageId: string) => (await http.download(`/chat/images/${enc(imageId)}`)).blob,
       markRead: (id: string) => post<void>(`/chat/conversations/${enc(id)}/read`),
+      /** Erases every message and picture in the chat, for both people. Tasks are kept. */
+      clearHistory: (id: string) => del<void>(`/chat/conversations/${enc(id)}/history`),
       makeTodo: (messageId: string) => post<TodoDTO>(`/chat/messages/${enc(messageId)}/todo`),
       removeTodo: (messageId: string) => del<void>(`/chat/messages/${enc(messageId)}/todo`),
     },

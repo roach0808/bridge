@@ -13,7 +13,8 @@ const NewCallPage = lazy(() => import('@/pages/calls/NewCallPage'));
 const CalendarPage = lazy(() => import('@/pages/calendar/CalendarPage'));
 const ChatPage = lazy(() => import('@/pages/chat/ChatPage'));
 const TodosPage = lazy(() => import('@/pages/todos/TodosPage'));
-const ProfilesPage = lazy(() => import('@/pages/admin/ProfilesPage'));
+const ProfilesPage = lazy(() => import('@/pages/profiles/ProfilesPage'));
+const ProfileDetailPage = lazy(() => import('@/pages/profiles/ProfileDetailPage'));
 const PlatformsPage = lazy(() => import('@/pages/admin/PlatformsPage'));
 const TeamPage = lazy(() => import('@/pages/admin/TeamPage'));
 const UsersPage = lazy(() => import('@/pages/admin/UsersPage'));
@@ -74,6 +75,7 @@ export const router = createBrowserRouter([
           { path: 'stats', element: <Page roles={['founder', 'manager', 'associate']}><StatsPage /></Page> },
           { path: 'invoicing', element: <Page roles={['founder']}><InvoicingPage /></Page> },
           { path: 'profiles', element: <Page><ProfilesPage /></Page> },
+          { path: 'profiles/:id', element: <Page><ProfileDetailPage /></Page> },
           { path: 'platforms', element: <Page roles={['founder', 'manager']}><PlatformsPage /></Page> },
           { path: 'team', element: <Page roles={['manager']}><TeamPage /></Page> },
           { path: 'users', element: <Page roles={['founder']}><UsersPage /></Page> },

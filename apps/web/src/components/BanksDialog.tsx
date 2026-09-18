@@ -23,6 +23,8 @@ import {
   Typography,
 } from '@mui/material';
 import type { BankDTO, BankInput, ProfileDTO } from '@god/shared';
+import DoNotDisturbOnOutlined from '@mui/icons-material/DoNotDisturbOnOutlined';
+import RestartAltRounded from '@mui/icons-material/RestartAltRounded';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { api } from '@/lib/api';
@@ -161,12 +163,22 @@ function BankRow({ bank, onEdit, onDelete }: { bank: BankDTO; onEdit: () => void
     onSuccess: () => queryClient.invalidateQueries({ queryKey: qk.banks(bank.profileId) }),
     onError: (err) => toast.error(errorMessage(err)),
   });
+  // A closed account stays on file for past payments, but the Profile then needs another one.
+  const setActive = useMutation({
+    mutationFn: (isActive: boolean) => api.banks.update(bank.id, { isActive }),
+    onSuccess: (saved) => {
+      void queryClient.invalidateQueries({ queryKey: qk.banks(bank.profileId) });
+      void queryClient.invalidateQueries({ queryKey: qk.profiles.all });
+      toast.success(saved.isActive ? 'Account marked open' : 'Account marked closed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
   const details = [bank.swiftBic && `SWIFT ${bank.swiftBic}`, bank.routingNumber && `Routing ${bank.routingNumber}`, bank.country, bank.currency]
     .filter(Boolean)
     .join(' · ');
 
   return (
-    <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ py: 1.5 }}>
+    <Stack direction="row" spacing={1.5} alignItems="flex-start" sx={{ py: 1.5, opacity: bank.isActive ? 1 : 0.6 }}>
       <Box sx={{ width: 36, height: 36, borderRadius: 2, display: 'grid', placeItems: 'center', bgcolor: 'background.subtle', color: 'text.secondary', flexShrink: 0 }}>
         <AccountBalanceOutlined fontSize="small" />
       </Box>
@@ -175,9 +187,14 @@ function BankRow({ bank, onEdit, onDelete }: { bank: BankDTO; onEdit: () => void
           <Typography variant="body2" fontWeight={600} noWrap>
             {bank.bankName}
           </Typography>
-          {bank.isPrimary && (
+          {bank.isPrimary && bank.isActive && (
             <Typography variant="caption" color="primary.main" fontWeight={600}>
               Primary
+            </Typography>
+          )}
+          {!bank.isActive && (
+            <Typography variant="caption" color="text.secondary" fontWeight={600}>
+              Closed
             </Typography>
           )}
         </Stack>
@@ -201,9 +218,16 @@ function BankRow({ bank, onEdit, onDelete }: { bank: BankDTO; onEdit: () => void
             {reveal ? <VisibilityOffOutlined fontSize="small" /> : <VisibilityOutlined fontSize="small" />}
           </IconButton>
         </Tooltip>
+        <Tooltip title={bank.isActive ? 'Mark this account closed' : 'Mark this account open again'}>
+          <span>
+            <IconButton size="small" disabled={setActive.isPending} onClick={() => setActive.mutate(!bank.isActive)} aria-label={bank.isActive ? 'Close account' : 'Reopen account'}>
+              {bank.isActive ? <DoNotDisturbOnOutlined fontSize="small" /> : <RestartAltRounded fontSize="small" />}
+            </IconButton>
+          </span>
+        </Tooltip>
         <Tooltip title={bank.isPrimary ? 'Primary bank' : 'Make primary'}>
           <span>
-            <IconButton size="small" disabled={bank.isPrimary || makePrimary.isPending} onClick={() => makePrimary.mutate()}>
+            <IconButton size="small" disabled={bank.isPrimary || !bank.isActive || makePrimary.isPending} onClick={() => makePrimary.mutate()}>
               {bank.isPrimary ? <StarRounded fontSize="small" color="primary" /> : <StarOutlineRounded fontSize="small" />}
             </IconButton>
           </span>

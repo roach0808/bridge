@@ -62,7 +62,6 @@ function Brand() {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const me = useMe();
-  const navigate = useNavigate();
   const items = NAV_ITEMS.filter((i) => i.roles.includes(me.role));
   const badges = useNavBadges();
   const groups = (['work', 'admin', 'account'] as const).map((s) => items.filter((i) => i.section === s)).filter((g) => g.length);
@@ -70,21 +69,6 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <Stack sx={{ height: '100%' }}>
       <Brand />
-      {me.role !== 'expert' && (
-        <Box sx={{ px: 1.5, pb: 1.5 }}>
-          <Button
-            fullWidth
-            variant="contained"
-            startIcon={<AddRounded />}
-            onClick={() => {
-              navigate('/calls/new');
-              onNavigate?.();
-            }}
-          >
-            New call
-          </Button>
-        </Box>
-      )}
       <Box sx={{ flex: 1, overflowY: 'auto', px: 1.25 }}>
         {groups.map((group, i) => (
           <List key={i} dense disablePadding sx={{ pb: 1.5 }}>
@@ -115,7 +99,7 @@ function useNotificationNavigation() {
   }, [navigate]);
 }
 
-/** Unread chat messages, and tasks waiting on me (open ones I was given, done ones I gave), for the sidebar badges. */
+/** What is waiting on me: unread chats, tasks, and calls stuck at my own step. */
 function useNavBadges(): Record<NonNullable<NavItem['badge']>, number> {
   const conversations = useQuery({ queryKey: qk.chat.conversations, queryFn: api.chat.conversations, refetchInterval: 120_000 });
   const me = useMe();
@@ -130,7 +114,9 @@ function useNavBadges(): Record<NonNullable<NavItem['badge']>, number> {
     refetchInterval: 120_000,
     enabled: me.role === 'founder' || me.role === 'manager',
   });
+  const calls = useQuery({ queryKey: qk.calls.waiting, queryFn: api.calls.waiting, refetchInterval: 120_000 });
   return {
+    calls: calls.data?.count ?? 0,
     chat: (conversations.data ?? []).reduce((n, c) => n + c.unreadCount, 0),
     todos: (todos.data?.length ?? 0) + (toConfirm.data?.length ?? 0),
   };

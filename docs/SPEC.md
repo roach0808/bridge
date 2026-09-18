@@ -100,6 +100,7 @@ grouped under Managers; they are assigned per Call.
 | Set invoice statuses | ✓ | | | |
 | See invoice statuses and amounts | ✓ | ✓ (every Associate's) | own | |
 | See a Profile's platform rates | ✓ | ✓ | ✓ | |
+| Close or reopen a bank account | ✓ | | | |
 | Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | own | |
 | Set the Call's GPT link | ✓ | | | |
 | Read the Call's GPT link | ✓ | | | ✓ (assigned) |
@@ -109,6 +110,10 @@ grouped under Managers; they are assigned per Call.
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates, Experts | Founders, Managers | Founders, Managers |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
 | View audit history | ✓ | ✓ (every Associate's) | own | assigned (without invoicing steps) |
+
+**[Implementation]** A Call is always booked in the future: the API refuses a `scheduledAt` more
+than five minutes in the past, on creation and when rescheduling, and the calendar does not offer
+past slots.
 
 **[Implementation]** Managers have every Associate function: a Call's Associate may be a
 Manager, who then runs it exactly like an Associate (no overrides on their own Call), sees
@@ -321,6 +326,7 @@ Replacing or removing a picture deletes the old row, so storage never piles up.
 | swift_bic, routing_number | text, nullable | |
 | country | text (ISO 3166-1 alpha-2), nullable | |
 | currency | text (ISO 4217), nullable | |
+| is_active | boolean, default true | A closed account stays on file but no longer counts: the Profile then needs another one |
 | notes | text, nullable | |
 | is_primary | boolean | Exactly one primary per Profile that has banks (partial unique index) |
 | created_by | uuid → User | |
@@ -814,6 +820,7 @@ A call can only be created with an approved profile (409
 |---|---|---|---|
 | GET | /calls | all | Scoped per role (§2.3). Query: status (repeatable), associate_id, expert_id, platform_id, from, to, q, sort, page, pageSize |
 | POST | /calls | Founder, Manager, Associate | { platform_id, profile_id, associate_id?, expert_id?, scheduled_at, duration_minutes, project_details, platform_associate_name, notes? }. The profile must be approved. Founder and Manager must pass associate_id |
+| GET | /calls/waiting | all | { count } of calls held up at the caller's own step (§9.3 sidebar badge): scheduling steps for Associates and Managers, confirm/start/finish for Experts, invoicing for the Founder |
 | GET | /calls/:id | participants | Includes platform, profile, associate, manager, expert and the history (`messages` is always empty while messaging is off) |
 | PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, invoice_*, gpt_link (Founder only), rate_override. scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
 | POST | /calls/:id/transition | per §4 | { to, comment?, ninjaLink?, actualDurationMinutes?, rating?, feedback? } → 200 with updated Call; 400 when a required field for the step is missing (§4.2); 409 (invalid edge, or `expert_busy` when moving to a blocking status would double-book the Expert) |
@@ -983,6 +990,7 @@ Associates from before this rule) stays readable, with `canSend: false`.
 | POST | /chat/conversations/:id/read | the two people | Marks the chat read (204) |
 | POST | /chat/conversations/:id/messages (pictures) | the two people | **[Implementation]** { body, image?: { dataUrl, width, height } }. The browser shrinks a picture to at most 1600 px and 1 MB (JPEG, PNG or WebP; the bytes are checked); the body is then an optional caption. Pictures live in `chat_images` |
 | GET | /chat/images/:id | the two people | The picture bytes (`Cache-Control: private`) |
+| DELETE | /chat/conversations/:id/history | either of the two people | Erases every message, picture and reaction in the chat for both. Tasks made from the chat are kept, each keeping the message's words as its title. Emits `chat:cleared` |
 | DELETE | /chat/messages/:id | the sender | Deletes for both: body erased, picture row deleted at once, reactions removed; a "deleted" placeholder stays. 409 for a message that is a task or a task's done reply. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/reactions | the two people | { emoji }. Toggles the caller's reaction (up to 10 per person per message); not on deleted messages or closed chats. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`). Founder → anyone, Manager → own-team Associates; 403 otherwise, 409 if already a task. Conversations carry `canGiveTask` |
@@ -1464,3 +1472,4 @@ Container alternative:
 | 2026-09-17 | Tasks are shown as one panel per person (your own first, then the people below you) instead of "Given by me" and "Assigned to me" tabs |
 | 2026-09-17 | A task is one compact line with two tick boxes (the taker's and the giver's); the giver can delete a completed task |
 | 2026-09-17 | Managers oversee every Associate (calls, calendar, statistics, tasks); Managers and Associates see financial statistics for the calls they can see; Managers and Experts can chat; presence is blue on the platform and grey with a last-seen time away from it; calendar blocks carry a status badge; completed tasks stay in view for a week |
+| 2026-09-18 | Chat histories can be erased for both people; one presence dot per avatar (blue on the platform, grey away from it); no New call button in the sidebar, but a badge for calls waiting on you; calls cannot be booked in the past and calls being scheduled show on everyone's calendar; the call panel shows the platform, how soon it starts and its money; Profiles are one table with a Pending column, platform dots and their own page; bank accounts can be closed, and invoicing warns when a Profile has none open |
