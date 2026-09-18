@@ -179,6 +179,8 @@ export function createApiClient(options: ClientOptions) {
       create: (body: ProfileInput) => post<ProfileDTO>('/profiles', body),
       update: (id: string, body: Partial<ProfileInput>) => patch<ProfileDTO>(`/profiles/${enc(id)}`, body),
       approve: (id: string) => post<ProfileDTO>(`/profiles/${enc(id)}/approve`),
+      /** Founder only. A Profile with past calls keeps them under a removed name. */
+      remove: (id: string) => del<void>(`/profiles/${enc(id)}`),
       reject: (id: string, reason: string) => post<ProfileDTO>(`/profiles/${enc(id)}/reject`, { reason }),
       setPhoto: (id: string, dataUrl: string) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/photo`, { body: { dataUrl } }),

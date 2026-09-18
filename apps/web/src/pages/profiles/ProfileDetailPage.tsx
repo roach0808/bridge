@@ -1,5 +1,6 @@
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import CheckCircleOutlined from '@mui/icons-material/CheckCircleOutlined';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditOutlined from '@mui/icons-material/EditOutlined';
 import LinkedIn from '@mui/icons-material/LinkedIn';
 import { Alert, Box, Button, Card, CardContent, IconButton, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
@@ -9,7 +10,7 @@ import { useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
 import { DeactivatedPill, ProfileActiveToggle, ProfileDetailsBody, ProfileStatusChip } from '@/components/ProfileDetails';
-import { ErrorState } from '@/components/common';
+import { ConfirmDialog, ErrorState } from '@/components/common';
 import { UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
@@ -36,6 +37,9 @@ export default function ProfileDetailPage() {
       { replace: true },
     );
   const [rejecting, setRejecting] = useState<ProfileDTO | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const queryClient = useQueryClient();
+  const toast = useToast();
 
   const query = useQuery({ queryKey: qk.profiles.detail(id), queryFn: () => api.profiles.get(id), enabled: Boolean(id) });
   const p = query.data;
@@ -88,6 +92,11 @@ export default function ProfileDetailPage() {
                 </Box>
                 <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }} flexWrap="wrap" useFlexGap>
                   {isFounder && <ProfileActiveToggle profile={p} />}
+                  {isFounder && (
+                    <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => setDeleting(true)}>
+                      Delete
+                    </Button>
+                  )}
                   {mayEdit && !editing && (
                     <Button variant="outlined" size="small" startIcon={<EditOutlined />} onClick={() => setEditing(true)}>
                       Edit
@@ -120,6 +129,21 @@ export default function ProfileDetailPage() {
       )}
 
       <RejectProfileDialog profile={rejecting} onClose={() => setRejecting(null)} />
+      <ConfirmDialog
+        open={deleting}
+        title={`Delete ${p?.name ?? 'this profile'}?`}
+        description="If it has no calls, it is removed completely. If it had calls, its personal details, bank accounts and addresses are erased and it disappears from every list, but its past calls and income stay, shown as “Removed profile”. This cannot be undone."
+        confirmLabel="Delete profile"
+        destructive
+        onClose={() => setDeleting(false)}
+        onConfirm={async () => {
+          await api.profiles.remove(id);
+          void queryClient.invalidateQueries({ queryKey: qk.profiles.all });
+          void queryClient.invalidateQueries({ queryKey: qk.dashboard });
+          toast.success('Profile deleted');
+          navigate('/profiles');
+        }}
+      />
     </Box>
   );
 }

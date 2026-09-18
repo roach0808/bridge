@@ -190,6 +190,9 @@ model Profile {
   status          ProfileStatus @default(approved)
   /// Deactivated Profiles are visible to Founders only and cannot be booked.
   isActive        Boolean       @default(true) @map("is_active")
+  /// Set when the Founder deleted a Profile that already had calls: its personal details are erased,
+  /// it leaves every list, and its calls and income stay under a removed name.
+  deletedAt       DateTime?     @map("deleted_at") @db.Timestamptz(3)
   createdById     String        @map("created_by") @db.Uuid
   reviewedById    String?       @map("reviewed_by") @db.Uuid
   reviewedAt      DateTime?     @map("reviewed_at") @db.Timestamptz(3)

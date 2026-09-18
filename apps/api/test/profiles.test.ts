@@ -390,3 +390,41 @@ describe('profile deactivation', () => {
     expect((await (await as(fx.e1)).get('/profiles')).body).toEqual([]);
   });
 });
+
+describe('DELETE /profiles/:id', () => {
+  it('removes a profile without calls entirely, banks and addresses with it; founder only', async () => {
+    const founder = await as(fx.founder);
+    const created = (await founder.post('/profiles', { ...profileBody(), addresses: [{ label: 'Home', address: '1 Main St' }] })).body;
+    await founder.post(`/profiles/${created.id}/banks`, { bankName: 'First Bank', accountHolder: 'Morgan', accountNumber: 'DE89370400440532013000' });
+
+    expectError(await (await as(fx.m1)).delete(`/profiles/${created.id}`), 403);
+    expect((await founder.delete(`/profiles/${created.id}`)).status).toBe(204);
+    expect(await prisma.profile.count({ where: { id: created.id } })).toBe(0);
+    expect(await prisma.profileBank.count({ where: { profileId: created.id } })).toBe(0);
+    expectError(await founder.get(`/profiles/${created.id}`), 404);
+  });
+
+  it('keeps the calls of a profile that had some, erasing its personal details', async () => {
+    const founder = await as(fx.founder);
+    await prisma.profile.update({ where: { id: fx.approvedProfile.id }, data: { email: 'dana@example.org', phone: '+1 555 0100' } });
+    const call = await makeCall(fx, { associate: fx.a1, status: 'process_to_bank', realIncome: 800 });
+
+    expect((await founder.delete(`/profiles/${fx.approvedProfile.id}`)).status).toBe(204);
+    const row = await prisma.profile.findUniqueOrThrow({ where: { id: fx.approvedProfile.id } });
+    expect(row).toMatchObject({ name: 'Removed profile', email: null, phone: null, isActive: false });
+    expect(row.deletedAt).not.toBeNull();
+
+    // Gone from every list, but its call and income are intact.
+    expect((await founder.get('/profiles')).body.some((p: { id: string }) => p.id === fx.approvedProfile.id)).toBe(false);
+    expectError(await founder.get(`/profiles/${fx.approvedProfile.id}`), 404);
+    expect((await founder.get('/stats/profiles')).body.some((r: { profile: { id: string } }) => r.profile.id === fx.approvedProfile.id)).toBe(false);
+    const kept = (await founder.get(`/calls/${call.id}`)).body;
+    expect(kept).toMatchObject({ profile: { name: 'Removed profile' }, realIncome: 800 });
+  });
+
+  it('refuses while the profile has calls still to finish', async () => {
+    const founder = await as(fx.founder);
+    await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    expectError(await founder.delete(`/profiles/${fx.approvedProfile.id}`), 409);
+  });
+});

@@ -85,6 +85,7 @@ grouped under Managers; they are assigned per Call.
 | View Profile details | all | shared + own team's submissions | shared + own submissions | Profiles of assigned Calls, without platform statuses |
 | Set a Profile's status and rate on a platform | ✓ | | | |
 | Deactivate a Profile / see deactivated ones | ✓ | | | |
+| Delete a Profile | ✓ | | | |
 | See / edit a Profile's current address and banks | ✓ | | | |
 | Upload own photo | ✓ | ✓ | ✓ | ✓ |
 | Upload a Profile photo | ✓ | | | |
@@ -946,6 +947,8 @@ Response: { from, to, expert, canEditBlocks, calls, busy, occurrences, rules }.
 Profile responses carry `photoId`, and for the Founder `bankCount` and
 `needsBank` (null for everyone else).
 
+**[Implementation] Deleting a Profile.** `DELETE /profiles/:id` (Founder, audited). Refused (409) while the Profile has calls that are not finished. A Profile with no calls is removed entirely, with its banks, addresses and platform statuses. One with past calls has its personal details, banks, addresses and picture erased, is renamed "Removed profile", deactivated and hidden from every list (`deleted_at`), while its calls, income and history stay.
+
 **[Implementation] Deleting a user.** `DELETE /users/:id` (Founder, audited) erases what identifies the account: email (replaced with an unusable one), password, Google link, sessions, push devices, notifications and picture; the nickname becomes "Removed user <id>" and the account is deactivated for good, freeing the old email and nickname. Their calls, chat messages, tasks, status history and audit entries stay and name the removed user. Refused for yourself, the last Founder, a Manager who still has Associates, and anyone with calls that are not finished.
 
 **[Implementation] Sign-in details (Founder).** `GET /users/:id/sign-in` (audited) returns { email, google }; `PATCH /users/:id/sign-in` { email } changes the sign-in email; `DELETE /users/:id/google` unlinks the Google account so the next Google sign-in links again by email. `GET /me/google` shows the caller's own link. These are the only endpoints besides /me and sign-in that return an email, and only to the Founder.
@@ -1476,3 +1479,4 @@ Container alternative:
 | 2026-09-18 | Calls read as how soon they are ("in 13 hours") with the date beside them; a finished call shows its expected price, or that it still needs a rate, and its real income once paid; an arriving chat message raises a toast; platform rows on a profile keep a name column with a status dot |
 | 2026-09-18 | Call times read in plain words everywhere: "in 13 hours" over "Tomorrow 11 AM · 45 min"; the exact date and range stay in the tooltip |
 | 2026-09-18 | A tab left open across a deploy recovers by itself: a page whose files are gone reloads once, and otherwise shows "The app was updated — Reload" |
+| 2026-09-18 | Founders can delete a Profile: gone entirely if it never had calls, otherwise erased and hidden with its calls and income kept. Closed bank accounts no longer satisfy the dashboard's "Add bank" task |

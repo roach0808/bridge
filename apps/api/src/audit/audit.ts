@@ -131,6 +131,7 @@ const SUMMARIES: Record<string, string> = {
   'profile.active': 'activated or deactivated a profile',
   'profile.create': 'added a profile',
   'profile.update': 'changed a profile',
+  'profile.delete': 'deleted a profile',
   'bank.read': 'looked at bank details',
   'bank.create': 'added bank details',
   'bank.update': 'changed bank details',

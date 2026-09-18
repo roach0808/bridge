@@ -46,11 +46,12 @@ const platformsFor = (actor: Pick<Actor, 'role'>): Promise<PlatformRef[] | null>
  */
 function visibleProfilesWhere(actor: Actor): Prisma.ProfileWhereInput {
   // Deactivated Profiles are the Founder's business only.
-  if (actor.role === 'founder') return {};
-  if (actor.role === 'expert') return { isActive: true, calls: { some: { expertId: actor.id } } };
+  // Deleted Profiles are gone for everyone; only their past calls still name them.
+  if (actor.role === 'founder') return { deletedAt: null };
+  if (actor.role === 'expert') return { deletedAt: null, isActive: true, calls: { some: { expertId: actor.id } } };
   const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }];
   if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } });
-  return { isActive: true, OR: [{ status: 'approved' }, ...own] };
+  return { deletedAt: null, isActive: true, OR: [{ status: 'approved' }, ...own] };
 }
 
 async function loadVisible(actor: Actor, id: string | null) {
@@ -246,6 +247,53 @@ profilesRouter.patch('/profiles/:id/active', requireRole('founder'), async (req,
     include: includeFor(actor),
   });
   res.json(toProfileDTO(updated, await platformRefs()));
+});
+
+/**
+ * Founder deletes a Profile. Without calls it is removed entirely. With past calls, its
+ * personal details, banks and addresses are erased and it leaves every list, while its
+ * calls and income stay under a removed name. Unfinished calls block it.
+ */
+profilesRouter.delete('/profiles/:id', requireRole('founder'), async (req, res) => {
+  const actor = actorOf(req);
+  const profile = await loadVisible(actor, idParam(req));
+  const [open, total] = await Promise.all([
+    prisma.call.count({ where: { profileId: profile.id, status: { notIn: ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'] } } }),
+    prisma.call.count({ where: { profileId: profile.id } }),
+  ]);
+  if (open) throw conflict(`“${profile.name}” still has ${open} call${open === 1 ? '' : 's'} to finish or move to another Profile`);
+
+  await prisma.$transaction(async (tx) => {
+    if (total === 0) {
+      // Banks, addresses and platform statuses go with it (cascade).
+      await tx.profile.delete({ where: { id: profile.id } });
+    } else {
+      await tx.profileBank.deleteMany({ where: { profileId: profile.id } });
+      await tx.profileAddress.deleteMany({ where: { profileId: profile.id } });
+      await tx.profile.update({
+        where: { id: profile.id },
+        data: {
+          deletedAt: new Date(),
+          isActive: false,
+          name: 'Removed profile',
+          linkedinUrl: null,
+          briefExperience: '',
+          dateOfBirth: null,
+          gender: null,
+          nationality: null,
+          location: null,
+          education: null,
+          careerHistory: null,
+          currentAddress: null,
+          email: null,
+          phone: null,
+          photoId: null,
+        },
+      });
+    }
+    if (profile.photoId) await tx.photo.deleteMany({ where: { id: profile.photoId } });
+  });
+  res.status(204).end();
 });
 
 /** Founder sets a profile's standing and rate on one platform. */

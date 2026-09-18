@@ -72,6 +72,7 @@ async function profilesNeedingRate(): Promise<ProfileNeedingRate[]> {
     JOIN platforms pl ON pl.id = c.platform_id
     LEFT JOIN profile_platform_statuses s ON s.profile_id = c.profile_id AND s.platform_id = c.platform_id
     WHERE c.status IN ('finished', 'invoice_submit', 'invoice_approve', 'process_to_bank')
+      AND p.deleted_at IS NULL
       AND c.rate_override IS NULL
       AND s.rate IS NULL
     GROUP BY p.id, p.name, p.avatar_id, p.photo_id, pl.id, pl.name
@@ -93,7 +94,8 @@ async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary[
       take: 100,
     }),
     prisma.profile.findMany({
-      where: { banks: { none: {} }, calls: { some: booked } },
+      // Closed accounts don't count: the Profile needs an open one.
+      where: { deletedAt: null, banks: { none: { isActive: true } }, calls: { some: booked } },
       select: {
         id: true,
         name: true,

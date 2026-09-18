@@ -191,6 +191,7 @@ statsRouter.get('/stats/associates', async (req, res) => {
 statsRouter.get('/stats/profiles', requireRole('founder'), async (_req, res) => {
   const [profiles, sums] = await Promise.all([
     prisma.profile.findMany({
+      where: { deletedAt: null },
       select: {
         id: true,
         name: true,
