@@ -39,11 +39,21 @@ export function relativeTime(iso: string): string {
  */
 export function whenLabel(iso: string, zone: string): string {
   const at = DateTime.fromISO(iso);
-  const hoursAway = Math.abs(at.diffNow('hours').hours);
-  if (hoursAway >= 24) return formatDateTime(iso, zone);
   const relative = at.toRelative({ style: 'long' }) ?? '';
-  return `${relative} · ${inZone(iso, zone).toFormat('h:mm a')}`;
+  const daysAway = Math.abs(at.diffNow('days').days);
+  // Beyond a week "in 2 months" stops being useful, so the date leads instead.
+  if (daysAway >= 7) return `${formatDateTime(iso, zone)} · ${relative}`;
+  const when = daysAway < 1 ? inZone(iso, zone).toFormat('h:mm a') : inZone(iso, zone).toFormat('ccc h:mm a');
+  return `${relative} · ${when}`;
 }
+
+/** "in 3 hours", "in 2 days", "8 hours ago": how soon something is, on its own. */
+export function countdown(iso: string): string {
+  return DateTime.fromISO(iso).toRelative({ style: 'long' }) ?? '';
+}
+
+/** True while something is less than a day away (or just passed). */
+export const soon = (iso: string) => Math.abs(DateTime.fromISO(iso).diffNow('hours').hours) < 24;
 
 /** "Today", "Tomorrow", "Yesterday", or "Mon, Sep 15" in the zone. */
 export function dayLabel(iso: string, zone: string): string {

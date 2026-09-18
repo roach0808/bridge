@@ -37,6 +37,7 @@ import {
   FEATURES,
   MAX_ACTUAL_DURATION_MINUTES,
   STATUS_LABELS,
+  STATUS_STAGE,
   edgeOwner,
   isOverride,
   type CallDetailDTO,
@@ -60,7 +61,7 @@ import { api, socket } from '@/lib/api';
 import { errorMessage, fieldErrors, isApiError } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { patchCallInCache } from '@/realtime/RealtimeProvider';
-import { formatDateTime, formatUsd, inZone, relativeTime, zoneAbbr, zoneCity } from '@/lib/time';
+import { formatDateTime, formatUsd, inZone, relativeTime, soon, whenLabel, zoneAbbr, zoneCity } from '@/lib/time';
 import { useCallOwners } from './callOwners';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertAvailability';
 import { MessageThread } from './MessageThread';
@@ -900,12 +901,15 @@ export default function CallDetailPage() {
   const expertZone = call.expert?.timeZone ?? null;
   const perms = call.permissions;
   // Once a call is finished the expected price matters; once it is paid, what really arrived.
+  const finished = STATUS_STAGE[call.status] !== 'scheduling' && call.status !== 'ongoing' && call.status !== 'confirmed';
   const money =
-    me.role === 'expert' || call.expectedPrice === null
+    me.role === 'expert' || !finished
       ? null
       : call.realIncome !== null
         ? { label: `Real income ${formatUsd(call.realIncome)}`, hint: 'What reached the bank', color: 'success.main' }
-        : { label: `Expected ${formatUsd(call.expectedPrice)}`, hint: 'Rate × the call’s real duration', color: 'text.primary' };
+        : call.expectedPrice !== null
+          ? { label: `Expected ${formatUsd(call.expectedPrice)}`, hint: 'Rate × the call’s real duration', color: 'primary.main' }
+          : { label: 'Expected: no rate yet', hint: 'Set the Profile’s rate on this platform', color: 'warning.main' };
 
   return (
     <>
@@ -957,9 +961,23 @@ export default function CallDetailPage() {
                   <Typography variant="body2" color="text.disabled">
                     ·
                   </Typography>
-                  <Typography variant="body2">
-                    {formatDateTime(call.scheduledAt, zone)} · {call.durationMinutes} min
-                  </Typography>
+                  <Tooltip title={formatDateTime(call.scheduledAt, zone)}>
+                    <Typography variant="body2" fontWeight={soon(call.scheduledAt) ? 600 : 400}>
+                      {whenLabel(call.scheduledAt, zone)} · {call.durationMinutes} min
+                    </Typography>
+                  </Tooltip>
+                  {money && (
+                    <>
+                      <Typography variant="body2" color="text.disabled">
+                        ·
+                      </Typography>
+                      <Tooltip title={money.hint}>
+                        <Typography variant="body2" fontWeight={650} sx={{ color: money.color }}>
+                          {money.label}
+                        </Typography>
+                      </Tooltip>
+                    </>
+                  )}
                 </Stack>
               </Box>
             </Stack>
@@ -986,7 +1004,12 @@ export default function CallDetailPage() {
             }
           >
             <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-              <Field label={`Time (${zoneCity(zone)})`}>{formatDateTime(call.scheduledAt, zone)}</Field>
+              <Field label={`Time (${zoneCity(zone)})`}>
+                <Tooltip title={formatDateTime(call.scheduledAt, zone)}>
+                  <Typography variant="body2">{whenLabel(call.scheduledAt, zone)}</Typography>
+                </Tooltip>
+              </Field>
+              <Field label="Platform">{call.platform.name}</Field>
               <Field label="Duration">
                 {call.durationMinutes} minutes · ends {inZone(call.endsAt, zone).toFormat('h:mm a')}
               </Field>

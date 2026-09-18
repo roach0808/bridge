@@ -46,7 +46,7 @@ import { UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
-import { formatRange, inZone, relativeTime, zoneAbbr } from '@/lib/time';
+import { countdown, formatRange, inZone, relativeTime, soon, zoneAbbr } from '@/lib/time';
 import { CallCard } from './CallCard';
 
 function useDebounced<T>(value: T, ms = 300): T {
@@ -355,11 +355,11 @@ export default function CallsListPage() {
                         </Stack>
                       </TableCell>
                       <TableCell>
-                        <Typography variant="body2">
-                          {start.toFormat('ccc, LLL d')}
+                        <Typography variant="body2" fontWeight={soon(c.scheduledAt) ? 600 : 400}>
+                          {countdown(c.scheduledAt)}
                         </Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {formatRange(c.scheduledAt, c.endsAt, zone)} · {c.durationMinutes}m
+                          {start.toFormat('ccc, LLL d')} · {formatRange(c.scheduledAt, c.endsAt, zone)} · {c.durationMinutes}m
                         </Typography>
                       </TableCell>
                       <TableCell>

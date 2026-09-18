@@ -3,7 +3,7 @@ import type { CallDTO } from '@god/shared';
 import { Link as RouterLink } from 'react-router';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { StatusChip } from '@/components/StatusChip';
-import { dayLabel, formatRange } from '@/lib/time';
+import { countdown, dayLabel, formatRange } from '@/lib/time';
 
 /** Compact call summary used by the dashboard and mobile lists. */
 export function CallCard({ call, zone, showExpert = true }: { call: CallDTO; zone: string; showExpert?: boolean }) {
@@ -25,7 +25,7 @@ export function CallCard({ call, zone, showExpert = true }: { call: CallDTO; zon
               <StatusChip status={call.status} />
             </Stack>
             <Typography variant="body2" sx={{ mt: 1, fontVariantNumeric: 'tabular-nums' }}>
-              {dayLabel(call.scheduledAt, zone)} · {formatRange(call.scheduledAt, call.endsAt, zone)}
+              {countdown(call.scheduledAt)} · {dayLabel(call.scheduledAt, zone)} · {formatRange(call.scheduledAt, call.endsAt, zone)}
             </Typography>
             {showExpert && (
               <Stack direction="row" spacing={2} sx={{ mt: 1.25 }} flexWrap="wrap" useFlexGap>

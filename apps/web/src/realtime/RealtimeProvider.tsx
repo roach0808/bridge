@@ -15,7 +15,9 @@ import type {
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { notificationLink, notificationText } from '@god/shared';
+import { Button } from '@mui/material';
 import { useAuth } from '@/auth/AuthProvider';
+import { useToast } from '@/components/ToastProvider';
 import { showInTabNotification } from '@/lib/push';
 import { socket } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
@@ -70,6 +72,7 @@ const RealtimeContext = createContext<RealtimeState>({ connected: false });
 
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const { status, user } = useAuth();
   const meId = user?.id;
   const [connected, setConnected] = useState(socket.connected);
@@ -122,11 +125,19 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(message.conversationId) });
       window.dispatchEvent(new CustomEvent<ChatMessageDTO>('god:chat-message', { detail: message }));
       if (message.sender.id !== meId && message.kind === 'text') {
-        showInTabNotification(
-          message.sender.nickname,
-          { body: message.body, tag: `chat:${message.conversationId}`, url: `/chat/${message.conversationId}` },
-          navigateTo,
-        );
+        const url = `/chat/${message.conversationId}`;
+        const preview = message.body || '\uD83D\uDCF7 Photo';
+        showInTabNotification(message.sender.nickname, { body: preview, tag: `chat:${message.conversationId}`, url }, navigateTo);
+        // Inside the app a browser notification is suppressed, so say it here too,
+        // unless they are already reading that very chat.
+        if (window.location.pathname !== url) {
+          toast.info(
+            `${message.sender.nickname}: ${preview.slice(0, 80)}`,
+            <Button color="inherit" size="small" onClick={() => navigateTo(url)}>
+              Open
+            </Button>,
+          );
+        }
       }
     };
 
@@ -192,7 +203,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('chat:message-updated', onChatMessageUpdated);
       socket.off('chat:cleared', onChatCleared);
     };
-  }, [queryClient, status, meId]);
+  }, [queryClient, status, meId, toast]);
 
   return <RealtimeContext.Provider value={{ connected }}>{children}</RealtimeContext.Provider>;
 }

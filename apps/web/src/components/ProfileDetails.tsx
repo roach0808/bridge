@@ -324,24 +324,55 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
             ) : (
               <Stack divider={<Divider flexItem />}>
                 {p.platformStatuses.map(({ platform, status, rate }) => (
-                  <Stack key={platform.id} direction="row" alignItems="center" spacing={2} sx={{ py: 0.75, minHeight: 40 }}>
-                    <Typography variant="body2" sx={{ flex: 1, minWidth: 0 }} noWrap>
-                      {platform.name}
-                    </Typography>
+                  <Box
+                    key={platform.id}
+                    sx={{
+                      display: 'grid',
+                      // The name keeps its own column, so it never gets squeezed out by the rate field.
+                      gridTemplateColumns: { xs: '1fr auto', sm: 'minmax(120px, 1fr) 120px 150px' },
+                      alignItems: 'center',
+                      columnGap: 2,
+                      rowGap: 0.5,
+                      py: 0.75,
+                      minHeight: 44,
+                    }}
+                  >
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+                      <Box
+                        component="span"
+                        sx={{
+                          width: 9,
+                          height: 9,
+                          borderRadius: '50%',
+                          flexShrink: 0,
+                          bgcolor: PLATFORM_REGISTRATION_COLORS[status],
+                          opacity: status === 'not_registered' ? 0.45 : 1,
+                        }}
+                      />
+                      <Typography variant="body2" fontWeight={status === 'registered' ? 600 : 400} noWrap>
+                        {platform.name}
+                      </Typography>
+                    </Stack>
                     {isFounder ? (
                       <>
-                        <PlatformRateField profile={p} platformId={platform.id} rate={rate} registered={status === 'registered'} />
-                        <PlatformStatusSelect profile={p} platformId={platform.id} status={status} rate={rate} />
+                        <Box sx={{ justifySelf: { sm: 'end' }, gridColumn: { xs: '1 / -1', sm: 'auto' } }}>
+                          <PlatformRateField profile={p} platformId={platform.id} rate={rate} registered={status === 'registered'} />
+                        </Box>
+                        <Box sx={{ justifySelf: 'end' }}>
+                          <PlatformStatusSelect profile={p} platformId={platform.id} status={status} rate={rate} />
+                        </Box>
                       </>
                     ) : (
                       <>
-                        <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.secondary'}>
+                        <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.secondary'} sx={{ justifySelf: { sm: 'end' } }}>
                           {rate === null ? 'No rate' : formatRate(rate)}
                         </Typography>
-                        <PlatformStatusChip status={status} />
+                        <Box sx={{ justifySelf: 'end' }}>
+                          <PlatformStatusChip status={status} />
+                        </Box>
                       </>
                     )}
-                  </Stack>
+                  </Box>
                 ))}
               </Stack>
             )}
