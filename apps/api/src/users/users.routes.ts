@@ -25,11 +25,13 @@ const DONE_STATUSES = ['finished', 'invoice_submit', 'invoice_approve', 'process
 export const usersRouter = Router();
 usersRouter.use('/users', requireAuth, requireRole('founder', 'manager'));
 
-/** Users a Manager may see: their own Associates plus every Expert (§6.2). */
+/** Users a Manager may see: every Associate and every Expert (§6.2). */
 function visibleUsersWhere(actor: Actor): Prisma.UserWhereInput {
   // Deleted accounts are gone from every list; only their past work still names them.
   if (actor.role === 'founder') return { deletedAt: null };
-  return { deletedAt: null, OR: [{ role: 'associate', managerId: actor.id }, { role: 'expert' }] };
+  // A Manager works with every Associate (runs calls with them, gives them tasks);
+  // editing accounts stays limited to their own team (PATCH below).
+  return { deletedAt: null, role: { in: ['associate', 'expert'] } };
 }
 
 async function loadVisibleUser(actor: Actor, id: string | null) {
