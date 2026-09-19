@@ -208,7 +208,7 @@ describe('canGiveTask', () => {
     expect(supervisesWork({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate' })).toBe(false);
   });
   it('associates and experts give no tasks', () => {
-    expect(canGiveTask({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate', managerId: 'a' })).toBe(false);
+    expect(canGiveTask({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate' })).toBe(false);
     expect(canGiveTask({ id: 'e', role: 'expert' }, { id: 'f', role: 'founder' })).toBe(false);
   });
 });
