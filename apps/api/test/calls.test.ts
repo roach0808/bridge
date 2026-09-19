@@ -580,3 +580,27 @@ describe('call rate', () => {
     expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { rateOverride: 1 }), 403);
   });
 });
+
+describe('DELETE /calls/:id', () => {
+  it('the founder deletes a call with its history, messages and notifications', async () => {
+    const founder = await as(fx.founder);
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'process_to_bank', realIncome: 500 });
+    await prisma.callStatusHistory.create({ data: { callId: call.id, fromStatus: 'invoice_approve', toStatus: 'process_to_bank', actorId: fx.founder.id } });
+    await prisma.message.create({ data: { callId: call.id, senderId: fx.a1.id, body: 'Wrapped up' } });
+    await prisma.notification.create({ data: { userId: fx.a1.id, type: 'call.status_changed', payload: { callId: call.id, summary: 'Paid' } } });
+    const other = await prisma.notification.create({ data: { userId: fx.a1.id, type: 'todo.assigned', payload: { todoId: 'x' } } });
+
+    expectError(await (await as(fx.m1)).delete(`/calls/${call.id}`), 403);
+    expectError(await (await as(fx.a1)).delete(`/calls/${call.id}`), 403);
+    expect((await founder.delete(`/calls/${call.id}`)).status).toBe(204);
+
+    expect(await prisma.call.count({ where: { id: call.id } })).toBe(0);
+    expect(await prisma.callStatusHistory.count({ where: { callId: call.id } })).toBe(0);
+    expect(await prisma.message.count({ where: { callId: call.id } })).toBe(0);
+    expect(await prisma.notification.count({ where: { userId: fx.a1.id } })).toBe(1);
+    expect(await prisma.notification.count({ where: { id: other.id } })).toBe(1);
+    expectError(await founder.get(`/calls/${call.id}`), 404);
+    // Its money no longer counts anywhere.
+    expect((await founder.get('/stats/profiles')).body.find((r: { profile: { id: string } }) => r.profile.id === fx.approvedProfile.id).totalIncome).toBe(0);
+  });
+});

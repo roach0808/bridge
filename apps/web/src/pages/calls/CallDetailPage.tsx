@@ -1,4 +1,5 @@
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
+import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import BadgeOutlined from '@mui/icons-material/BadgeOutlined';
 import VideocamRounded from '@mui/icons-material/VideocamRounded';
@@ -49,10 +50,10 @@ import {
 } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
-import { EmptyState, ErrorState, Field } from '@/components/common';
+import { ConfirmDialog, EmptyState, ErrorState, Field } from '@/components/common';
 import { ProfileDetailsDialog } from '@/components/ProfileDetails';
 import { RoleBadge, UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
@@ -868,6 +869,21 @@ export default function CallDetailPage() {
   const [editing, setEditing] = useState(false);
   const [reassign, setReassign] = useState<'associate' | 'expert' | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const queryClient = useQueryClient();
+  const pageToast = useToast();
+
+  // Someone else deleted this call while it was open: leave the page.
+  const deletingHere = useRef(false);
+  useEffect(() => {
+    const onDeleted = (e: Event) => {
+      if ((e as CustomEvent<string>).detail !== id || deletingHere.current) return;
+      pageToast.info('This call was deleted');
+      navigate('/calls', { replace: true });
+    };
+    window.addEventListener('god:call-deleted', onDeleted);
+    return () => window.removeEventListener('god:call-deleted', onDeleted);
+  }, [id, navigate, pageToast]);
 
   const { data: call, isLoading, error, refetch } = useQuery({
     queryKey: qk.calls.detail(id),
@@ -983,6 +999,11 @@ export default function CallDetailPage() {
             </Stack>
             <Stack spacing={1} alignItems={{ xs: 'flex-start', md: 'flex-end' }} sx={{ flexShrink: 0 }}>
               <TransitionBar call={call} />
+              {me.role === 'founder' && (
+                <Button size="small" color="error" startIcon={<DeleteOutlineRounded />} onClick={() => setDeleting(true)}>
+                  Delete call
+                </Button>
+              )}
             </Stack>
           </Stack>
           <Box sx={{ mt: 3 }}>
@@ -1104,6 +1125,27 @@ export default function CallDetailPage() {
 
       <EditDetailsDialog call={call} open={editing} onClose={() => setEditing(false)} />
       <ReassignDialog call={call} kind={reassign ?? 'expert'} open={Boolean(reassign)} onClose={() => setReassign(null)} />
+      <ConfirmDialog
+        open={deleting}
+        title={`Delete the call with ${call.profile.name}?`}
+        description="The call is removed for good, with its status history, messages and the notifications about it. Statistics and income stop counting it. This cannot be undone."
+        confirmLabel="Delete call"
+        destructive
+        onClose={() => setDeleting(false)}
+        onConfirm={async () => {
+          deletingHere.current = true;
+          await api.calls.remove(call.id).catch((err: unknown) => {
+            deletingHere.current = false;
+            throw err;
+          });
+          queryClient.removeQueries({ queryKey: qk.calls.detail(call.id) });
+          void queryClient.invalidateQueries({ queryKey: qk.calls.all });
+          void queryClient.invalidateQueries({ queryKey: qk.calendar.all });
+          void queryClient.invalidateQueries({ queryKey: qk.dashboard });
+          pageToast.success('Call deleted');
+          navigate('/calls', { replace: true });
+        }}
+      />
     </>
   );
 }

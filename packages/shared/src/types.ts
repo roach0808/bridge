@@ -628,6 +628,8 @@ export interface WebPushPayload {
 
 export interface ServerToClientEvents {
   'call:updated': (call: CallDTO) => void;
+  /** The Founder deleted the call, with everything that belonged to it. */
+  'call:deleted': (event: { id: string }) => void;
   'call:message': (message: MessageDTO) => void;
   'notification:new': (notification: NotificationDTO) => void;
   'chat:message': (message: ChatMessageDTO) => void;

@@ -199,6 +199,8 @@ export function createApiClient(options: ClientOptions) {
       waiting: () => get<{ count: number }>('/calls/waiting'),
       create: (body: CreateCallInput) => post<CallDTO>('/calls', body),
       update: (id: string, body: UpdateCallInput) => patch<CallDTO>(`/calls/${enc(id)}`, body),
+      /** Founder only: deletes the call with its history, messages and notifications. */
+      remove: (id: string) => del<void>(`/calls/${enc(id)}`),
       /** `ongoing` needs `ninjaLink`; `finished` needs `actualDurationMinutes` and `rating`. */
       transition: (id: string, to: CallStatus, extra?: Omit<TransitionInput, 'to'>) =>
         post<CallDTO>(`/calls/${enc(id)}/transition`, { to, ...extra }),

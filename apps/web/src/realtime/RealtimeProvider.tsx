@@ -157,6 +157,16 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (message.deleted) void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
     };
 
+    const onCallDeleted = ({ id }: { id: string }) => {
+      queryClient.removeQueries({ queryKey: qk.calls.detail(id) });
+      void queryClient.invalidateQueries({ queryKey: qk.calls.all });
+      void queryClient.invalidateQueries({ queryKey: qk.calendar.all });
+      void queryClient.invalidateQueries({ queryKey: qk.dashboard });
+      void queryClient.invalidateQueries({ queryKey: qk.notifications });
+      void queryClient.invalidateQueries({ queryKey: qk.stats.all });
+      window.dispatchEvent(new CustomEvent<string>('god:call-deleted', { detail: id }));
+    };
+
     const onChatCleared = ({ conversationId }: { conversationId: string }) => {
       void queryClient.resetQueries({ queryKey: qk.chat.messages(conversationId) });
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
@@ -189,6 +199,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('chat:read', onChatRead);
     socket.on('chat:message-updated', onChatMessageUpdated);
     socket.on('chat:cleared', onChatCleared);
+    socket.on('call:deleted', onCallDeleted);
     if (socket.connected) setConnected(true);
 
     return () => {
@@ -202,6 +213,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('chat:read', onChatRead);
       socket.off('chat:message-updated', onChatMessageUpdated);
       socket.off('chat:cleared', onChatCleared);
+      socket.off('call:deleted', onCallDeleted);
     };
   }, [queryClient, status, meId, toast]);
 

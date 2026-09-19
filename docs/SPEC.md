@@ -99,6 +99,7 @@ grouped under Managers; they are assigned per Call.
 | Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
+| Delete a Call | ✓ | | | |
 | See invoice statuses and amounts | ✓ | ✓ (every Associate's) | own | |
 | See a Profile's platform rates | ✓ | ✓ | ✓ | |
 | Close or reopen a bank account | ✓ | | | |
@@ -821,6 +822,7 @@ A call can only be created with an approved profile (409
 |---|---|---|---|
 | GET | /calls | all | Scoped per role (§2.3). Query: status (repeatable), associate_id, expert_id, platform_id, from, to, q, sort, page, pageSize |
 | POST | /calls | Founder, Manager, Associate | { platform_id, profile_id, associate_id?, expert_id?, scheduled_at, duration_minutes, project_details, platform_associate_name, notes? }. The profile must be approved. Founder and Manager must pass associate_id |
+| DELETE | /calls/:id | Founder | Deletes the call for good, with its status history and messages (cascade) and every notification about it; statistics and income stop counting it. Emits `call:deleted` to its participants, whose open pages leave it. The audit trail keeps its record, including the deletion |
 | GET | /calls/waiting | all | { count } of calls held up at the caller's own step (§9.3 sidebar badge): scheduling steps for Associates and Managers, confirm/start/finish for Experts, invoicing for the Founder |
 | GET | /calls/:id | participants | Includes platform, profile, associate, manager, expert and the history (`messages` is always empty while messaging is off) |
 | PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, invoice_*, gpt_link (Founder only), rate_override. scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
@@ -1480,3 +1482,4 @@ Container alternative:
 | 2026-09-18 | Call times read in plain words everywhere: "in 13 hours" over "Tomorrow 11 AM · 45 min"; the exact date and range stay in the tooltip |
 | 2026-09-18 | A tab left open across a deploy recovers by itself: a page whose files are gone reloads once, and otherwise shows "The app was updated — Reload" |
 | 2026-09-18 | Founders can delete a Profile: gone entirely if it never had calls, otherwise erased and hidden with its calls and income kept. Closed bank accounts no longer satisfy the dashboard's "Add bank" task |
+| 2026-09-19 | Founders can delete a Call for good, with its status history, messages and notifications |

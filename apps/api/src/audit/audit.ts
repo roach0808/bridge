@@ -126,6 +126,7 @@ const SUMMARIES: Record<string, string> = {
   'call.transition': 'moved a call to its next status',
   'call.create': 'created a call',
   'call.update': 'changed a call',
+  'call.delete': 'deleted a call',
   'profile.platform': 'set a profile’s status or rate on a platform',
   'profile.review': 'approved or rejected a profile',
   'profile.active': 'activated or deactivated a profile',

@@ -11,12 +11,12 @@ import {
   type MessageDTO,
 } from '@god/shared';
 import { Router } from 'express';
-import { actorOf, requireAuth } from '../auth/middleware';
+import { actorOf, requireAuth, requireRole } from '../auth/middleware';
 import { prisma } from '../db';
 import { badRequest, notFound } from '../errors';
 import { idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
-import { emitToCall } from '../realtime/hub';
+import { emitToCall, emitToUser } from '../realtime/hub';
 import { historyInclude, messageInclude, toHistoryDTO, toMessageDTO } from '../serializers';
 import { visibleCallsWhere, visibleHistoryWhere } from './calls.access';
 import {
@@ -55,6 +55,23 @@ callsRouter.get('/calls/:id', async (req, res) => {
 
 callsRouter.patch('/calls/:id', async (req, res) => {
   res.json(await updateCall(actorOf(req), idParam(req), parseBody(updateCallSchema, req)));
+});
+
+/**
+ * Founder only: deletes the call for good, with its status history, messages and the
+ * notifications about it. Statistics and income simply stop counting it.
+ */
+callsRouter.delete('/calls/:id', requireRole('founder'), async (req, res) => {
+  const actor = actorOf(req);
+  const call = await getCallForActor(actor, idParam(req));
+  const people = await participantIds(prisma, call);
+  await prisma.$transaction([
+    prisma.$executeRaw`DELETE FROM notifications WHERE payload->>'callId' = ${call.id}`,
+    // Status history and messages go with the call (cascade).
+    prisma.call.delete({ where: { id: call.id } }),
+  ]);
+  for (const id of people) emitToUser(id, 'call:deleted', { id: call.id });
+  res.status(204).end();
 });
 
 callsRouter.post('/calls/:id/transition', async (req, res) => {
