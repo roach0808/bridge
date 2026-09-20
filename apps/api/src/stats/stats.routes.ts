@@ -90,7 +90,8 @@ async function pricedCalls(from: Date, to: Date, associateIds?: string[]): Promi
            c.actual_duration_minutes, c.real_income, COALESCE(c.rate_override, s.rate) AS rate
     FROM calls c
     LEFT JOIN profile_platform_statuses s ON s.profile_id = c.profile_id AND s.platform_id = c.platform_id
-    WHERE c.scheduled_at >= ${from} AND c.scheduled_at < ${to}
+    WHERE c.status <> 'cancelled'
+      AND c.scheduled_at >= ${from} AND c.scheduled_at < ${to}
       ${associateIds ? Prisma.sql`AND c.associate_id = ANY(${associateIds}::uuid[])` : Prisma.empty}`;
   return rows.map((r) => ({
     associateId: r.associate_id,
@@ -216,6 +217,7 @@ statsRouter.get('/stats/profiles', requireRole('founder'), async (_req, res) => 
              max(c.scheduled_at) FILTER (WHERE c.scheduled_at <= ${new Date()}) AS last_call_at
       FROM calls c
       LEFT JOIN profile_platform_statuses s ON s.profile_id = c.profile_id AND s.platform_id = c.platform_id
+      WHERE c.status <> 'cancelled'
       GROUP BY c.profile_id`,
   ]);
   const rows: ProfileStatsRow[] = profiles.map((p) => {

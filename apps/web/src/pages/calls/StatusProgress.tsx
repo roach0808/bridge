@@ -1,5 +1,5 @@
 import { Box, Stack, Tooltip, Typography } from '@mui/material';
-import { STAGE_LABELS, STATUS_LABELS, STATUS_STAGE, stagesForRole, type CallStatus, type Role } from '@god/shared';
+import { STAGE_LABELS, STATUS_LABELS, STATUS_STAGE, TRACK_STAGES, stagesForRole, type CallStatus, type Role } from '@god/shared';
 import { STATUS_COLORS } from '@/components/StatusChip';
 
 /** The happy path; `on_rescheduling` is shown as a detour on `scheduled`. */
@@ -8,10 +8,20 @@ const TRACK: CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'ongoing
 /** Experts don't see the invoicing stage (their calls end at Finished). */
 export function StatusProgress({ status, role }: { status: CallStatus; role: Role }) {
   const position = TRACK.indexOf(status === 'on_rescheduling' ? 'scheduled' : status);
+  // A cancelled call left the track: the bar would say nothing true about it.
+  if (status === 'cancelled') {
+    return (
+      <Typography variant="body2" color="text.secondary">
+        This call was cancelled — it never took place and earns nothing.
+      </Typography>
+    );
+  }
   return (
     <Box sx={{ overflowX: 'auto', pb: 0.5 }}>
       <Stack direction="row" sx={{ minWidth: 640 }}>
-        {stagesForRole(role).map((stage) => {
+        {stagesForRole(role)
+          .filter((stage) => TRACK_STAGES.includes(stage))
+          .map((stage) => {
           const steps = TRACK.filter((s) => STATUS_STAGE[s] === stage);
           return (
             <Box key={stage} sx={{ flex: steps.length, px: 0.5 }}>

@@ -22,7 +22,7 @@ import {
 } from '@mui/material';
 import { type ProfileDTO, type ProfileStatus } from '@god/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
 import { DeactivatedPill, PROFILE_STATUS_META, ProfileStatusChip } from '@/components/ProfileDetails';
@@ -32,7 +32,7 @@ import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { FilterChips, Hint, SearchField, TableSurface, useDebouncedValue } from '../admin/adminShared';
 import { ProfileDialog } from '../admin/ProfileDialogs';
-import { PlatformDots, pendingItems } from './profileShared';
+import { AllPlatformStatuses, TopPlatformStatus, pendingItems } from './profileShared';
 
 type Filter = 'all' | ProfileStatus | 'needs_bank' | 'deactivated';
 const STATUS_ORDER: Record<ProfileStatus, number> = { pending: 0, rejected: 1, approved: 2 };
@@ -193,14 +193,14 @@ export default function ProfilesPage() {
           )}
         </Card>
       ) : (
-        <TableSurface minWidth={820}>
+        <TableSurface minWidth={880}>
           <Table size="small">
             <TableHead>
               <TableRow>
                 <TableCell sx={{ minWidth: 200 }}>Profile</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell sx={{ minWidth: 190 }}>Pending</TableCell>
-                {!isExpert && <TableCell>Platforms</TableCell>}
+                {!isExpert && <TableCell sx={{ minWidth: 230 }}>Platforms</TableCell>}
                 <TableCell align="right" width={96}>
                   Open
                 </TableCell>
@@ -224,63 +224,74 @@ function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isE
   const me = useMe();
   const pending = pendingItems(p);
   const mayEdit = me.role === 'founder' || (p.createdBy?.id === me.id && p.status !== 'approved');
+  // The row shows the first platform; the rest unfold underneath it.
+  const [platformsOpen, setPlatformsOpen] = useState(false);
   return (
-    <TableRow hover sx={{ cursor: 'pointer', '&:last-child td': { borderBottom: 0 } }} onClick={() => onOpen(false)}>
-      <TableCell>
-        <Stack direction="row" spacing={1.25} alignItems="center">
-          <UserAvatar avatarId={p.avatarId} photoId={p.photoId} label={p.name} size={30} />
-          <Box sx={{ minWidth: 0 }}>
-            <Typography variant="body2" fontWeight={550} noWrap>
-              {p.name}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 260 }}>
-              {p.briefExperience || '—'}
-            </Typography>
-          </Box>
-        </Stack>
-      </TableCell>
-      <TableCell>
-        <Stack spacing={0.5} alignItems="flex-start">
-          <ProfileStatusChip status={p.status} />
-          {!p.isActive && <DeactivatedPill />}
-        </Stack>
-      </TableCell>
-      <TableCell>
-        {pending.length === 0 ? (
-          <Typography variant="body2" color="text.disabled">
-            Nothing
-          </Typography>
-        ) : (
-          <Stack spacing={0.25}>
-            {pending.map((item) => (
-              <Typography key={item} variant="caption" sx={{ color: 'warning.main', fontWeight: 600, lineHeight: 1.4 }}>
-                {item}
-              </Typography>
-            ))}
-          </Stack>
-        )}
-      </TableCell>
-      {!isExpert && (
+    <Fragment>
+      <TableRow hover sx={{ cursor: 'pointer' }} onClick={() => onOpen(false)}>
         <TableCell>
-          <PlatformDots profile={p} />
+          <Stack direction="row" spacing={1.25} alignItems="center">
+            <UserAvatar avatarId={p.avatarId} photoId={p.photoId} label={p.name} size={30} />
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" fontWeight={550} noWrap>
+                {p.name}
+              </Typography>
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 260 }}>
+                {p.briefExperience || '—'}
+              </Typography>
+            </Box>
+          </Stack>
         </TableCell>
-      )}
-      <TableCell align="right" onClick={(e) => e.stopPropagation()}>
-        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
-          <Tooltip title="Open details">
-            <IconButton size="small" aria-label={`Open ${p.name}`} onClick={() => onOpen(false)}>
-              <OpenInNewRounded sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-          {mayEdit && (
-            <Tooltip title="Edit">
-              <IconButton size="small" aria-label={`Edit ${p.name}`} onClick={() => onOpen(true)}>
-                <EditOutlined sx={{ fontSize: 18 }} />
+        <TableCell>
+          <Stack spacing={0.5} alignItems="flex-start">
+            <ProfileStatusChip status={p.status} />
+            {!p.isActive && <DeactivatedPill />}
+          </Stack>
+        </TableCell>
+        <TableCell>
+          {pending.length === 0 ? (
+            <Typography variant="body2" color="text.disabled">
+              Nothing
+            </Typography>
+          ) : (
+            <Stack spacing={0.25}>
+              {pending.map((item) => (
+                <Typography key={item} variant="caption" sx={{ color: 'warning.main', fontWeight: 600, lineHeight: 1.4 }}>
+                  {item}
+                </Typography>
+              ))}
+            </Stack>
+          )}
+        </TableCell>
+        {!isExpert && (
+          <TableCell>
+            <TopPlatformStatus profile={p} expanded={platformsOpen} onToggle={() => setPlatformsOpen((o) => !o)} />
+          </TableCell>
+        )}
+        <TableCell align="right" onClick={(e) => e.stopPropagation()}>
+          <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+            <Tooltip title="Open details">
+              <IconButton size="small" aria-label={`Open ${p.name}`} onClick={() => onOpen(false)}>
+                <OpenInNewRounded sx={{ fontSize: 18 }} />
               </IconButton>
             </Tooltip>
-          )}
-        </Stack>
-      </TableCell>
-    </TableRow>
+            {mayEdit && (
+              <Tooltip title="Edit">
+                <IconButton size="small" aria-label={`Edit ${p.name}`} onClick={() => onOpen(true)}>
+                  <EditOutlined sx={{ fontSize: 18 }} />
+                </IconButton>
+              </Tooltip>
+            )}
+          </Stack>
+        </TableCell>
+      </TableRow>
+      {platformsOpen && !isExpert && (
+        <TableRow>
+          <TableCell colSpan={5} sx={{ bgcolor: 'action.hover', py: 1 }}>
+            <AllPlatformStatuses profile={p} />
+          </TableCell>
+        </TableRow>
+      )}
+    </Fragment>
   );
 }

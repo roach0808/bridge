@@ -1,5 +1,7 @@
-import { Box, Stack, Tooltip } from '@mui/material';
-import { PLATFORM_REGISTRATION_LABELS, type ProfileDTO } from '@god/shared';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
+import { Box, Stack, Typography } from '@mui/material';
+import { PLATFORM_REGISTRATION_LABELS, type PlatformRegistration, type ProfileDTO } from '@god/shared';
+import type { MouseEvent } from 'react';
 import { PLATFORM_REGISTRATION_COLORS } from '@/components/ProfileDetails';
 
 /**
@@ -21,27 +23,85 @@ export function pendingItems(p: ProfileDTO): string[] {
   return items;
 }
 
-/** One dot per platform: green registered, grey not registered, red banned. */
-export function PlatformDots({ profile }: { profile: ProfileDTO }) {
-  const statuses = profile.platformStatuses ?? [];
-  if (!statuses.length) return null;
+/** Green registered, grey not registered, red banned. */
+export function PlatformDot({ status }: { status: PlatformRegistration }) {
   return (
-    <Stack direction="row" spacing={0.75} alignItems="center">
+    <Box
+      component="span"
+      sx={{
+        width: 10,
+        height: 10,
+        borderRadius: '50%',
+        flexShrink: 0,
+        bgcolor: PLATFORM_REGISTRATION_COLORS[status],
+        opacity: status === 'not_registered' ? 0.45 : 1,
+      }}
+    />
+  );
+}
+
+/**
+ * The row only carries the platform that matters most (priority one), by name,
+ * so it is plain where the Profile is registered. Clicking opens the rest.
+ */
+export function TopPlatformStatus({ profile, expanded, onToggle }: { profile: ProfileDTO; expanded: boolean; onToggle: () => void }) {
+  const statuses = profile.platformStatuses ?? [];
+  const top = statuses[0];
+  if (!top) return null;
+  const rest = statuses.length - 1;
+  return (
+    <Stack
+      component="button"
+      type="button"
+      direction="row"
+      spacing={0.75}
+      alignItems="center"
+      onClick={(e: MouseEvent) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      aria-expanded={expanded}
+      sx={{
+        border: 0,
+        p: 0.25,
+        bgcolor: 'transparent',
+        color: 'inherit',
+        font: 'inherit',
+        cursor: 'pointer',
+        borderRadius: 1,
+        '&:hover': { bgcolor: 'action.hover' },
+      }}
+    >
+      <PlatformDot status={top.status} />
+      <Typography variant="body2" noWrap>
+        {top.platform.name}
+      </Typography>
+      <Typography variant="caption" noWrap sx={{ color: PLATFORM_REGISTRATION_COLORS[top.status], fontWeight: 600 }}>
+        {PLATFORM_REGISTRATION_LABELS[top.status]}
+      </Typography>
+      {rest > 0 && (
+        <Typography variant="caption" color="text.secondary">
+          +{rest}
+        </Typography>
+      )}
+      <ExpandMoreRounded sx={{ fontSize: 16, color: 'text.secondary', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+    </Stack>
+  );
+}
+
+/** Every platform this Profile stands on, with where it stands. */
+export function AllPlatformStatuses({ profile }: { profile: ProfileDTO }) {
+  const statuses = profile.platformStatuses ?? [];
+  return (
+    <Stack direction="row" spacing={2.5} flexWrap="wrap" useFlexGap sx={{ py: 0.5 }}>
       {statuses.map((s) => (
-        <Tooltip key={s.platform.id} title={`${s.platform.name}: ${PLATFORM_REGISTRATION_LABELS[s.status]}`}>
-          <Box
-            component="span"
-            aria-label={`${s.platform.name}: ${PLATFORM_REGISTRATION_LABELS[s.status]}`}
-            sx={{
-              width: 10,
-              height: 10,
-              borderRadius: '50%',
-              flexShrink: 0,
-              bgcolor: PLATFORM_REGISTRATION_COLORS[s.status],
-              opacity: s.status === 'not_registered' ? 0.45 : 1,
-            }}
-          />
-        </Tooltip>
+        <Stack key={s.platform.id} direction="row" spacing={0.75} alignItems="center">
+          <PlatformDot status={s.status} />
+          <Typography variant="body2">{s.platform.name}</Typography>
+          <Typography variant="caption" sx={{ color: PLATFORM_REGISTRATION_COLORS[s.status], fontWeight: 600 }}>
+            {PLATFORM_REGISTRATION_LABELS[s.status]}
+          </Typography>
+        </Stack>
       ))}
     </Stack>
   );

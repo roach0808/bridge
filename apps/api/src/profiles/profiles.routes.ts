@@ -258,7 +258,9 @@ profilesRouter.delete('/profiles/:id', requireRole('founder'), async (req, res) 
   const actor = actorOf(req);
   const profile = await loadVisible(actor, idParam(req));
   const [open, total] = await Promise.all([
-    prisma.call.count({ where: { profileId: profile.id, status: { notIn: ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'] } } }),
+    prisma.call.count({
+      where: { profileId: profile.id, status: { notIn: ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank', 'cancelled'] } },
+    }),
     prisma.call.count({ where: { profileId: profile.id } }),
   ]);
   if (open) throw conflict(`“${profile.name}” still has ${open} call${open === 1 ? '' : 's'} to finish or move to another Profile`);

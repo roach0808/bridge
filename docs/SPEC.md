@@ -1,6 +1,6 @@
 # God System — Project Specification
 
-Version 1.4 · 2026-09-19 · Status: Phase 1 implemented, deployed
+Version 1.5 · 2026-09-20 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -461,8 +461,9 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | confirmed_at | timestamptz, nullable | When the giver confirmed it; set exactly when status = completed |
 | conversation_id | uuid → Conversation, nullable | Set exactly when the task came from a chat message |
 | assignee_id | uuid → User | Who the task is for (the taker) |
-| created_by | uuid → User (Founder or Manager) | The giver |
-| status | enum: open, done, completed | open → done (the taker ticks it) → completed (the giver confirms). `done_at` is set exactly when done or completed (check constraint) |
+| created_by | uuid → User | The giver: a Founder, a Manager, or the taker themselves (a personal to-do) |
+| status | enum: open, done, completed | open → done (the taker ticks it) → completed (the giver confirms). A task you gave yourself goes straight to completed when you tick it. `done_at` is set exactly when done or completed (check constraint) |
+| position | int, default 0 | Where the task sits on its panel; smaller is higher. Dragging renumbers the panel in steps of `TODO_POSITION_STEP` (100). Indexed with `assignee_id` |
 | done_at | timestamptz, nullable | |
 | done_note | text, nullable | The assignee's note, also the body of the reply |
 | done_message_id | uuid → ChatMessage, nullable, unique | The `todo_done` reply |
@@ -645,6 +646,7 @@ User         1 ── * WebPushSubscription
 | invoice_submit | Invoicing | Founder |
 | invoice_approve | Invoicing | Founder |
 | process_to_bank | Invoicing | Founder |
+| cancelled | Cancelled | Associate |
 
 "Associate" in this section means whoever runs the Call: its Associate, or a
 Manager running a Call of their own (§2.3), who then acts exactly like an
@@ -653,6 +655,11 @@ Associate, without overrides.
 A new Call starts in `on_scheduling`: tentative, the Expert is optional and the
 Expert's time is not blocked. `on_rescheduling` is a booked call sent back: the
 Expert is required and the old slot stays blocked until it is scheduled again.
+`cancelled` is a call called off before it ran: it is terminal, it frees the
+Expert's slot, it is left off the calendar, and it earns nothing (it counts in
+no statistics and blocks neither a Profile nor a User from being deleted). It is
+not a stage of the workflow but a dead end beside it (`TRACK_STAGES` is the
+three stages a call travels through).
 
 ### 4.2 Allowed transitions
 
@@ -668,6 +675,10 @@ ongoing ──(Expert)──► finished
 finished ──(Founder)──► invoice_submit
 invoice_submit ──(Founder)──► invoice_approve
 invoice_approve ──(Founder)──► process_to_bank
+on_scheduling ──(Associate, Manager, Founder)──► cancelled
+scheduled ──(Associate, Manager, Founder)──► cancelled
+confirmed ──(Associate, Manager, Founder)──► cancelled
+on_rescheduling ──(Associate, Manager, Founder)──► cancelled
 ```
 
 Rules:
@@ -693,7 +704,12 @@ Rules:
 - A Call cannot be booked, or rescheduled, more than five minutes in the past.
 - Once `ongoing` or `finished`, the Associate has no transitions. Only the
   Founder may act after `finished`.
-- `process_to_bank` is terminal.
+- A call can be called off while it has not started (`CANCELLABLE_STATUSES`:
+  `on_scheduling`, `scheduled`, `confirmed`, `on_rescheduling`) by whoever runs
+  it, any Manager, or the Founder. The Expert never cancels — they ask for
+  rescheduling instead — and a call that has run cannot be cancelled. An
+  optional comment says why, and reaches everyone with the notification.
+- `process_to_bank` and `cancelled` are terminal.
 - Overrides (§2.3) follow the same edges; only the allowed actor set widens.
 
 ### 4.3 Transition rule table (shared package)
@@ -713,6 +729,10 @@ export const TRANSITIONS: Transition[] = [
   { from: 'finished',        to: 'invoice_submit',  roles: ['founder'] },
   { from: 'invoice_submit',  to: 'invoice_approve', roles: ['founder'] },
   { from: 'invoice_approve', to: 'process_to_bank', roles: ['founder'] },
+  { from: 'on_scheduling',   to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'scheduled',       to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'confirmed',       to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'on_rescheduling', to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
 ];
 
 export function canTransition(role, from, to, ctx): boolean
@@ -749,8 +769,6 @@ locked `FOR UPDATE`):
 
 ### 4.5 Proposed future statuses (not in v1)
 
-- `cancelled` — reachable from any scheduling status by Associate, Manager, or
-  Founder. Terminal.
 - `no_show` — reachable from `scheduled` by Expert. Returns to Associate for
   rescheduling.
 
@@ -1138,14 +1156,15 @@ that the rules no longer allow stays readable, with `canSend: false`.
 | DELETE | /chat/conversations/:id/history | either of the two people | Erases every message, picture and reaction in the chat for both. Tasks made from the chat are kept, each keeping the message's words as its title. Emits `chat:cleared` |
 | DELETE | /chat/messages/:id | the sender | Deletes for both: body erased, picture row deleted at once, reactions removed; a "deleted" placeholder stays. 409 for a message that is a task or a task's done reply. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/reactions | the two people | { emoji }. Toggles the caller's reaction (up to 10 per person per message); not on deleted messages or closed chats. Emits `chat:message-updated` |
-| POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`). Founder → anyone, Manager → any Associate (`canGiveTask`); 403 otherwise, 409 if already a task |
+| POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`). Founder → anyone, Manager → any Associate, anyone → themselves (`canGiveTask`); 403 otherwise, 409 if already a task |
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
-| GET | /todos/assignees | Founder, Manager | People the caller may give a task to |
-| POST | /todos | Founder, Manager | { assigneeId, title, details? }: a task without a chat message |
+| GET | /todos/assignees | all | People the caller may give a task to: themselves first, then everyone below them (every Associate for a Manager, everyone for the Founder) |
+| POST | /todos | all | { assigneeId, title, details? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own |
+| POST | /todos/reorder | the panel's owner, or anyone who may give them tasks | { assigneeId, ids }: the panel's new top-to-bottom order (what the filter hides keeps its order below it). 409 when an id is not that person's. Emits `chat:todos-reordered` |
 | DELETE | /todos/:id | the giver | Removes a task that is open, or completed and no longer needed. 409 while it waits for confirmation |
 | GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (every Associate for a Manager; everyone for the Founder). Each panel: the person, whether the caller may give them tasks, their tasks (whoever gave them) and counts. Query: status as below |
-| GET | /todos | giver or taker | Query: scope = assigned (default) \| created (Founders and Managers), status = active (default: open, done, and tasks completed within the last 7 days) \| open \| done \| completed \| all. Open first |
-| POST | /todos/:id/done | the taker | { note? }. open → done; for a chat task posts a `todo_done` reply (body = note or "Done"). The giver gets `todo.done` |
+| GET | /todos | giver or taker | Query: scope = assigned (default) \| created, status = active (default: open, done, and tasks completed within the last 7 days) \| open \| done \| completed \| all. Open first |
+| POST | /todos/:id/done | the taker | { note? }. open → done; for a chat task posts a `todo_done` reply (body = note or "Done"). The giver gets `todo.done`. A task the taker gave themselves goes straight to completed, with nobody to confirm and nobody to tell |
 | POST | /todos/:id/confirm | the giver | done → completed (`confirmed_at`); the taker gets `todo.completed`. Completed tasks leave the default list |
 | POST | /todos/:id/reopen | the giver | { note? }. done or completed → open, clearing the done state; the taker gets `todo.reopened` |
 
@@ -1195,9 +1214,10 @@ the database is unreachable.
 ### 6.16 Audit trail **[Implementation]**
 
 Every change (POST, PATCH, PUT, DELETE) and every sensitive read (bank details,
-database dumps, someone's sessions or sign-in details, the Profile statistics,
-the audit list itself) is recorded once the response is known, so refused
-attempts (403, 409) are kept too. Token refreshes, read receipts and presence
+database dumps, someone's sessions or sign-in details, the Profile statistics)
+is recorded once the response is known, so refused attempts (403, 409) are kept
+too. Reading the trail itself is **not** recorded: it only filled the trail with
+itself. Token refreshes, read receipts and presence
 are skipped as noise. Each entry has the actor, a plain summary, the request,
 its outcome, and the device, IP and country (§3.1 AuditLog). A failed sign-in
 keeps the attempted email; a successful one does not.
@@ -1240,6 +1260,7 @@ Entries are kept 365 days, trimmed after each nightly dump. Web: **Audit**
 | session:revoked | user:{id} | Sent before a deactivated user's sockets are dropped |
 | chat:message | both people's user rooms | ChatMessage |
 | chat:todo | giver's and taker's user rooms | Todo, or { id, conversationId, messageId, removed: true } (ids null for standalone tasks) |
+| chat:todos-reordered | the taker, the actor, every Founder and Manager | { assigneeId }: that panel has a new order |
 | chat:read | both people's user rooms | { conversationId, userId, readAt } |
 | chat:message-updated | both people's user rooms | ChatMessage, after a delete or a reaction |
 | chat:cleared | both people's user rooms | { conversationId }: the chat's history was erased |
@@ -1348,13 +1369,13 @@ Everyone sees whether the people they may chat with are at their screen.
 | Login | all | Email + password, and "Sign in with Google" when the API has a Google client ID |
 | Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, Profiles that need a bank, with an Add bank shortcut, and Profiles that need a rate), the **database size**, and **Backups** (the last nightly dump with its size and row count, Run now, and Download per kept dump). Manager: team counts per stage |
 | Call list | all | Table with filters (status, associate, expert, date range, search), live updates; filters live in the URL. **When** reads in plain words: "in 13 hours" over "Tomorrow 11 AM · 45 min" (exact date and range in the tooltip) |
-| Call detail | participants | Header with "View profile details", the platform, when it is in plain words, and its money once finished (expected price, "no rate yet", or real income once paid; not for Experts), a **Delete call** button for the Founder, status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions`, assignment controls, status history, a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls), a **GPT link** card (the Founder edits it, the Expert reads it) and a **Rate** card (the platform rate plus a special rate for this call, hidden from Experts). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
+| Call detail | participants | Header with "View profile details", the platform, when it is in plain words, and its money once finished as a pill — **Expected income** (rate × real duration), "No rate yet", or **Real income** once paid, repeated as a field in the Details card; not for Experts — a **Delete call** button for the Founder, status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions` and a quiet **Cancel call** button while the call has not started (whoever runs it, any Manager, the Founder; the dialog warns it cannot be undone, frees the Expert's time and earns nothing, and takes an optional reason), a warning before **Invoice submitted** when the Profile has no open bank account, assignment controls, status history, a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls), a **GPT link** card (the Founder edits it, the Expert reads it) and a **Rate** card (the platform rate plus a special rate for this call, hidden from Experts). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
 | New Call | Founder, Manager, Associate | Required fields are marked with *. In this order: Profile (approved and active only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. A Manager runs the call themselves by default, or picks any Associate. Past times are refused. Saving asks for confirmation when the time is today, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Every call block carries a status badge (SCHEDULING, SCHEDULED, CONFIRMED, RESCHEDULING, ONGOING, DONE, INVOICED, APPROVED, PAID) next to its colour; others' calls still being scheduled show as "Being scheduled"; past slots cannot start a call. Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
-| Profiles | all | One table: profile, status, **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), platform dots (green registered, grey not registered, red banned) and open / edit buttons. Filters All / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) |
+| Profiles | all | One table: profile, status, **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with its status (green registered, grey not registered, red banned) and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons. Filters All / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) |
 | Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit; a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (name, status dot, rate, status) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
 | Chat | all | Each chat row has a menu with **Clear chat history**. Messages can be deleted by their sender (a placeholder stays), carry pictures (paste, drop or attach; click to enlarge) and emoji reactions; an emoji picker sits by the message box. An arriving message raises a toast with an Open button unless that chat is already on screen, plus a browser notification when one is allowed. Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
-| Tasks | all | One panel per person: your own tasks first, then the people below you (every Associate for a Manager; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Panels with nothing in them start folded |
+| Tasks | all | One panel per person: your own tasks first, then the people below you (every Associate for a Manager; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person — including your own panel, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged up and down by the handle on the left (mouse, touch or keyboard) and the order is saved for everyone who sees that panel. Panels with nothing in them start folded |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create, deactivate |
 | Users | Founder | All users, create any role. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
@@ -1374,7 +1395,8 @@ the database size.
 
 - Every list subscribes to `call:updated` and `call:deleted` and patches the
   TanStack Query cache; chat and task screens follow `chat:message`,
-  `chat:message-updated`, `chat:cleared`, `chat:todo` and `chat:read`.
+  `chat:message-updated`, `chat:cleared`, `chat:todo`, `chat:todos-reordered`
+  and `chat:read`.
 - The sidebar has no New call button; it shows the signed-in person at the
   top, and badges: calls waiting at my step on Calls (`GET /calls/waiting`),
   unread chat messages on Chat, and on Tasks the open tasks given to me plus
@@ -1682,3 +1704,6 @@ Container alternative:
 | 2026-09-18 | Founders can delete a Profile: gone entirely if it never had calls, otherwise erased and hidden with its calls and income kept. Closed bank accounts no longer satisfy the dashboard's "Add bank" task |
 | 2026-09-19 | Founders can delete a Call for good, with its status history, messages and notifications |
 | 2026-09-19 | Spec brought up to date (v1.4): sessions and audit trail sections, money on calls, new tables (ProfileAddress, AuthIdentity, AuditLog, ChatImage, ChatReaction), task and chat rules, screens. Managers now list every Associate, so they can pick any of them for a call |
+| 2026-09-20 | A call can be **cancelled** before it starts by whoever runs it, any Manager or the Founder: terminal, off the calendar, the Expert's slot freed, no income. Experts never cancel |
+| 2026-09-20 | Anyone can put a task on their own panel; ticking it finishes it at once. Tasks are dragged into the order their panel should keep, and everyone sees that order |
+| 2026-09-20 | The call panel names its money in a field of its own: Expected income once finished, Real income once paid. The Profiles table shows the priority-one platform's status by name and unfolds every platform on click. Submitting an invoice from the call page warns when the Profile has no open bank account. Reading the audit trail is no longer written to the audit trail |

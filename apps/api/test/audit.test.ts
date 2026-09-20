@@ -119,6 +119,10 @@ describe('audit trail', () => {
     expect((await founder.get('/audit', { q: 'transition' })).body.items.length).toBeGreaterThan(0);
     expect((await founder.get('/audit', { pageSize: 1 })).body.items).toHaveLength(1);
     expect((await founder.get('/audit/actions')).body).toEqual(expect.arrayContaining(['call.transition']));
+
+    // Reading the trail is not itself recorded: it only filled the trail with itself.
+    await new Promise((r) => setTimeout(r, 200));
+    expect(await prisma.auditLog.count({ where: { action: 'audit.read' } })).toBe(0);
   });
 
   it('entries older than a year are trimmed by the nightly job', async () => {

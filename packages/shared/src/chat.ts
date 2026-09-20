@@ -21,13 +21,18 @@ export const TODO_STATUSES = ['open', 'done', 'completed'] as const;
 export type TodoStatus = (typeof TODO_STATUSES)[number];
 
 /**
- * Who may give a task to whom: the Founder to anyone else,
- * a Manager to any Associate (not only their own team).
+ * Who may give a task to whom: anyone to themselves (a personal to-do on their
+ * own panel), the Founder to anyone else, a Manager to any Associate.
  */
 export function canGiveTask(giver: { id: string; role: Role }, taker: { id: string; role: Role }): boolean {
-  if (giver.id === taker.id) return false;
+  if (giver.id === taker.id) return true;
   if (giver.role === 'founder') return true;
   return giver.role === 'manager' && taker.role === 'associate';
+}
+
+/** A task someone gave themselves needs nobody's confirmation: ticking it finishes it. */
+export function isSelfTask(t: { assignee: { id: string }; createdBy: { id: string } }): boolean {
+  return t.assignee.id === t.createdBy.id;
 }
 
 /** A Manager runs the work of every Associate, and of themselves. */
@@ -36,6 +41,9 @@ export function supervisesWork(actor: { id: string; role: Role }, owner: { id: s
   if (actor.role !== 'manager') return false;
   return owner.role === 'associate' || owner.id === actor.id;
 }
+
+/** Tasks are ordered by hand inside each panel; the gap leaves room to drop one between two others. */
+export const TODO_POSITION_STEP = 100;
 
 /** A completed task stays on the board this long before it drops out of the default view. */
 export const COMPLETED_TASK_DAYS = 7;

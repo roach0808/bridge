@@ -249,6 +249,8 @@ export function createApiClient(options: ClientOptions) {
       confirm: (id: string) => post<TodoDTO>(`/todos/${enc(id)}/confirm`),
       /** The giver sends a done or completed task back to the taker. */
       reopen: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/reopen`, note ? { note } : {}),
+      /** The new top-to-bottom order of one person's panel, after a drag. */
+      reorder: (input: { assigneeId: string; ids: string[] }) => post<void>('/todos/reorder', input),
     },
 
     stats: {

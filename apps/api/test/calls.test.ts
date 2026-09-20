@@ -34,7 +34,7 @@ describe('POST /calls', () => {
       durationMinutes: 45,
       scheduledAt: '2027-03-01T15:00:00.000Z',
       endsAt: '2027-03-01T15:45:00.000Z',
-      allowedTransitions: ['scheduled'],
+      allowedTransitions: ['scheduled', 'cancelled'],
       permissions: { edit: true, reassignAssociate: false, reassignExpert: true, editIncome: false, editGptLink: false, editRate: true },
     });
     const history = await prisma.callStatusHistory.findMany({ where: { callId: res.body.id } });
@@ -73,7 +73,7 @@ describe('POST /calls', () => {
     const m1 = await as(fx.m1);
     const call = (await m1.post('/calls', body({ expertId: fx.e1.id }))).body;
     expect(call.permissions).toMatchObject({ edit: true, reassignAssociate: true, reassignExpert: true });
-    expect(call.allowedTransitions).toEqual(['scheduled']);
+    expect(call.allowedTransitions).toEqual(['scheduled', 'cancelled']);
 
     const moved = await m1.post(`/calls/${call.id}/transition`, { to: 'scheduled' });
     expect(moved.status, moved.text).toBe(200);

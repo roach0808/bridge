@@ -10,11 +10,16 @@ export const CALL_STATUSES = [
   'invoice_submit',
   'invoice_approve',
   'process_to_bank',
+  /** Called off before it started: no call, no income (§4.5). */
+  'cancelled',
 ] as const;
 export type CallStatus = (typeof CALL_STATUSES)[number];
 
-export const STAGES = ['scheduling', 'execution', 'invoicing'] as const;
+export const STAGES = ['scheduling', 'execution', 'invoicing', 'cancelled'] as const;
 export type Stage = (typeof STAGES)[number];
+
+/** The stages a call travels through; `cancelled` is a dead end beside them. */
+export const TRACK_STAGES: readonly Stage[] = ['scheduling', 'execution', 'invoicing'];
 
 export const STATUS_STAGE: Record<CallStatus, Stage> = {
   on_scheduling: 'scheduling',
@@ -26,6 +31,7 @@ export const STATUS_STAGE: Record<CallStatus, Stage> = {
   invoice_submit: 'invoicing',
   invoice_approve: 'invoicing',
   process_to_bank: 'invoicing',
+  cancelled: 'cancelled',
 };
 
 export const STATUS_LABELS: Record<CallStatus, string> = {
@@ -38,6 +44,7 @@ export const STATUS_LABELS: Record<CallStatus, string> = {
   invoice_submit: 'Invoice submitted',
   invoice_approve: 'Invoice approved',
   process_to_bank: 'Processed to bank',
+  cancelled: 'Cancelled',
 };
 
 /** Room-saving names for calendar blocks and other tight spots. */
@@ -51,18 +58,21 @@ export const SHORT_STATUS_LABELS: Record<CallStatus, string> = {
   invoice_submit: 'Invoiced',
   invoice_approve: 'Approved',
   process_to_bank: 'Paid',
+  cancelled: 'Cancelled',
 };
 
 export const STAGE_LABELS: Record<Stage, string> = {
   scheduling: 'Scheduling',
   execution: 'Execution',
   invoicing: 'Invoicing',
+  cancelled: 'Cancelled',
 };
 
 export const STAGE_STATUSES: Record<Stage, CallStatus[]> = {
   scheduling: ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'],
   execution: ['ongoing', 'finished'],
   invoicing: ['invoice_submit', 'invoice_approve', 'process_to_bank'],
+  cancelled: ['cancelled'],
 };
 
 /** Statuses in which a call occupies the Expert's time (§3.3). */
@@ -98,7 +108,13 @@ export const WAITING_STATUSES: Record<Role, readonly CallStatus[]> = {
 export const CALL_DURATIONS = [15, 30, 45, 60] as const;
 export type CallDuration = (typeof CALL_DURATIONS)[number];
 
-export const TERMINAL_STATUSES: readonly CallStatus[] = ['process_to_bank'];
+export const TERMINAL_STATUSES: readonly CallStatus[] = ['process_to_bank', 'cancelled'];
+
+/**
+ * A call can still be called off while it has not started (§4.5). Cancelling is
+ * final: the Expert's time is freed and the call earns nothing.
+ */
+export const CANCELLABLE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'];
 
 /** The invoicing stage. Experts never see it: to them these calls are simply finished. */
 export const INVOICING_STATUSES: readonly CallStatus[] = STAGE_STATUSES.invoicing;

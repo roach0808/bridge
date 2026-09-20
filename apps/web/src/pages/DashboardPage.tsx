@@ -12,7 +12,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { STAGE_LABELS, STAGE_STATUSES, STAGES, type CallDTO, type CallStatus, type DashboardSummary, type ProfileNeedingBank, type ProfileNeedingRate } from '@god/shared';
+import { STAGE_LABELS, STAGE_STATUSES, TRACK_STAGES, type CallDTO, type CallStatus, type DashboardSummary, type ProfileNeedingBank, type ProfileNeedingRate } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useState, type ReactNode } from 'react';
@@ -395,7 +395,7 @@ function TeamPanel({ team }: { team: NonNullable<DashboardSummary['team']> }) {
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <UserChip user={row.associate} showRole={false} />
             </Box>
-            {STAGES.map((stage) => (
+            {TRACK_STAGES.map((stage) => (
               <Box key={stage} sx={{ width: 76, textAlign: 'right' }}>
                 <Typography variant="body2" fontWeight={600}>
                   {sum(row.byStatus, STAGE_STATUSES[stage])}

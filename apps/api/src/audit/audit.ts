@@ -56,8 +56,11 @@ function shape(path: string): string {
     .join('/');
 }
 
-/** Reads worth recording: money, personal data and anything that dumps data out. */
-const SENSITIVE_READS = [/^users\/:id\/sign-in$/, /^stats\/profiles$/, /^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/, /^audit/];
+/**
+ * Reads worth recording: money, personal data and anything that dumps data out.
+ * Reading the trail itself is not one of them — it only filled the trail with itself.
+ */
+const SENSITIVE_READS = [/^users\/:id\/sign-in$/, /^stats\/profiles$/, /^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/];
 
 const MUTATIONS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -155,6 +158,7 @@ const SUMMARIES: Record<string, string> = {
   'todo.done': 'marked a task done',
   'todo.confirm': 'confirmed a task complete',
   'todo.reopen': 'reopened a task',
+  // No longer recorded; kept so entries written before still read well.
   'audit.read': 'read the audit trail',
   'stats.profiles': 'looked at profile statistics (emails and banks)',
 };

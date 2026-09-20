@@ -24,6 +24,11 @@ export const TRANSITIONS: Transition[] = [
   { from: 'finished',        to: 'invoice_submit',  roles: ['founder'] },
   { from: 'invoice_submit',  to: 'invoice_approve', roles: ['founder'] },
   { from: 'invoice_approve', to: 'process_to_bank', roles: ['founder'] },
+  // Called off before it started; the Expert is told, but never cancels (§4.5).
+  { from: 'on_scheduling',   to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'scheduled',       to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'confirmed',       to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'on_rescheduling', to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
 ];
 
 /**
@@ -42,6 +47,10 @@ const EDGE_OWNERS: Record<string, Role[]> = {
   'finished>invoice_submit': ['founder'],
   'invoice_submit>invoice_approve': ['founder'],
   'invoice_approve>process_to_bank': ['founder'],
+  'on_scheduling>cancelled': ['associate'],
+  'scheduled>cancelled': ['associate'],
+  'confirmed>cancelled': ['associate'],
+  'on_rescheduling>cancelled': ['associate'],
 };
 
 /**

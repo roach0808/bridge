@@ -6,6 +6,7 @@ import { Box, MenuItem, TextField, Typography } from '@mui/material';
 import { ROLE_LABELS, type TodoDTO, type TodoSummary, type UserRef } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
+import { useMe } from '@/auth/AuthProvider';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
@@ -171,8 +172,11 @@ export function TodoReopenDialog({ todo, onClose }: { todo: TodoDTO | null; onCl
 
 /** A task that doesn't come from a chat message. With `assignee` it is already decided who it is for. */
 export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assignee?: UserRef; onClose: () => void }) {
+  const me = useMe();
   const refresh = useRefreshTodos();
   const toast = useToast();
+  // A task for yourself is a to-do, not something you hand out.
+  const self = assignee?.id === me.id;
   const [assigneeId, setAssigneeId] = useState('');
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
@@ -189,7 +193,7 @@ export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assi
     mutationFn: () => api.todos.create({ assigneeId, title: title.trim(), details: details.trim() || null }),
     onSuccess: (saved) => {
       refresh(saved);
-      toast.success(`Task given to ${saved.assignee.nickname}`);
+      toast.success(self ? 'Task added' : `Task given to ${saved.assignee.nickname}`);
       onClose();
     },
     onError: (err) => toast.error(errorMessage(err)),
@@ -199,9 +203,9 @@ export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assi
     <FormDialog
       open={open}
       onClose={onClose}
-      title={assignee ? `New task for ${assignee.nickname}` : 'New task'}
+      title={self || !assignee ? 'New task' : `New task for ${assignee.nickname}`}
       icon={<AddTaskRounded />}
-      submitLabel="Give task"
+      submitLabel={self ? 'Add task' : 'Give task'}
       pending={mutation.isPending}
       submitDisabled={!assigneeId || !title.trim()}
       onSubmit={() => mutation.mutate()}
@@ -217,7 +221,7 @@ export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assi
         >
           {(assignees.data ?? []).map((u) => (
             <MenuItem key={u.id} value={u.id}>
-              {u.nickname}
+              {u.id === me.id ? 'You' : u.nickname}
               <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                 {ROLE_LABELS[u.role]}
               </Typography>

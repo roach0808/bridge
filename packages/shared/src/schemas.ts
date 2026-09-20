@@ -362,6 +362,11 @@ export const createTodoSchema = z.object({
   title: trimmed('Title', 200),
   details: optionalText(5000).optional(),
 });
+/** The tasks of one panel, in the order they should be shown from now on. */
+export const reorderTodosSchema = z.object({
+  assigneeId: uuid,
+  ids: z.array(uuid).min(1).max(500),
+});
 
 // --- Statistics -----------------------------------------------------------------
 

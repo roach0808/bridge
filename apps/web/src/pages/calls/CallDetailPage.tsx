@@ -1,4 +1,5 @@
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
+import CancelOutlined from '@mui/icons-material/CancelOutlined';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
 import BadgeOutlined from '@mui/icons-material/BadgeOutlined';
@@ -37,13 +38,14 @@ import {
   MAX_PLATFORM_RATE,
   FEATURES,
   MAX_ACTUAL_DURATION_MINUTES,
+  INVOICING_STATUSES,
   STATUS_LABELS,
-  STATUS_STAGE,
   edgeOwner,
   isOverride,
   type CallDetailDTO,
   type CallDTO,
   type CallStatus,
+  type Role,
   type TransitionInput,
   type UpdateCallInput,
   type UserRef,
@@ -85,6 +87,32 @@ function useUpdateCall(call: CallDTO) {
 
 const RATING_LABELS: Record<number, string> = { 1: 'Went badly', 2: 'Not great', 3: 'Okay', 4: 'Went well', 5: 'Went very well' };
 
+/**
+ * What the call is worth, as soon as that means anything: the expected income
+ * once it is finished (rate × real duration), and what really arrived once the
+ * bank has paid. Experts never see money.
+ */
+function callMoney(call: CallDTO, role: Role): { label: string; value: string; hint: string; color: string } | null {
+  if (role === 'expert') return null;
+  if (call.status === 'cancelled') {
+    return { label: 'Income', value: 'None — cancelled', hint: 'A cancelled call earns nothing', color: 'text.secondary' };
+  }
+  const done = call.status === 'finished' || INVOICING_STATUSES.includes(call.status);
+  if (!done) return null;
+  if (call.realIncome !== null) {
+    return { label: 'Real income', value: formatUsd(call.realIncome), hint: 'What reached the bank', color: 'success.main' };
+  }
+  if (call.expectedPrice !== null) {
+    return {
+      label: 'Expected income',
+      value: formatUsd(call.expectedPrice),
+      hint: `Rate × the call’s real duration (${call.actualDurationMinutes ?? call.durationMinutes} min)`,
+      color: 'primary.main',
+    };
+  }
+  return { label: 'Expected income', value: 'No rate yet', hint: 'Set the Profile’s rate on this platform', color: 'warning.main' };
+}
+
 function TransitionBar({ call }: { call: CallDTO }) {
   const me = useMe();
   const toast = useToast();
@@ -106,6 +134,15 @@ function TransitionBar({ call }: { call: CallDTO }) {
     setIncome(call.expectedPrice === null ? '' : String(call.expectedPrice));
     transition.reset();
   };
+
+  // §6.10: an invoice for a Profile with no open bank account cannot be paid out.
+  const invoicing = call.allowedTransitions.includes('invoice_submit');
+  const profile = useQuery({
+    queryKey: qk.profiles.detail(call.profile.id),
+    queryFn: () => api.profiles.get(call.profile.id),
+    enabled: invoicing,
+  });
+  const noBank = invoicing && profile.data?.bankCount === 0;
 
   const transition = useMutation({
     mutationFn: ({ to, ...extra }: TransitionInput) => api.calls.transition(call.id, to, extra),
@@ -131,6 +168,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const incomeValid = income.trim() !== '' && Number.isFinite(incomeValue) && incomeValue >= 0 && Math.round(incomeValue * 100) === incomeValue * 100;
   // An Expert asking to reschedule must say why, so the Associate knows what to arrange.
   const expertReschedule = target === 'on_rescheduling' && me.role === 'expert';
+  const cancelling = target === 'cancelled';
   const ready =
     target === 'ongoing'
       ? linkValid
@@ -153,24 +191,29 @@ function TransitionBar({ call }: { call: CallDTO }) {
     });
   };
 
+  // Cancelling is not a step along the way; it gets its own quiet button.
+  const forward = call.allowedTransitions.filter((t) => t !== 'cancelled');
+
   if (!call.allowedTransitions.length) {
     return (
       <Typography variant="body2" color="text.secondary">
-        {call.status === 'process_to_bank' || (me.role === 'expert' && call.status === 'finished')
-          ? 'This call is complete.'
-          : 'No actions for you at this stage.'}
+        {call.status === 'cancelled'
+          ? 'This call was cancelled.'
+          : call.status === 'process_to_bank' || (me.role === 'expert' && call.status === 'finished')
+            ? 'This call is complete.'
+            : 'No actions for you at this stage.'}
       </Typography>
     );
   }
 
   return (
     <>
-      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent={{ md: 'flex-end' }}>
-        {call.allowedTransitions.map((to) => {
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent={{ md: 'flex-end' }} alignItems="center">
+        {forward.map((to) => {
           const override = isOverride(me.role, call.status, to, { isCallAssociate: call.associate.id === me.id });
           const backwards = to === 'on_rescheduling';
           // One primary action: the first forward move. Everything else stays quiet.
-          const primary = !backwards && to === call.allowedTransitions.find((t) => t !== 'on_rescheduling');
+          const primary = !backwards && to === forward.find((t) => t !== 'on_rescheduling');
           return (
             <Tooltip key={to} title={override ? `Override: normally done by the ${edgeOwner(call.status, to)}` : ''}>
               <span>
@@ -198,6 +241,22 @@ function TransitionBar({ call }: { call: CallDTO }) {
             </Tooltip>
           );
         })}
+        {call.allowedTransitions.includes('cancelled') && (
+          <Tooltip title="Call it off: the time is freed and the call earns nothing">
+            <span>
+              <Button
+                size="small"
+                color="error"
+                startIcon={<CancelOutlined />}
+                disabled={transition.isPending}
+                onClick={() => open('cancelled')}
+                sx={{ color: 'error.main' }}
+              >
+                Cancel call
+              </Button>
+            </span>
+          </Tooltip>
+        )}
       </Stack>
       <Dialog open={Boolean(target)} onClose={() => !transition.isPending && setTarget(null)} maxWidth="xs" fullWidth>
         {target && (
@@ -207,7 +266,9 @@ function TransitionBar({ call }: { call: CallDTO }) {
                 ? 'Confirm this call?'
                 : expertReschedule
                   ? 'Request rescheduling?'
-                  : `Move to ${STATUS_LABELS[target]}?`}
+                  : cancelling
+                    ? `Cancel the call with ${call.profile.name}?`
+                    : `Move to ${STATUS_LABELS[target]}?`}
             </DialogTitle>
             <DialogContent>
               <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
@@ -220,6 +281,27 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   You confirm that {me.role === 'expert' ? 'you are' : 'the Expert is'} available on{' '}
                   <strong>{formatDateTime(call.scheduledAt, call.expert?.timeZone ?? me.timeZone)}</strong> for{' '}
                   {call.durationMinutes} minutes and can take the call.
+                </Alert>
+              )}
+              {cancelling && (
+                <Alert severity="warning" sx={{ mb: 2 }}>
+                  <strong>This cannot be undone.</strong> The call is called off for good
+                  {call.expert ? `, ${call.expert.nickname}’s time is freed` : ''} and it earns nothing. Everyone on the
+                  call is told. To keep it and find another time, use “Needs rescheduling” instead.
+                </Alert>
+              )}
+              {target === 'invoice_submit' && noBank && (
+                <Alert
+                  severity="warning"
+                  sx={{ mb: 2 }}
+                  action={
+                    <Button color="inherit" size="small" href={`/profiles/${call.profile.id}`} target="_blank" rel="noopener">
+                      Profile
+                    </Button>
+                  }
+                >
+                  <strong>{call.profile.name} has no bank account yet.</strong> The invoice can be submitted, but nothing
+                  can be paid out until bank details are added.
                 </Alert>
               )}
               {expertReschedule && (
@@ -286,9 +368,15 @@ function TransitionBar({ call }: { call: CallDTO }) {
                 )}
                 {target !== 'finished' && (
                   <TextField
-                    label={expertReschedule ? 'Reason for rescheduling' : 'Comment (optional)'}
+                    label={expertReschedule ? 'Reason for rescheduling' : cancelling ? 'Why is it cancelled? (optional)' : 'Comment (optional)'}
                     required={expertReschedule}
-                    placeholder={expertReschedule ? 'e.g. A conflict came up — I can do Thursday afternoon instead.' : undefined}
+                    placeholder={
+                      expertReschedule
+                        ? 'e.g. A conflict came up — I can do Thursday afternoon instead.'
+                        : cancelling
+                          ? 'e.g. The client called it off.'
+                          : undefined
+                    }
                     multiline
                     minRows={2}
                     value={comment}
@@ -300,14 +388,15 @@ function TransitionBar({ call }: { call: CallDTO }) {
             </DialogContent>
             <DialogActions sx={{ px: 3, pb: 2 }}>
               <Button color="inherit" onClick={() => setTarget(null)} disabled={transition.isPending}>
-                Cancel
+                {cancelling ? 'Keep the call' : 'Cancel'}
               </Button>
               <Button
                 variant="contained"
+                color={cancelling ? 'error' : 'primary'}
                 disabled={transition.isPending || !ready}
                 onClick={confirm}
               >
-                {transition.isPending ? <CircularProgress size={18} color="inherit" /> : 'Confirm'}
+                {transition.isPending ? <CircularProgress size={18} color="inherit" /> : cancelling ? 'Cancel call' : 'Confirm'}
               </Button>
             </DialogActions>
           </>
@@ -673,6 +762,8 @@ function RateCard({ call }: { call: CallDTO }) {
   const next = empty ? null : Math.round(value * 100) / 100;
   const dirty = next !== call.rateOverride;
   const effective = call.rateOverride ?? call.platformRate;
+  // A cancelled call is never paid for, whatever the rate says.
+  const cancelled = call.status === 'cancelled';
 
   return (
     <SectionCard title="Rate & payment">
@@ -703,7 +794,7 @@ function RateCard({ call }: { call: CallDTO }) {
           <Field label="Expected price">
             {call.expectedPrice === null ? (
               <Typography variant="body2" color="text.disabled">
-                {effective === null ? 'Needs a rate' : 'After the call (rate × real duration)'}
+                {cancelled ? 'None — cancelled' : effective === null ? 'Needs a rate' : 'After the call (rate × real duration)'}
               </Typography>
             ) : (
               <Tooltip title={`$${effective}/h × ${call.actualDurationMinutes} min`}>
@@ -716,7 +807,7 @@ function RateCard({ call }: { call: CallDTO }) {
           <Field label="Real income">
             {call.realIncome === null ? (
               <Typography variant="body2" color="text.disabled">
-                Entered when paid to bank
+                {cancelled ? 'None — cancelled' : 'Entered when paid to bank'}
               </Typography>
             ) : (
               <Typography variant="body2" fontWeight={600}>
@@ -731,7 +822,7 @@ function RateCard({ call }: { call: CallDTO }) {
           </Field>
         </Box>
         {call.permissions.editIncome && call.status === 'process_to_bank' && <RealIncomeEditor call={call} />}
-        {call.permissions.editRate && (
+        {call.permissions.editRate && !cancelled && (
           <Stack direction="row" spacing={1.5} alignItems="flex-start">
             <TextField
               label="Special rate for this call"
@@ -916,16 +1007,7 @@ export default function CallDetailPage() {
 
   const expertZone = call.expert?.timeZone ?? null;
   const perms = call.permissions;
-  // Once a call is finished the expected price matters; once it is paid, what really arrived.
-  const finished = STATUS_STAGE[call.status] !== 'scheduling' && call.status !== 'ongoing' && call.status !== 'confirmed';
-  const money =
-    me.role === 'expert' || !finished
-      ? null
-      : call.realIncome !== null
-        ? { label: `Real income ${formatUsd(call.realIncome)}`, hint: 'What reached the bank', color: 'success.main' }
-        : call.expectedPrice !== null
-          ? { label: `Expected ${formatUsd(call.expectedPrice)}`, hint: 'Rate × the call’s real duration', color: 'primary.main' }
-          : { label: 'Expected: no rate yet', hint: 'Set the Profile’s rate on this platform', color: 'warning.main' };
+  const money = callMoney(call, me.role);
 
   return (
     <>
@@ -988,9 +1070,25 @@ export default function CallDetailPage() {
                         ·
                       </Typography>
                       <Tooltip title={money.hint}>
-                        <Typography variant="body2" fontWeight={650} sx={{ color: money.color }}>
-                          {money.label}
-                        </Typography>
+                        <Box
+                          sx={{
+                            display: 'inline-flex',
+                            alignItems: 'baseline',
+                            gap: 0.75,
+                            px: 1,
+                            py: 0.25,
+                            borderRadius: 999,
+                            bgcolor: 'action.selected',
+                            color: money.color,
+                            fontWeight: 700,
+                            fontSize: '0.875rem',
+                          }}
+                        >
+                          <Box component="span" sx={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.85 }}>
+                            {money.label}
+                          </Box>
+                          {money.value}
+                        </Box>
                       </Tooltip>
                     </>
                   )}
@@ -1031,6 +1129,15 @@ export default function CallDetailPage() {
                 </Tooltip>
               </Field>
               <Field label="Platform">{call.platform.name}</Field>
+              {money && (
+                <Field label={money.label}>
+                  <Tooltip title={money.hint}>
+                    <Typography variant="body2" fontWeight={650} sx={{ color: money.color }}>
+                      {money.value}
+                    </Typography>
+                  </Tooltip>
+                </Field>
+              )}
               <Field label="Duration">
                 {durationLabel(call.durationMinutes)} · ends {timeOfDay(call.endsAt, zone)}
               </Field>

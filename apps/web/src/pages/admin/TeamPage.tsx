@@ -12,7 +12,7 @@ import {
   Typography,
 } from '@mui/material';
 import {
-  STAGES,
+  TRACK_STAGES,
   STAGE_LABELS,
   STAGE_STATUSES,
   STATUS_LABELS,
@@ -39,7 +39,7 @@ const stageTotal = (counts: Counts | undefined, stage: Stage) =>
   counts ? STAGE_STATUSES[stage].reduce((n, s) => n + (counts[s] ?? 0), 0) : 0;
 
 function StageBar({ counts }: { counts: Counts | undefined }) {
-  const totals = STAGES.map((s) => ({ stage: s, n: stageTotal(counts, s) }));
+  const totals = TRACK_STAGES.map((s) => ({ stage: s, n: stageTotal(counts, s) }));
   const sum = totals.reduce((n, t) => n + t.n, 0);
   return (
     <Box
@@ -98,7 +98,7 @@ export default function TeamPage() {
   const teamTotals = useMemo(
     () =>
       Object.fromEntries(
-        STAGES.map((stage) => [stage, [...countsById.values()].reduce((n, c) => n + stageTotal(c, stage), 0)]),
+        TRACK_STAGES.map((stage) => [stage, [...countsById.values()].reduce((n, c) => n + stageTotal(c, stage), 0)]),
       ) as Record<Stage, number>,
     [countsById],
   );
@@ -140,7 +140,7 @@ export default function TeamPage() {
             }
           />
         </Grid>
-        {STAGES.map((stage) => (
+        {TRACK_STAGES.map((stage) => (
           <Grid key={stage} size={{ xs: 6, md: 3 }}>
             <StatTile
               label={STAGE_LABELS[stage]}
@@ -244,7 +244,7 @@ export default function TeamPage() {
                       ) : (
                         <>
                           <Stack direction="row" spacing={1} sx={{ mb: 1.25 }}>
-                            {STAGES.map((s) => (
+                            {TRACK_STAGES.map((s) => (
                               <StageCount key={s} stage={s} counts={counts} dim={!m.isActive} />
                             ))}
                           </Stack>

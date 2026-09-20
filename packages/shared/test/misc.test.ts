@@ -3,6 +3,7 @@ import {
   AVATAR_CATALOG,
   canChat,
   canGiveTask,
+  isSelfTask,
   supervisesWork,
   expectedPrice,
   transitionSchema,
@@ -25,6 +26,9 @@ import {
   displayZoneFor,
   isAvatarForAudience,
   isBlockingStatus,
+  CANCELLABLE_STATUSES,
+  TERMINAL_STATUSES,
+  TRACK_STAGES,
   isValidTimeZone,
   repeatSchema,
   updateCallSchema,
@@ -32,12 +36,22 @@ import {
 } from '../src';
 
 describe('call status constants', () => {
-  it('blocking statuses are every status except on_scheduling', () => {
-    expect([...BLOCKING_STATUSES].sort()).toEqual(CALL_STATUSES.filter((s) => s !== 'on_scheduling').sort());
+  /** A call holds the Expert's time from the moment it has one, until it is called off. */
+  const FREE: readonly string[] = ['on_scheduling', 'cancelled'];
+
+  it('blocking statuses are every status but on_scheduling and cancelled', () => {
+    expect([...BLOCKING_STATUSES].sort()).toEqual(CALL_STATUSES.filter((s) => !FREE.includes(s)).sort());
   });
 
   it.each(CALL_STATUSES)('isBlockingStatus(%s)', (s) => {
-    expect(isBlockingStatus(s)).toBe(s !== 'on_scheduling');
+    expect(isBlockingStatus(s)).toBe(!FREE.includes(s));
+  });
+
+  it('cancelled is terminal and is a stage of its own', () => {
+    expect([...TERMINAL_STATUSES].sort()).toEqual(['cancelled', 'process_to_bank']);
+    expect(STATUS_STAGE.cancelled).toBe('cancelled');
+    expect(TRACK_STAGES).toEqual(['scheduling', 'execution', 'invoicing']);
+    expect([...CANCELLABLE_STATUSES].sort()).toEqual(['confirmed', 'on_rescheduling', 'on_scheduling', 'scheduled']);
   });
 
   it('stage mapping agrees with STAGE_STATUSES', () => {
@@ -183,11 +197,10 @@ describe('canChat', () => {
 });
 
 describe('canGiveTask', () => {
-  it('the founder gives tasks to anyone but themselves', () => {
+  it('the founder gives tasks to anyone', () => {
     for (const role of ['founder', 'manager', 'associate', 'expert'] as const) {
       expect(canGiveTask({ id: 'f', role: 'founder' }, { id: 'x', role })).toBe(true);
     }
-    expect(canGiveTask({ id: 'f', role: 'founder' }, { id: 'f', role: 'founder' })).toBe(false);
   });
   it('a manager gives tasks to any associate, and to nobody else', () => {
     const m = { id: 'm', role: 'manager' as const };
@@ -195,7 +208,13 @@ describe('canGiveTask', () => {
     expect(canGiveTask(m, { id: 'b', role: 'associate' })).toBe(true);
     expect(canGiveTask(m, { id: 'm2', role: 'manager' })).toBe(false);
     expect(canGiveTask(m, { id: 'e', role: 'expert' })).toBe(false);
-    expect(canGiveTask(m, m)).toBe(false);
+  });
+  it('anyone gives themselves a task, whatever their role', () => {
+    for (const role of ['founder', 'manager', 'associate', 'expert'] as const) {
+      expect(canGiveTask({ id: 'x', role }, { id: 'x', role })).toBe(true);
+      expect(isSelfTask({ assignee: { id: 'x' }, createdBy: { id: 'x' } })).toBe(true);
+      expect(isSelfTask({ assignee: { id: 'x' }, createdBy: { id: 'y' } })).toBe(false);
+    }
   });
 
   it('supervisesWork: the founder over everyone, a manager over associates and their own work', () => {
@@ -223,8 +242,8 @@ describe('experts do not see invoicing', () => {
     expect(statusForRole('expert', 'confirmed')).toBe('confirmed');
   });
   it('stages and status filters', () => {
-    expect(stagesForRole('expert')).toEqual(['scheduling', 'execution']);
-    expect(stagesForRole('manager')).toEqual(['scheduling', 'execution', 'invoicing']);
+    expect(stagesForRole('expert')).toEqual(['scheduling', 'execution', 'cancelled']);
+    expect(stagesForRole('manager')).toEqual(['scheduling', 'execution', 'invoicing', 'cancelled']);
     expect(statusFilterForRole('expert', ['finished']).sort()).toEqual(['finished', 'invoice_approve', 'invoice_submit', 'process_to_bank']);
     expect(statusFilterForRole('expert', ['invoice_submit'])).toEqual([]);
     expect(statusFilterForRole('founder', ['invoice_submit'])).toEqual(['invoice_submit']);

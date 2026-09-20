@@ -30,6 +30,7 @@ export const STAGE_COLORS: Record<Stage, string> = {
   scheduling: '#4a8cf0',
   execution: '#e0913a',
   invoicing: '#3fb68b',
+  cancelled: '#9aa0a6',
 };
 
 /** Distinct, soft hues for per-Expert calendar columns. */

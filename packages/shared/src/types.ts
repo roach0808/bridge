@@ -634,6 +634,8 @@ export interface ServerToClientEvents {
   'notification:new': (notification: NotificationDTO) => void;
   'chat:message': (message: ChatMessageDTO) => void;
   'chat:todo': (todo: TodoDTO | TodoRemovedEvent) => void;
+  /** Someone dragged a task: this person's panel has a new order. */
+  'chat:todos-reordered': (event: { assigneeId: string }) => void;
   'chat:read': (event: ChatReadEvent) => void;
   /** A message changed: deleted, or its reactions. */
   'chat:message-updated': (message: ChatMessageDTO) => void;

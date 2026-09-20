@@ -1,4 +1,5 @@
 import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
+import CancelRounded from '@mui/icons-material/CancelRounded';
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import HowToRegRounded from '@mui/icons-material/HowToRegRounded';
@@ -22,6 +23,7 @@ export const STATUS_ICONS: Record<CallStatus, ComponentType<SvgIconProps>> = {
   invoice_submit: ReceiptLongRounded,
   invoice_approve: VerifiedRounded,
   process_to_bank: AccountBalanceRounded,
+  cancelled: CancelRounded,
 };
 
 export const STATUS_COLORS: Record<CallStatus, string> = {
@@ -34,6 +36,7 @@ export const STATUS_COLORS: Record<CallStatus, string> = {
   invoice_submit: '#2ea3b8',
   invoice_approve: '#35a38a',
   process_to_bank: '#6aa84f',
+  cancelled: '#9aa0a6',
 };
 
 /** A tiny status badge for calendar blocks: the status icon, and its short name when there is room. */

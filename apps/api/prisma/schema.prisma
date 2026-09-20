@@ -29,6 +29,7 @@ enum CallStatus {
   invoice_submit
   invoice_approve
   process_to_bank
+  cancelled
 }
 
 enum ProfileStatus {
@@ -525,6 +526,8 @@ model Todo {
   assigneeId     String     @map("assignee_id") @db.Uuid
   createdById    String     @map("created_by") @db.Uuid
   status         TodoStatus @default(open)
+  /// Where the task sits on its panel; dragging a task rewrites these (§6.x tasks).
+  position       Int        @default(0)
   doneAt         DateTime?  @map("done_at") @db.Timestamptz(3)
   doneNote       String?    @map("done_note")
   /// The chat reply posted when the assignee marked it done.
@@ -541,6 +544,7 @@ model Todo {
   createdBy    User         @relation("TodoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
   @@index([assigneeId, status])
+  @@index([assigneeId, position])
   @@index([createdById, status])
   @@map("todos")
 }

@@ -151,6 +151,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: qk.todos.all });
     };
 
+    // Someone dragged a task into a new place: everyone sees the same order.
+    const onTodosReordered = () => {
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+    };
+
     const onChatMessageUpdated = (message: ChatMessageDTO) => {
       replaceChatMessage(queryClient, message);
       // The chat list preview may be the message that was just deleted.
@@ -196,6 +201,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('notification:new', onNotification);
     socket.on('chat:message', onChatMessage);
     socket.on('chat:todo', onChatTodo);
+    socket.on('chat:todos-reordered', onTodosReordered);
     socket.on('chat:read', onChatRead);
     socket.on('chat:message-updated', onChatMessageUpdated);
     socket.on('chat:cleared', onChatCleared);
@@ -210,6 +216,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('notification:new', onNotification);
       socket.off('chat:message', onChatMessage);
       socket.off('chat:todo', onChatTodo);
+      socket.off('chat:todos-reordered', onTodosReordered);
       socket.off('chat:read', onChatRead);
       socket.off('chat:message-updated', onChatMessageUpdated);
       socket.off('chat:cleared', onChatCleared);

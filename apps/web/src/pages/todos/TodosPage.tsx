@@ -3,15 +3,28 @@ import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRound
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
+import DragIndicatorRounded from '@mui/icons-material/DragIndicatorRounded';
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import RadioButtonUncheckedRounded from '@mui/icons-material/RadioButtonUncheckedRounded';
 import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import VerifiedOutlined from '@mui/icons-material/VerifiedOutlined';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import { Box, Button, Card, Checkbox, Collapse, Divider, IconButton, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
-import { ROLE_LABELS, type TodoDTO, type TodoPanel, type UserRef } from '@god/shared';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { useState } from 'react';
+import { ROLE_LABELS, isSelfTask, type TodoDTO, type TodoPanel, type UserRef } from '@god/shared';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState, type CSSProperties, type ReactNode, type Ref } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { BrowserNotificationsPrompt } from '@/components/BrowserNotifications';
@@ -58,7 +71,7 @@ export default function TodosPage() {
     queryFn: () => api.todos.board({ status: filter }),
   });
   const panels = query.data ?? [];
-  const gives = panels.some((p) => p.canGive);
+  const gives = panels.some((p) => p.canGive && !p.isMe);
 
   return (
     <Box>
@@ -66,8 +79,8 @@ export default function TodosPage() {
         title="Tasks"
         subtitle={
           gives
-            ? 'Your tasks first, then one panel per person. Mark your own done; confirm theirs when they are.'
-            : 'Tasks given to you. Mark one done when it is finished, and the person who gave it confirms.'
+            ? 'Your tasks first, then one panel per person. Add your own, drag to reorder, and confirm theirs when they are done.'
+            : 'Your own to-dos and the tasks given to you. Add one, drag to reorder, and tick it off when it is finished.'
         }
       />
 
@@ -131,6 +144,35 @@ function PersonPanel({
   // Panels with nothing in them start folded, so a long team stays readable.
   const [open, setOpen] = useState(isMe || tasks.length > 0);
   const waiting = counts.done;
+  const queryClient = useQueryClient();
+  const toast = useToast();
+  // Your own panel is yours to arrange, and so is the panel of anyone you give tasks to.
+  const mayArrange = (isMe || panel.canGive) && tasks.length > 1;
+  const sensors = useSensors(
+    // A few pixels of movement, so a tap on the handle still behaves like a tap.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const reorder = useMutation({
+    mutationFn: (ids: string[]) => api.todos.reorder({ assigneeId: person.id, ids }),
+    onError: (err) => {
+      toast.error(errorMessage(err));
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+    },
+  });
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    const from = tasks.findIndex((t) => t.id === active.id);
+    const to = tasks.findIndex((t) => t.id === over.id);
+    if (from < 0 || to < 0) return;
+    const next = arrayMove(tasks, from, to);
+    // Move it under the hand right away; the order is saved for everyone.
+    queryClient.setQueryData<TodoPanel[]>(qk.todos.board(filter), (old) =>
+      old?.map((p) => (p.person.id === person.id ? { ...p, tasks: next } : p)),
+    );
+    reorder.mutate(next.map((t) => t.id));
+  };
 
   return (
     <Card>
@@ -149,7 +191,7 @@ function PersonPanel({
             {isMe ? 'Your tasks' : person.nickname}
           </Typography>
           <Typography variant="caption" color="text.secondary">
-            {isMe ? 'Given to you' : ROLE_LABELS[person.role]}
+            {isMe ? 'Yours' : ROLE_LABELS[person.role]}
             {!person.isActive && ' · deactivated'}
             {counts.open > 0 && ` · ${counts.open} open`}
             {waiting > 0 && ` · ${waiting} waiting for confirmation`}
@@ -178,6 +220,21 @@ function PersonPanel({
           <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
             {filter === 'active' ? 'No tasks right now.' : 'No tasks match this filter.'}
           </Typography>
+        ) : mayArrange ? (
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+            onDragEnd={onDragEnd}
+          >
+            <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+              <Stack divider={<Divider />}>
+                {tasks.map((t) => (
+                  <SortableTask key={t.id} todo={t} onReopen={() => onReopen(t)} />
+                ))}
+              </Stack>
+            </SortableContext>
+          </DndContext>
         ) : (
           <Stack divider={<Divider />}>
             {tasks.map((t) => (
@@ -190,11 +247,56 @@ function PersonPanel({
   );
 }
 
+/** A task that can be dragged up and down its panel by its handle. */
+function SortableTask({ todo, onReopen }: { todo: TodoDTO; onReopen: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: todo.id });
+  return (
+    <TaskRow
+      todo={todo}
+      onReopen={onReopen}
+      rootRef={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        position: 'relative',
+        zIndex: isDragging ? 2 : undefined,
+        opacity: isDragging ? 0.75 : 1,
+      }}
+      handle={
+        <Tooltip title="Drag to reorder">
+          <IconButton
+            size="small"
+            aria-label={`Reorder \u201c${todoText(todo)}\u201d`}
+            {...attributes}
+            {...listeners}
+            sx={{ cursor: 'grab', touchAction: 'none', color: 'text.disabled', p: 0.25, '&:active': { cursor: 'grabbing' } }}
+          >
+            <DragIndicatorRounded sx={{ fontSize: 17 }} />
+          </IconButton>
+        </Tooltip>
+      }
+    />
+  );
+}
+
 /**
  * One task on a single line: the taker's tick, the giver's tick, what it says,
  * who gave it, and (once both ticked, or before it starts) a way to clear it away.
+ * A task you gave yourself has nobody to confirm it, so it has one tick only.
  */
-function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void }) {
+function TaskRow({
+  todo: t,
+  onReopen,
+  handle,
+  rootRef,
+  style,
+}: {
+  todo: TodoDTO;
+  onReopen: () => void;
+  handle?: ReactNode;
+  rootRef?: Ref<HTMLDivElement>;
+  style?: CSSProperties;
+}) {
   const me = useMe();
   const { zone } = useAuth();
   const toast = useToast();
@@ -202,6 +304,8 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
   const navigate = useNavigate();
   const iGave = t.createdBy.id === me.id;
   const mine = t.assignee.id === me.id;
+  // Given to yourself: ticking it finishes it, there is nobody to confirm.
+  const self = isSelfTask(t);
   const [expanded, setExpanded] = useState(false);
   const text = todoText(t);
 
@@ -209,7 +313,7 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
     mutationFn: () => api.todos.done(t.id),
     onSuccess: (saved) => {
       refresh(saved);
-      toast.success(saved.conversationId ? 'Marked done — your reply was posted in the chat' : 'Marked done');
+      toast.success(saved.conversationId ? 'Marked done — your reply was posted in the chat' : self ? 'Done' : 'Marked done');
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
@@ -234,16 +338,20 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
 
   return (
     <Box
+      ref={rootRef}
+      style={style}
       sx={{
         px: 1,
         py: 0.25,
         // A colour bar makes the state readable at a glance: waiting, ticked, confirmed.
         borderLeft: 3,
         borderLeftColor: TODO_COLORS[t.status],
-        bgcolor: t.status === 'completed' ? 'action.hover' : undefined,
+        // An opaque row: while one is dragged it slides over the others.
+        bgcolor: t.status === 'completed' ? 'action.hover' : 'background.paper',
       }}
     >
       <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minHeight: 40 }}>
+        {handle}
         <Tooltip title={t.status === 'open' ? (mine ? 'Tick when you have finished it' : `Waiting for ${t.assignee.nickname}`) : `Done ${t.doneAt ? relativeTime(t.doneAt) : ''}`}>
           <span>
             <Checkbox
@@ -258,31 +366,33 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
             />
           </span>
         </Tooltip>
-        <Tooltip
-          title={
-            t.status === 'completed'
-              ? `Confirmed ${t.confirmedAt ? relativeTime(t.confirmedAt) : ''}`
-              : iGave
-                ? t.status === 'done'
-                  ? 'Confirm it is really done'
-                  : 'Your tick, once they mark it done'
-                : `${t.createdBy.nickname} confirms it`
-          }
-        >
-          <span>
-            <Checkbox
-              size="small"
-              color="success"
-              checked={t.status === 'completed'}
-              disabled={!iGave || t.status !== 'done' || busy}
-              onChange={() => confirm.mutate()}
-              icon={<VerifiedOutlined fontSize="small" />}
-              checkedIcon={<VerifiedRounded fontSize="small" />}
-              inputProps={{ 'aria-label': `Confirm “${text}”` }}
-              sx={TICK_SX(TODO_COLORS.completed)}
-            />
-          </span>
-        </Tooltip>
+        {!self && (
+          <Tooltip
+            title={
+              t.status === 'completed'
+                ? `Confirmed ${t.confirmedAt ? relativeTime(t.confirmedAt) : ''}`
+                : iGave
+                  ? t.status === 'done'
+                    ? 'Confirm it is really done'
+                    : 'Your tick, once they mark it done'
+                  : `${t.createdBy.nickname} confirms it`
+            }
+          >
+            <span>
+              <Checkbox
+                size="small"
+                color="success"
+                checked={t.status === 'completed'}
+                disabled={!iGave || t.status !== 'done' || busy}
+                onChange={() => confirm.mutate()}
+                icon={<VerifiedOutlined fontSize="small" />}
+                checkedIcon={<VerifiedRounded fontSize="small" />}
+                inputProps={{ 'aria-label': `Confirm “${text}”` }}
+                sx={TICK_SX(TODO_COLORS.completed)}
+              />
+            </span>
+          </Tooltip>
+        )}
 
         <Box sx={{ minWidth: 0, flex: 1, cursor: t.details || t.doneNote ? 'pointer' : 'default' }} onClick={() => setExpanded((e) => !e)}>
           <Typography
@@ -300,7 +410,7 @@ function TaskRow({ todo: t, onReopen }: { todo: TodoDTO; onReopen: () => void })
             {text}
           </Typography>
           <Typography variant="caption" color="text.secondary" noWrap component="div">
-            {iGave ? 'by you' : `by ${t.createdBy.nickname}`} ·{' '}
+            {self ? '' : `${iGave ? 'by you' : `by ${t.createdBy.nickname}`} · `}
             <Tooltip title={formatDateTime(t.createdAt, zone)}>
               <span>{relativeTime(t.createdAt)}</span>
             </Tooltip>

@@ -28,6 +28,11 @@ const SPEC: Array<[CallStatus, CallStatus, Role[]]> = [
   ['finished', 'invoice_submit', ['founder']],
   ['invoice_submit', 'invoice_approve', ['founder']],
   ['invoice_approve', 'process_to_bank', ['founder']],
+  // Called off before it starts: whoever runs the call, any Manager, the Founder.
+  ['on_scheduling', 'cancelled', ['associate', 'manager', 'founder']],
+  ['scheduled', 'cancelled', ['associate', 'manager', 'founder']],
+  ['confirmed', 'cancelled', ['associate', 'manager', 'founder']],
+  ['on_rescheduling', 'cancelled', ['associate', 'manager', 'founder']],
 ];
 
 const specRoles = (from: CallStatus, to: CallStatus): Role[] =>
@@ -74,6 +79,14 @@ describe('TRANSITIONS table', () => {
 
   it('process_to_bank is terminal', () => {
     expect(TRANSITIONS.filter((t) => t.from === 'process_to_bank')).toEqual([]);
+  });
+
+  it('cancelling is final, only before the call runs, and never by the Expert', () => {
+    expect(TRANSITIONS.filter((t) => t.from === 'cancelled')).toEqual([]);
+    expect(TRANSITIONS.filter((t) => t.to === 'cancelled').map((t) => t.from).sort()).toEqual(
+      ['confirmed', 'on_rescheduling', 'on_scheduling', 'scheduled'],
+    );
+    for (const t of TRANSITIONS.filter((t) => t.to === 'cancelled')) expect(t.roles).not.toContain('expert');
   });
 
   it('nothing transitions back into on_scheduling', () => {

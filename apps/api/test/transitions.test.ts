@@ -120,6 +120,66 @@ describe('valid moves record history with the right is_override', () => {
   });
 });
 
+describe('cancelling a call (§4.5)', () => {
+  it.each(['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'] as const)(
+    'the associate running it calls it off from %s (no override)',
+    async (from) => {
+      const call = await makeCall(fx, { associate: fx.a1, status: from });
+      await expectMoved(await as(fx.a1), fx.a1, call.id, from, 'cancelled', false);
+    },
+  );
+
+  it('any manager and the founder may call it off; the expert may not', async () => {
+    const mine = await makeCall(fx, { associate: fx.a3, status: 'scheduled' });
+    // m1 manages a1/a2, but every Manager runs every Associate's calls.
+    await expectMoved(await as(fx.m1), fx.m1, mine.id, 'scheduled', 'cancelled', true);
+
+    const theirs = await makeCall(fx, { associate: fx.a1, status: 'confirmed', scheduledAt: '2027-02-02T09:00:00Z' });
+    await expectMoved(await as(fx.founder), fx.founder, theirs.id, 'confirmed', 'cancelled', true);
+
+    const expertCall = await makeCall(fx, { associate: fx.a1, status: 'confirmed', scheduledAt: '2027-02-03T09:00:00Z' });
+    expectError(await transition(await as(fx.e1), expertCall.id, 'cancelled'), 403, 'forbidden');
+    expect((await (await as(fx.e1)).get(`/calls/${expertCall.id}`)).body.allowedTransitions).not.toContain('cancelled');
+  });
+
+  it('a call that has run cannot be called off, and a cancelled call is final', async () => {
+    const finished = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    expectError(await transition(await as(fx.a1), finished.id, 'cancelled'), 409, 'invalid_transition');
+
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: '2027-03-01T09:00:00Z' });
+    await expectMoved(await as(fx.a1), fx.a1, call.id, 'scheduled', 'cancelled', false);
+    const detail = await (await as(fx.a1)).get(`/calls/${call.id}`);
+    expect(detail.body.allowedTransitions).toEqual([]);
+    expectError(await transition(await as(fx.a1), call.id, 'scheduled'), 409, 'invalid_transition');
+  });
+
+  it('frees the Expert’s slot and earns nothing', async () => {
+    const at = '2027-04-01T09:00:00Z';
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: at });
+    // The slot is taken while the call stands.
+    const clash = {
+      profileId: fx.approvedProfile.id,
+      platformId: fx.platform.id,
+      expertId: fx.e1.id,
+      scheduledAt: at,
+      durationMinutes: 60,
+      projectDetails: 'Another call at the same time',
+      platformAssociateName: 'Jordan at GLG',
+    };
+    const a1 = await as(fx.a1);
+    const booked = await a1.post('/calls', clash);
+    expect(booked.status, booked.text).toBe(201);
+    // While the first call stands, the second cannot take the same slot.
+    expectError(await transition(a1, booked.body.id, 'scheduled'), 409, 'expert_busy');
+
+    await expectMoved(a1, fx.a1, call.id, 'scheduled', 'cancelled', false);
+    expect((await transition(a1, booked.body.id, 'scheduled')).status).toBe(200);
+    // A cancelled call is off the calendar; its slot belongs to the new one.
+    const cal = await a1.get('/calendar', { from: '2027-04-01T00:00:00Z', to: '2027-04-02T00:00:00Z' });
+    expect(cal.body.calls.map((c: { id: string }) => c.id)).toEqual([booked.body.id]);
+  });
+});
+
 describe('starting and finishing need the Expert’s input', () => {
   const post = (client: Client, callId: string, body: Record<string, unknown>) => client.post(`/calls/${callId}/transition`, body);
 
@@ -197,7 +257,7 @@ describe('409 for an invalid edge', () => {
 
   it('rejects an unknown status name with 400', async () => {
     const call = await makeCall(fx, { associate: fx.a1 });
-    expectError(await (await as(fx.founder)).post(`/calls/${call.id}/transition`, { to: 'cancelled' }), 400, 'validation_error');
+    expectError(await (await as(fx.founder)).post(`/calls/${call.id}/transition`, { to: 'abandoned' }), 400, 'validation_error');
   });
 });
 
@@ -283,10 +343,11 @@ describe('allowedTransitions in the call DTO', () => {
   it('reflects the viewer', async () => {
     const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
     const [a1, e1, founder, m1] = await Promise.all([as(fx.a1), as(fx.e1), as(fx.founder), as(fx.m1)]);
-    expect((await a1.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(['on_rescheduling']);
-    expect((await m1.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(['on_rescheduling']);
+    expect((await a1.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(['on_rescheduling', 'cancelled']);
+    expect((await m1.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(['on_rescheduling', 'cancelled']);
+    // The Expert confirms or asks for another time, but never calls a call off.
     expect([...(await e1.get(`/calls/${call.id}`)).body.allowedTransitions].sort()).toEqual(['confirmed', 'on_rescheduling']);
-    expect([...(await founder.get(`/calls/${call.id}`)).body.allowedTransitions].sort()).toEqual(['confirmed', 'on_rescheduling']);
+    expect([...(await founder.get(`/calls/${call.id}`)).body.allowedTransitions].sort()).toEqual(['cancelled', 'confirmed', 'on_rescheduling']);
   });
 });
 

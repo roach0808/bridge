@@ -8,8 +8,10 @@ import {
   createTodoSchema,
   chatMessagesQuerySchema,
   listTodosQuerySchema,
+  reorderTodosSchema,
   startConversationSchema,
   todoBoardQuerySchema,
+  TODO_POSITION_STEP,
   todoDoneSchema,
   type ChatMessageDTO,
   type ChatMessagePage,
@@ -495,6 +497,12 @@ chatRouter.post('/chat/messages/:id/reactions', async (req, res) => {
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const todoText = (t: { title: string | null; message: { body: string } | null }) => t.message?.body ?? t.title ?? '';
 
+/** A new task goes to the top of the panel, above everything already there. */
+async function topPosition(tx: Db, assigneeId: string): Promise<number> {
+  const top = await tx.todo.aggregate({ where: { assigneeId }, _min: { position: true } });
+  return (top._min.position ?? 0) - TODO_POSITION_STEP;
+}
+
 /** Tells the giver and the taker (and so every open chat or task list of theirs) about a change. */
 function emitTodo(t: { assigneeId: string; createdById: string }, payload: TodoDTO | TodoRemovedEvent) {
   emitToUser(t.assigneeId, 'chat:todo', payload);
@@ -530,7 +538,13 @@ chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
 
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
     const todo = await tx.todo.create({
-      data: { messageId: m.id, conversationId: m.conversationId, assigneeId: assignee.id, createdById: actor.id },
+      data: {
+        messageId: m.id,
+        conversationId: m.conversationId,
+        assigneeId: assignee.id,
+        createdById: actor.id,
+        position: await topPosition(tx, assignee.id),
+      },
       include: todoInclude,
     });
     const deliver = await notify(tx, [assignee.id], 'todo.assigned', {
@@ -564,20 +578,23 @@ chatRouter.delete('/chat/messages/:id/todo', async (req, res) => {
   res.status(204).end();
 });
 
-/** People the caller may give a task to. */
+/** People the caller may give a task to — themselves first, then anyone below them. */
 chatRouter.get('/todos/assignees', async (req, res) => {
   const actor = actorOf(req);
-  if (actor.role !== 'founder' && actor.role !== 'manager') return void res.json([]);
-  const users = await prisma.user.findMany({
-    where: {
-      isActive: true,
-      id: { not: actor.id },
-      ...(actor.role === 'manager' ? { role: 'associate' } : {}),
-    },
-    select: userRefSelect,
-    orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
-  });
-  res.json(users.map(toUserRef));
+  const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: userRefSelect });
+  const others =
+    actor.role === 'founder' || actor.role === 'manager'
+      ? await prisma.user.findMany({
+          where: {
+            isActive: true,
+            id: { not: actor.id },
+            ...(actor.role === 'manager' ? { role: 'associate' as const } : {}),
+          },
+          select: userRefSelect,
+          orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
+        })
+      : [];
+  res.json([me, ...others].map(toUserRef));
 });
 
 /** A task that doesn't come from a chat message. */
@@ -595,10 +612,17 @@ chatRouter.post('/todos', async (req, res) => {
 
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
     const todo = await tx.todo.create({
-      data: { title: input.title, details: input.details ?? null, assigneeId: assignee.id, createdById: actor.id },
+      data: {
+        title: input.title,
+        details: input.details ?? null,
+        assigneeId: assignee.id,
+        createdById: actor.id,
+        position: await topPosition(tx, assignee.id),
+      },
       include: todoInclude,
     });
-    const deliver = await notify(tx, [assignee.id], 'todo.assigned', {
+    // A task you put on your own list tells you nothing you don't know.
+    const deliver = await notify(tx, assignee.id === actor.id ? [] : [assignee.id], 'todo.assigned', {
       todoId: todo.id,
       actor: { nickname: actor.nickname, role: actor.role },
       summary: clip(input.title, 120),
@@ -617,6 +641,51 @@ chatRouter.delete('/todos/:id', async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * Drag and drop: the new order of one person's panel. Their own panel is theirs
+ * to arrange, and so is the panel of anyone they may give tasks to. Everyone
+ * looking at the board sees the same order.
+ */
+chatRouter.post('/todos/reorder', async (req, res) => {
+  const actor = actorOf(req);
+  const { assigneeId, ids } = parseBody(reorderTodosSchema, req);
+  const assignee = await prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true, role: true } });
+  if (!assignee) throw notFound('Person');
+  if (assigneeId !== actor.id && !canGiveTask(actor, asTaker(assignee))) {
+    throw forbidden('You cannot arrange this person\u2019s tasks');
+  }
+  const unique = [...new Set(ids)];
+  const rows = await prisma.todo.findMany({ where: { id: { in: unique }, assigneeId }, select: { id: true } });
+  if (rows.length !== unique.length) throw conflict('These tasks just changed; refresh and try again');
+
+  await prisma.$transaction(async (tx) => {
+    // The caller sends the order they can see; anything the filter hides keeps its
+    // own order below it, so the numbers stay sound whatever was on screen.
+    const all = await tx.todo.findMany({
+      where: { assigneeId },
+      orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
+      select: { id: true },
+    });
+    const ordered = [...unique, ...all.map((t) => t.id).filter((id) => !unique.includes(id))];
+    await Promise.all(
+      ordered.map((id, i) => tx.todo.update({ where: { id }, data: { position: (i + 1) * TODO_POSITION_STEP } })),
+    );
+  });
+  for (const userId of new Set([assigneeId, actor.id, ...(await boardWatchers())])) {
+    emitToUser(userId, 'chat:todos-reordered', { assigneeId });
+  }
+  res.status(204).end();
+});
+
+/** Everyone whose board can hold someone else's panel. */
+async function boardWatchers(): Promise<string[]> {
+  const rows = await prisma.user.findMany({
+    where: { isActive: true, role: { in: ['founder', 'manager'] } },
+    select: { id: true },
+  });
+  return rows.map((r) => r.id);
+}
+
 /** `assigned`: tasks given to me. `created`: tasks I gave. Open first, then done, then completed; newest first. */
 /** `active` keeps a task until a week after it was confirmed, so finished work stays in sight. */
 function todoStatusWhere(status: 'active' | 'all' | TodoStatus): Prisma.TodoWhereInput {
@@ -629,16 +698,13 @@ function todoStatusWhere(status: 'active' | 'all' | TodoStatus): Prisma.TodoWher
 chatRouter.get('/todos', async (req, res) => {
   const actor = actorOf(req);
   const { scope, status } = parseQuery(listTodosQuerySchema, req);
-  if (scope === 'created' && actor.role !== 'founder' && actor.role !== 'manager') {
-    throw forbidden('Only Founders and Managers give tasks');
-  }
   const rows = await prisma.todo.findMany({
     where: {
       ...(scope === 'assigned' ? { assigneeId: actor.id } : { createdById: actor.id }),
       ...todoStatusWhere(status),
     },
     include: todoInclude,
-    orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    orderBy: [{ status: 'asc' }, { position: 'asc' }, { createdAt: 'desc' }],
     take: 500,
   });
   res.json(rows.map(toTodoDTO));
@@ -675,7 +741,8 @@ chatRouter.get('/todos/board', async (req, res) => {
       ...todoStatusWhere(status),
     },
     include: todoInclude,
-    orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+    // The panel's own order, set by dragging; new tasks arrive at the top.
+    orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
     take: 1000,
   });
   const counts = await prisma.todo.groupBy({
@@ -699,18 +766,25 @@ chatRouter.get('/todos/board', async (req, res) => {
   res.json(body.filter((p) => p.isMe || p.canGive || p.tasks.length > 0));
 });
 
-/** The taker marks a task done. For a chat task this posts a reply to the task message. */
+/**
+ * The taker marks a task done. For a chat task this posts a reply to the task message.
+ * A task someone gave themselves has nobody to confirm it, so ticking it finishes it.
+ */
 chatRouter.post('/todos/:id/done', async (req, res) => {
   const actor = actorOf(req);
   const existing = await loadTodo(actor, idParam(req));
   const { note } = parseBody(todoDoneSchema, req);
   if (existing.assigneeId !== actor.id) throw forbidden('Only the person the task is for can mark it done');
   if (existing.status !== 'open') throw conflict('This task is already done');
+  const mine = existing.createdById === actor.id;
 
   const now = new Date();
   const { todo, message, deliver } = await prisma.$transaction(async (tx) => {
     // Guard against a double click racing past the check above.
-    const claimed = await tx.todo.updateMany({ where: { id: existing.id, status: 'open' }, data: { status: 'done', doneAt: now, doneNote: note ?? null } });
+    const claimed = await tx.todo.updateMany({
+      where: { id: existing.id, status: 'open' },
+      data: { status: mine ? 'completed' : 'done', doneAt: now, doneNote: note ?? null, ...(mine ? { confirmedAt: now } : {}) },
+    });
     if (!claimed.count) throw conflict('This task is already done');
     let message: MessageRow | null = null;
     if (existing.conversation) {
@@ -734,7 +808,8 @@ chatRouter.post('/todos/:id/done', async (req, res) => {
       });
     }
     const todo = await tx.todo.update({ where: { id: existing.id }, data: { doneMessageId: message?.id ?? null }, include: todoInclude });
-    const deliver = await notify(tx, [existing.createdById], 'todo.done', {
+    // Nobody is told about a task you gave yourself and ticked off.
+    const deliver = await notify(tx, mine ? [] : [existing.createdById], 'todo.done', {
       todoId: existing.id,
       ...(existing.conversationId ? { conversationId: existing.conversationId } : {}),
       actor: { nickname: actor.nickname, role: actor.role },

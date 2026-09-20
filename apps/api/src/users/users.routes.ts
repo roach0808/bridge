@@ -20,7 +20,8 @@ import { disconnectUser } from '../realtime/hub';
 import { toUserDTO, userSelect } from '../serializers';
 
 /** Calls that need nobody any more. */
-const DONE_STATUSES = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'] as const;
+/** Calls that need nobody any more: done, being paid for, or called off. */
+const DONE_STATUSES = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank', 'cancelled'] as const;
 
 export const usersRouter = Router();
 usersRouter.use('/users', requireAuth, requireRole('founder', 'manager'));

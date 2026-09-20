@@ -212,7 +212,6 @@ describe('to-dos', () => {
     expectError(await (await as(fx.founder)).post(`/chat/messages/${peerMsg.id}/todo`), 404);
 
     expect((await m1.get('/todos', { scope: 'created' })).body).toHaveLength(2);
-    expectError(await (await as(fx.a1)).get('/todos', { scope: 'created' }), 403);
   });
 
   it('marking done posts a reply in the chat, closes the to-do and notifies the founder', async () => {
@@ -310,8 +309,8 @@ describe('the task board', () => {
 
     const own = await board(fx.a3);
     expect(own).toHaveLength(1);
-    // A task confirmed just now stays in sight for a week.
-    expect(own[0]).toMatchObject({ isMe: true, canGive: false, counts: { open: 0, done: 0, completed: 1 } });
+    // A task confirmed just now stays in sight for a week. Your own panel takes your own tasks.
+    expect(own[0]).toMatchObject({ isMe: true, canGive: true, counts: { open: 0, done: 0, completed: 1 } });
     expect(own[0].tasks).toHaveLength(1);
     expect((await board(fx.a3, { status: 'completed' }))[0].tasks).toHaveLength(1);
     expect((await board(fx.a3, { status: 'all' }))[0].tasks).toHaveLength(1);
@@ -322,6 +321,69 @@ describe('the task board', () => {
     expect((await board(fx.a3, { status: 'completed' }))[0].tasks).toHaveLength(1);
     // Experts have a panel of their own too.
     expect((await board(fx.e1))).toHaveLength(1);
+  });
+});
+
+describe('a task you give yourself', () => {
+  it('anyone may add one, and ticking it finishes it at once', async () => {
+    const a1 = await as(fx.a1);
+    const res = await a1.post('/todos', { assigneeId: fx.a1.id, title: 'Read the new platform rules' });
+    expect(res.status, res.text).toBe(201);
+    expect(res.body).toMatchObject({ assignee: { id: fx.a1.id }, createdBy: { id: fx.a1.id }, status: 'open' });
+
+    const done = await a1.post(`/todos/${res.body.id}/done`);
+    expect(done.status, done.text).toBe(200);
+    // No confirmation step, and nobody to notify.
+    expect(done.body.status).toBe('completed');
+    expect(done.body.confirmedAt).not.toBeNull();
+    expect((await a1.get('/notifications')).body.items).toEqual([]);
+
+    // It can be put back on the list, and cleared away.
+    expect((await a1.post(`/todos/${res.body.id}/reopen`)).body.status).toBe('open');
+    expect((await a1.delete(`/todos/${res.body.id}`)).status).toBe(204);
+  });
+
+  it('an Expert too, but still nobody else’s list', async () => {
+    const e1 = await as(fx.e1);
+    expect((await e1.post('/todos', { assigneeId: fx.e1.id, title: 'Update my availability' })).status).toBe(201);
+    expectError(await e1.post('/todos', { assigneeId: fx.a1.id, title: 'Do my work' }), 403);
+    expect((await e1.get('/todos', { scope: 'created' })).body).toHaveLength(1);
+  });
+});
+
+describe('the order of a panel (§ drag and drop)', () => {
+  const titles = async (user: typeof fx.a1, personId: string) => {
+    const board = (await (await as(user)).get('/todos/board')).body;
+    return board.find((p: { person: { id: string } }) => p.person.id === personId).tasks.map((t: { title: string }) => t.title);
+  };
+
+  it('a new task lands on top, and a drag is saved for everyone', async () => {
+    const m1 = await as(fx.m1);
+    const a1 = await as(fx.a1);
+    const first = (await m1.post('/todos', { assigneeId: fx.a1.id, title: 'First' })).body;
+    const second = (await m1.post('/todos', { assigneeId: fx.a1.id, title: 'Second' })).body;
+    const third = (await a1.post('/todos', { assigneeId: fx.a1.id, title: 'Third' })).body;
+    expect(await titles(fx.a1, fx.a1.id)).toEqual(['Third', 'Second', 'First']);
+
+    // The owner of the panel arranges it; the Manager watching sees the same order.
+    const moved = await a1.post('/todos/reorder', { assigneeId: fx.a1.id, ids: [first.id, third.id, second.id] });
+    expect(moved.status, moved.text).toBe(204);
+    expect(await titles(fx.a1, fx.a1.id)).toEqual(['First', 'Third', 'Second']);
+    expect(await titles(fx.m1, fx.a1.id)).toEqual(['First', 'Third', 'Second']);
+    expect(await titles(fx.founder, fx.a1.id)).toEqual(['First', 'Third', 'Second']);
+
+    // Whoever may give the tasks may arrange them too.
+    expect((await m1.post('/todos/reorder', { assigneeId: fx.a1.id, ids: [second.id, first.id, third.id] })).status).toBe(204);
+    expect(await titles(fx.a1, fx.a1.id)).toEqual(['Second', 'First', 'Third']);
+  });
+
+  it('nobody arranges a panel that is not theirs to arrange', async () => {
+    const m1 = await as(fx.m1);
+    const own = (await m1.post('/todos', { assigneeId: fx.m1.id, title: 'Mine' })).body;
+    const theirs = (await m1.post('/todos', { assigneeId: fx.a1.id, title: 'Theirs' })).body;
+    expectError(await (await as(fx.a1)).post('/todos/reorder', { assigneeId: fx.m1.id, ids: [own.id] }), 403);
+    // The ids must really belong to that panel.
+    expectError(await m1.post('/todos/reorder', { assigneeId: fx.a1.id, ids: [theirs.id, own.id] }), 409);
   });
 });
 
@@ -338,13 +400,13 @@ describe('tasks without a chat message', () => {
     expect((await m1.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' })).status).toBe(201);
     expectError(await m1.post('/todos', { assigneeId: fx.m2.id, title: 'Chase invoices' }), 403);
     expectError(await (await as(fx.a1)).post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' }), 403);
-    expectError(await founder.post('/todos', { assigneeId: fx.founder.id, title: 'Myself' }), 403);
     expectError(await founder.post('/todos', { assigneeId: fx.a1.id, title: '   ' }), 400);
 
     const assignees = (await m1.get('/todos/assignees')).body.map((u: { id: string }) => u.id).sort();
-    expect(assignees).toEqual([fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
-    expect((await founder.get('/todos/assignees')).body.map((u: { id: string }) => u.id)).not.toContain(fx.founder.id);
-    expect((await (await as(fx.a1)).get('/todos/assignees')).body).toEqual([]);
+    expect(assignees).toEqual([fx.m1.id, fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
+    expect((await founder.get('/todos/assignees')).body.map((u: { id: string }) => u.id)).toContain(fx.founder.id);
+    // Everyone can put a task on their own list, and nobody else's.
+    expect((await (await as(fx.a1)).get('/todos/assignees')).body.map((u: { id: string }) => u.id)).toEqual([fx.a1.id]);
   });
 
   it('taker ticks done, giver confirms: the task is completed and leaves the default list', async () => {
