@@ -30,7 +30,7 @@ import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
-import { formatDate, zoneCity } from '@/lib/time';
+import { formatDate, formatUsd, zoneCity } from '@/lib/time';
 import { FilterChips, SR_ONLY, SearchField, TableSurface, useIsPhone, useNow } from './adminShared';
 import { CreateUserDialog, EditUserDialog } from './UserDialogs';
 
@@ -251,6 +251,7 @@ export default function UsersPage() {
                 <TableCell>User</TableCell>
                 <TableCell>Role</TableCell>
                 <TableCell>Manager</TableCell>
+                <TableCell>Pay</TableCell>
                 <TableCell>Time zone</TableCell>
                 <TableCell>Status</TableCell>
                 <TableCell>Joined</TableCell>
@@ -288,6 +289,9 @@ export default function UsersPage() {
                         —
                       </Typography>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <UserPay user={u} />
                   </TableCell>
                   <TableCell>
                     {u.role === 'expert' ? (
@@ -339,5 +343,35 @@ export default function UsersPage() {
         onClose={() => setConfirmOpen(false)}
       />
     </Box>
+  );
+}
+
+/** What someone is paid: an Expert per hour, an Associate a share of each call (§3.1). */
+function UserPay({ user: u }: { user: UserDTO }) {
+  const text =
+    u.role === 'expert'
+      ? u.hourlyRate === null
+        ? null
+        : `${formatUsd(u.hourlyRate)}/h`
+      : u.role === 'associate'
+        ? u.sharePercent === null
+          ? null
+          : `${u.sharePercent}% of calls`
+        : undefined;
+  if (text === undefined) {
+    return (
+      <Typography variant="body2" color="text.disabled">
+        —
+      </Typography>
+    );
+  }
+  return text === null ? (
+    <Typography variant="body2" sx={{ color: 'warning.main', fontWeight: 600 }}>
+      Not set
+    </Typography>
+  ) : (
+    <Typography variant="body2" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+      {text}
+    </Typography>
   );
 }

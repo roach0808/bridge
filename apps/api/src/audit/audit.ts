@@ -76,11 +76,13 @@ const SKIP = [/^auth\/refresh$/, /^notifications\/read$/, /^chat\/conversations\
  */
 const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^calls\/:id\/transition$/, 'call.transition', true],
+  [/^finance\/payouts$/, 'payout.mark', true],
   [/^calls\/:id\/messages/, 'call.message', true],
   [/^calls/, 'call'],
   [/^profiles\/:id\/platforms\/:id$/, 'profile.platform', true],
   [/^profiles\/:id\/(approve|reject)$/, 'profile.review', true],
   [/^profiles\/:id\/active$/, 'profile.active', true],
+  [/^profiles\/:id\/associate$/, 'profile.associate', true],
   [/^profiles\/:id\/banks/, 'bank'],
   [/^profiles\/:id\/photo$/, 'profile.photo'],
   [/^profiles/, 'profile'],
@@ -97,6 +99,7 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^todos\/:id\/done$/, 'todo.done', true],
   [/^todos\/:id\/confirm$/, 'todo.confirm', true],
   [/^todos\/:id\/reopen$/, 'todo.reopen', true],
+  [/^todos\/:id\/move$/, 'todo.move', true],
   [/^todos/, 'todo'],
   [/^chat/, 'chat'],
   [/^db-dumps/, 'dump'],
@@ -130,6 +133,8 @@ const SUMMARIES: Record<string, string> = {
   'call.create': 'created a call',
   'call.update': 'changed a call',
   'call.delete': 'deleted a call',
+  'payout.mark': 'marked someone’s pay for calls as paid or unpaid',
+  'profile.associate': 'handed a profile to another Associate',
   'profile.platform': 'set a profile’s status or rate on a platform',
   'profile.review': 'approved or rejected a profile',
   'profile.active': 'activated or deactivated a profile',
@@ -158,6 +163,7 @@ const SUMMARIES: Record<string, string> = {
   'todo.done': 'marked a task done',
   'todo.confirm': 'confirmed a task complete',
   'todo.reopen': 'reopened a task',
+  'todo.move': 'handed a task to someone else',
   // No longer recorded; kept so entries written before still read well.
   'audit.read': 'read the audit trail',
   'stats.profiles': 'looked at profile statistics (emails and banks)',

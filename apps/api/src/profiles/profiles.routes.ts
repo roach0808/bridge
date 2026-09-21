@@ -3,6 +3,7 @@ import {
   isAvatarForAudience,
   listProfilesQuerySchema,
   profileActiveSchema,
+  profileAssociateSchema,
   profilePlatformStatusSchema,
   profileSchema,
   rejectProfileSchema,
@@ -18,6 +19,7 @@ import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { fromDateOnly, idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import {
+  canAssignProfile,
   platformRefOrder,
   platformRefSelect,
   profileFounderCounts,
@@ -49,8 +51,8 @@ function visibleProfilesWhere(actor: Actor): Prisma.ProfileWhereInput {
   // Deleted Profiles are gone for everyone; only their past calls still name them.
   if (actor.role === 'founder') return { deletedAt: null };
   if (actor.role === 'expert') return { deletedAt: null, isActive: true, calls: { some: { expertId: actor.id } } };
-  const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }];
-  if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } });
+  const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }, { associateId: actor.id }];
+  if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } }, { associate: { managerId: actor.id } });
   return { deletedAt: null, isActive: true, OR: [{ status: 'approved' }, ...own] };
 }
 
@@ -92,12 +94,12 @@ profilesRouter.get('/profiles', async (req, res) => {
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
   });
   const platforms = await platformsFor(actor);
-  res.json(profiles.map((p) => toProfileDTO(p, platforms)));
+  res.json(profiles.map((p) => toProfileDTO(p, platforms, actor)));
 });
 
 profilesRouter.get('/profiles/:id', async (req, res) => {
   const actor = actorOf(req);
-  res.json(toProfileDTO(await loadVisible(actor, idParam(req)), await platformsFor(actor)));
+  res.json(toProfileDTO(await loadVisible(actor, idParam(req)), await platformsFor(actor), actor));
 });
 
 const addressRows = (list: Array<{ label: string; address: string }>) =>
@@ -132,6 +134,9 @@ profilesRouter.post('/profiles', requireRole('founder', 'manager', 'associate'),
         ...personalDetails(input, actor),
         avatarId: input.avatarId,
         createdById: actor.id,
+        // Whoever adds a Profile looks after it, until someone hands it on.
+        associateId: isFounder ? null : actor.id,
+        ...(isFounder && input.managerSharePercent !== undefined ? { managerSharePercent: input.managerSharePercent } : {}),
         ...(isFounder
           ? {
               status: 'approved',
@@ -148,7 +153,7 @@ profilesRouter.post('/profiles', requireRole('founder', 'manager', 'associate'),
     return { profile, deliver };
   });
   deliver();
-  res.status(201).json(toProfileDTO(profile, await platformRefs()));
+  res.status(201).json(toProfileDTO(profile, await platformRefs(), actor));
 });
 
 function personalDetails(input: Partial<z.output<typeof profileSchema>>, actor: Pick<Actor, 'role'>) {
@@ -194,6 +199,8 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
         briefExperience: input.briefExperience,
         ...personalDetails(input, actor),
         avatarId: input.avatarId,
+        // Only the Founder decides the Manager's share.
+        managerSharePercent: isFounder ? input.managerSharePercent : undefined,
         // An author's edit sends their submission back for review.
         ...(isFounder ? {} : { status: 'pending', reviewedById: null, reviewedAt: null, rejectionReason: null }),
       },
@@ -203,7 +210,7 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
     return { updated, deliver };
   });
   deliver();
-  res.json(toProfileDTO(updated, await platformsFor(actor)));
+  res.json(toProfileDTO(updated, await platformsFor(actor), actor));
 });
 
 async function review(actor: Actor, id: string | null, decision: 'approved' | 'rejected', reason?: string) {
@@ -233,7 +240,7 @@ async function review(actor: Actor, id: string | null, decision: 'approved' | 'r
     return { updated, deliver };
   });
   deliver();
-  return toProfileDTO(updated, await platformRefs());
+  return toProfileDTO(updated, await platformRefs(), actor);
 }
 
 /** Founder deactivates a Profile (hidden from everyone else, and unbookable) or brings it back. */
@@ -246,7 +253,7 @@ profilesRouter.patch('/profiles/:id/active', requireRole('founder'), async (req,
     data: { isActive },
     include: includeFor(actor),
   });
-  res.json(toProfileDTO(updated, await platformRefs()));
+  res.json(toProfileDTO(updated, await platformRefs(), actor));
 });
 
 /**
@@ -323,7 +330,41 @@ profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder')
     create: { profileId: profile.id, platformId: platform.id, status: nextStatus, rate: nextRate },
     update: { status, rate },
   });
-  res.json(toProfileDTO(await loadVisible(actor, profile.id), await platformRefs()));
+  res.json(toProfileDTO(await loadVisible(actor, profile.id), await platformRefs(), actor));
+});
+
+/**
+ * Hands the Profile to the Associate (or Manager) who looks after it from now on.
+ * The Founder chooses anyone; a Manager moves a Profile their team looks after
+ * (or nobody does yet) between themselves and their own Associates.
+ */
+profilesRouter.put('/profiles/:id/associate', requireRole('founder', 'manager'), async (req, res) => {
+  const actor = actorOf(req);
+  const profile = await loadVisible(actor, idParam(req));
+  const { associateId } = parseBody(profileAssociateSchema, req);
+  if (!canAssignProfile(actor, profile.associate)) {
+    throw forbidden('Only the Founder, or the Manager of the team looking after it, can hand this profile on');
+  }
+  if (associateId !== null) {
+    const next = await prisma.user.findUnique({
+      where: { id: associateId },
+      select: { id: true, role: true, managerId: true, isActive: true, deletedAt: true },
+    });
+    if (!next || !next.isActive || next.deletedAt || (next.role !== 'associate' && next.role !== 'manager')) {
+      throw badRequest('Choose an active Associate or Manager', { issues: [{ path: 'associateId', message: 'Not an active Associate or Manager' }] });
+    }
+    if (actor.role === 'manager' && next.id !== actor.id && next.managerId !== actor.id) {
+      throw forbidden('Managers hand profiles to themselves or to Associates on their own team');
+    }
+  } else if (actor.role !== 'founder') {
+    throw forbidden('Only the Founder leaves a profile without an Associate');
+  }
+  const updated = await prisma.profile.update({
+    where: { id: profile.id },
+    data: { associateId },
+    include: includeFor(actor),
+  });
+  res.json(toProfileDTO(updated, await platformsFor(actor), actor));
 });
 
 profilesRouter.post('/profiles/:id/approve', requireRole('founder'), async (req, res) => {

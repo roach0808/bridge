@@ -8,6 +8,7 @@ import {
   createTodoSchema,
   chatMessagesQuerySchema,
   listTodosQuerySchema,
+  moveTodoSchema,
   reorderTodosSchema,
   startConversationSchema,
   todoBoardQuerySchema,
@@ -639,6 +640,55 @@ chatRouter.delete('/todos/:id', async (req, res) => {
   const actor = actorOf(req);
   await removeTodo(actor, await loadTodo(actor, idParam(req)));
   res.status(204).end();
+});
+
+/**
+ * Drag and drop onto someone else's panel: the giver hands an open task to another
+ * person they may give tasks to. Tasks made from a chat message belong to that chat,
+ * so they stay with the person in it.
+ */
+chatRouter.post('/todos/:id/move', async (req, res) => {
+  const actor = actorOf(req);
+  const existing = await loadTodo(actor, idParam(req));
+  const { assigneeId } = parseBody(moveTodoSchema, req);
+  if (existing.createdById !== actor.id) throw forbidden('Only the person who gave the task can hand it to someone else');
+  if (existing.conversationId) throw conflict('This task came from a chat, so it stays with the person in that chat');
+  if (existing.status !== 'open') throw conflict('Only open tasks can be handed on');
+  if (existing.assigneeId === assigneeId) {
+    res.json(toTodoDTO(await prisma.todo.findUniqueOrThrow({ where: { id: existing.id }, include: todoInclude })));
+    return;
+  }
+  const assignee = await prisma.user.findUnique({
+    where: { id: assigneeId },
+    select: { id: true, role: true, managerId: true, isActive: true },
+  });
+  if (!assignee || !assignee.isActive) {
+    throw badRequest('Choose who the task is for', { issues: [{ path: 'assigneeId', message: 'Not an active user' }] });
+  }
+  if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
+
+  const { todo, deliver } = await prisma.$transaction(async (tx) => {
+    const todo = await tx.todo.update({
+      where: { id: existing.id },
+      data: { assigneeId: assignee.id, position: await topPosition(tx, assignee.id) },
+      include: todoInclude,
+    });
+    const deliver = await notify(tx, assignee.id === actor.id ? [] : [assignee.id], 'todo.assigned', {
+      todoId: todo.id,
+      actor: { nickname: actor.nickname, role: actor.role },
+      summary: clip(todoText(todo), 120),
+    });
+    return { todo, deliver };
+  });
+  deliver();
+  const dto = toTodoDTO(todo);
+  // The previous taker's lists drop it; the new taker and the giver get it.
+  if (existing.assigneeId !== actor.id) {
+    emitToUser(existing.assigneeId, 'chat:todo', { id: todo.id, conversationId: null, messageId: null, removed: true });
+  }
+  emitTodo(todo, dto);
+  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: existing.assigneeId });
+  res.json(dto);
 });
 
 /**

@@ -1,6 +1,6 @@
 # God System — Project Specification
 
-Version 1.5 · 2026-09-20 · Status: Phase 1 implemented, deployed
+Version 1.6 · 2026-09-21 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -42,7 +42,7 @@ PC browser and a mobile app.
 | **Founder** | Owner of the system. Full access. Handles invoice stages. Creates Managers. | — |
 | **Manager** | Manages a team of Associates (creates, edits and deactivates their accounts). Works with **every** Associate's Calls, and can run Calls themselves like an Associate. | Founder |
 | **Associate** | Creates and schedules Calls. Owns the scheduling stages. | Manager |
-| **Expert** | Confirms and performs the Call. Owns the execution stages. Never sees invoicing or money. | Founder |
+| **Expert** | Confirms and performs the Call. Owns the execution stages. Never sees invoicing or a call's income; sees only their own pay. | Founder |
 
 ### 2.1 Role hierarchy
 
@@ -108,8 +108,13 @@ grouped under Managers; they are assigned per Call.
 | See a Profile's platform rates | ✓ | ✓ | ✓ | |
 | Close or reopen a bank account | ✓ | | | |
 | Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | own | |
-| Set the Call's GPT link | ✓ | | | |
-| Read the Call's GPT link | ✓ | | | ✓ (assigned) |
+| Set the Call's deep search data link (`gpt_link`) | ✓ | | | |
+| Read the Call's deep search data link | ✓ | | | ✓ (assigned) |
+| Set an Expert's hourly rate, an Associate's share, a Profile's Manager share | ✓ | | | |
+| See own pay (§3.1 "Who is paid what") | ✓ (everyone's) | own share and the Associate's part they pass on | own part | own pay |
+| Mark the Expert or the Manager paid for a call | ✓ | | | |
+| Mark the Associate paid for a call | ✓ | ✓ (calls they are paid for) | | |
+| Hand a Profile to another Associate | ✓ (anyone) | ✓ (between themselves and their own team) | | |
 | See who is online (§7.6) | people they may chat with | same | same | same |
 | Run / download a database dump | ✓ | | | |
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
@@ -151,12 +156,17 @@ as `permissions` on every Call:
   `confirmed`), which is where the Associate owns the status. The Expert still
   cannot be removed from a call that is `scheduled` or later.
 - `editIncome`: Founder — corrects the real income of a call already processed
-  to bank.
+  to bank (409 once a share of it has been marked paid).
 - `editGptLink`: Founder.
+- `editExpertRate`: Founder — the Expert's rate for one call that has taken
+  place, until the Expert is marked paid for it (409 afterwards).
+- `reassignAssociate` ends once the call is processed to bank: the shares are
+  settled on its Associate.
 - `editRate` (the special rate for one call): whoever owns scheduling — the
   call's Associate, a Manager, or the Founder.
 
-**[Implementation]** Experts never see invoicing. The server shows them
+**[Implementation]** Experts never see invoicing or a call's income; the only
+money they receive is their own pay (`payouts.expert`, §3.1). The server shows them
 `invoice_submit`, `invoice_approve` and `process_to_bank` calls as `finished`
 (in call payloads, lists, the calendar, dashboard counts and socket updates),
 sends `expectedPrice`, `realIncome`, `platformRate` and `rateOverride` as null, leaves invoicing steps out of
@@ -188,6 +198,8 @@ app drops the Invoicing stage from their status bar and filters
 | photo_id | uuid → Photo, nullable, unique | An uploaded picture, shown instead of the avatar |
 | last_seen_at | timestamptz | Last time they were connected; shown as "last seen" when offline (§7.6) |
 | time_zone | text (IANA name) | Default `America/New_York`. Only meaningful for Experts: where they live, e.g. `Asia/Seoul`. Everyone else works on New York time (§9.3) |
+| hourly_rate | numeric(12,2), nullable | Experts: what they are paid per hour of call (USD). Set by the Founder; copied onto each call when it finishes |
+| share_percent | numeric(5,2), nullable | Associates: their percent of a call's real income, part of their Manager's share. Set by the Founder; 10 for a new Associate |
 | created_at, updated_at | timestamptz | |
 
 #### Platform
@@ -221,6 +233,8 @@ app drops the Invoicing stage from their status bar and filters
 | status | enum: pending, approved, rejected | Profiles added by a Founder are approved at once; an Associate's or Manager's submission starts pending until a Founder approves or rejects it |
 | is_active | boolean | Default true. A deactivated Profile is listed for Founders only and cannot be booked (409 `profile_not_approved`); its existing Calls carry on |
 | deleted_at | timestamptz, nullable | Set when the Founder deleted a Profile that had calls: personal details, banks and addresses erased, renamed "Removed profile", hidden everywhere, calls kept |
+| manager_share_percent | numeric(5,2) | The Manager's percent of this Profile's real income. Default 15; set by the Founder |
+| associate_id | uuid → User, nullable | The Associate (or Manager) who looks after the Profile. Whoever submits a Profile looks after it; the Founder hands any Profile to anyone, a Manager moves Profiles their team looks after (or nobody does yet) between themselves and their own Associates (`PUT /profiles/:id/associate`) |
 | created_by | uuid → User | Who added it |
 | reviewed_by | uuid → User, nullable | Founder who approved or rejected |
 | reviewed_at | timestamptz, nullable | |
@@ -274,6 +288,10 @@ A Profile's standing on each expert network platform. A missing row means
 | rating | integer 1–5, nullable | From an earlier finish form that asked "How did the call go?". No longer asked for; kept for old calls |
 | feedback | text, nullable | The note that went with that rating |
 | real_income | numeric(12,2), nullable | What reached the bank (USD), entered by the Founder when moving the call to `process_to_bank` (required then, check constraint). Never shown to Experts |
+| expert_rate | numeric(12,2), nullable | The Expert's `hourly_rate` when the call finished. Changing the Expert's rate later never changes it. The Founder may set it for one call (e.g. one that finished before the Expert had a rate) until the Expert is paid |
+| manager_share_percent, associate_share_percent | numeric(5,2), nullable | The Profile's Manager share and the Associate's share when the call was processed to bank (required then). The Associate's part never exceeds the Manager's share; 0 when a Manager ran the call |
+| payee_manager_id | uuid → User, nullable | The Manager paid for the call, fixed when it was processed to bank: the Associate's Manager, or the Manager who ran it |
+| expert_paid_at, manager_paid_at, associate_paid_at | timestamptz, nullable | When the Founder paid the Expert and the Manager, and when the Manager paid the Associate. Shares only once processed to bank; the Expert only with a rate (check constraints) |
 | created_by | uuid → User | |
 | created_at, updated_at | timestamptz | |
 
@@ -284,6 +302,26 @@ the rate (the call's `rate_override`, else the Profile's rate on the platform)
 while there is no rate. A call cannot be invoiced without a rate (409
 `rate_required`). The *real income* is what the Founder records when the money
 arrives, usually a little under the expected price.
+
+**[Implementation] Who is paid what.** The Founder is the only payer, and pays
+two people per call, never Associates directly:
+
+- **The Expert**: `expert_rate` × the real duration, rounded to cents. Known
+  once the call finished; payable from then on.
+- **The Manager**: `manager_share_percent` (15 unless the Profile says
+  otherwise) of the real income, once the call is processed to bank. The
+  Associate's own share (`associate_share_percent`, e.g. 10) is **part of**
+  it: the Manager passes it on and keeps the rest (15% − 10% = 5%). A Manager
+  who ran the call themselves keeps the whole share.
+
+Rates and shares are copied onto the call when they become final (the Expert's
+rate at `finished`, the shares at `process_to_bank`), so changing a rate or a
+share later only changes calls still to come. Each call carries `payouts`
+(§6.8) with the lines the viewer may see: the Founder every line; the Expert
+their own pay; the Manager being paid their share and the Associate's part they
+pass on; the Associate their part. The Founder marks the Expert and the Manager
+paid; the Manager marks the Associate paid (the Founder may too). Each payee is
+notified (`call.paid`).
 
 #### Avatar (catalog, reference data)
 
@@ -403,7 +441,7 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 |---|---|---|
 | id | uuid | |
 | user_id | uuid → User | |
-| type | text | call.status_changed, call.assigned, call.created, call.updated, call.message, todo.assigned, todo.done, todo.completed, todo.reopened, profile.submitted, profile.approved, profile.rejected |
+| type | text | call.status_changed, call.assigned, call.created, call.updated, call.message, call.paid, todo.assigned, todo.done, todo.completed, todo.reopened, profile.submitted, profile.approved, profile.rejected |
 | payload | jsonb | callId, conversationId, todoId, profileId, from, to, actor nickname + role, summary |
 | read_at | timestamptz, nullable | |
 | created_at | timestamptz | |
@@ -627,7 +665,11 @@ User         1 ── * WebPushSubscription
   `chat_reactions_emoji_short`, `todos_done_at_when_done`,
   `todos_confirmed_when_completed`, `todos_has_subject`,
   `todos_message_in_conversation`,
-  `profile_platform_statuses_rate_when_registered`.
+  `profile_platform_statuses_rate_when_registered`, `users_hourly_rate_nonnegative`,
+  `users_share_percent_range`, `profiles_manager_share_range`,
+  `calls_expert_rate_nonnegative`, `calls_shares_range` (the Associate's part
+  within the Manager's share), `calls_paid_has_shares`,
+  `calls_share_paid_when_banked`, `calls_expert_paid_when_priced`.
 
 ---
 
@@ -760,7 +802,9 @@ locked `FOR UPDATE`):
 1. Updates `calls.status`.
 2. Inserts a `call_status_history` row.
 3. Stores the step's extra fields: `ninjaLink` for `ongoing`;
-   `actualDurationMinutes` for `finished`; `realIncome` for `process_to_bank`.
+   `actualDurationMinutes` (and the Expert's current rate as `expert_rate`) for
+   `finished`; `realIncome`, the shares and the payee Manager for
+   `process_to_bank`.
 4. Creates `notifications` for every other participant of the Call
    (associate, expert, associate's manager, founder), except that the Expert
    is not notified about invoicing steps.
@@ -925,7 +969,7 @@ family) that records the device type, browser, OS, IP and country.
 | GET | /users | Founder, Manager | Manager sees every Associate and every Expert. Query: role, q, active |
 | POST | /users | Founder, Manager | Manager may create Associates only. time_zone accepted for Experts only |
 | GET | /users/:id | Founder, Manager | |
-| PATCH | /users/:id | Founder, Manager | nickname, manager_id, is_active; time_zone for Experts, Founder only. A Manager changes only their own team's Associates (403 otherwise) |
+| PATCH | /users/:id | Founder, Manager | nickname, manager_id, is_active; time_zone for Experts, Founder only. A Manager changes only their own team's Associates (403 otherwise). Founder only: `hourly_rate` (Experts; with `apply_rate_to_unpriced_calls: true` it also goes to their finished calls without a rate) and `share_percent` (Associates). Rates and shares are returned to the Founder only, and to each person on `/me` |
 | GET | /users/me/team | Manager | Associates under this Manager |
 | DELETE | /users/:id | Founder | Deletes the account, keeping its work (see below) |
 | GET | /users/:id/sign-in | Founder | { email, google } — audited |
@@ -955,6 +999,7 @@ but not shown anywhere else, and are not part of Call payloads.
 | POST | /profiles/:id/reject | Founder. { reason } required; author is notified |
 | PATCH | /profiles/:id/active | Founder. { isActive }. A deactivated Profile disappears for everyone else and cannot be booked |
 | DELETE | /profiles/:id | Founder. See "Deleting a Profile" in §6.9a |
+| PUT | /profiles/:id/associate | Founder, Manager | { associateId: uuid \| null }. Who looks after the Profile (§3.1). The Founder chooses any active Associate or Manager, or nobody; a Manager moves a Profile their team looks after (or nobody does yet) to themselves or one of their own Associates (403 otherwise) |
 | PUT | /profiles/:id/platforms/:platformId | Founder. { status?: not_registered \| registered \| banned, rate?: USD per hour, 0–1,000,000, two decimals, or null to clear }. At least one of the two. `registered` needs a rate (still editable afterwards), and a registered row cannot have its rate cleared |
 
 Profile responses include the personal details and `platformStatuses`: one
@@ -962,6 +1007,9 @@ entry per platform ({ platform: { id, name, priority }, status, rate }) in prior
 order, `not_registered` when never set. Experts get `platformStatuses: null`,
 and `email`, `phone` and `onboardedAt` null. `addresses`, `bankCount` (open
 accounts only) and `needsBank` are null for everyone except the Founder.
+`associate` (who looks after it) is null for Experts; `canAssign` says whether
+the viewer may hand it on; `managerSharePercent` goes to Founders and Managers.
+`PATCH /profiles/:id` takes `managerSharePercent` from the Founder only.
 
 A call can only be created with an approved profile (409
 `profile_not_approved`).
@@ -975,11 +1023,23 @@ A call can only be created with an approved profile (409
 | DELETE | /calls/:id | Founder | Deletes the call for good, with its status history and messages (cascade) and every notification about it; statistics and income stop counting it. Emits `call:deleted` to its participants, whose open pages leave it. The audit trail keeps its record, including the deletion |
 | GET | /calls/waiting | all | { count } of calls held up at the caller's own step (§9.3 sidebar badge): scheduling steps for Associates and Managers, confirm/start/finish for Experts, invoicing for the Founder |
 | GET | /calls/:id | participants | Includes platform, profile, associate, manager, expert and the history (`messages` is always empty while messaging is off) |
-| PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, real_income (Founder, once paid), gpt_link (Founder only), rate_override. scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
+| PATCH | /calls/:id | per §2.3 | associate_id, expert_id, platform_id, scheduled_at, duration_minutes, project_details, platform_associate_name, notes, real_income (Founder, once paid), gpt_link (Founder only), rate_override, expert_rate (Founder, once the call took place). scheduled_at and duration_minutes can change but not be cleared. 409 `expert_busy` if a booked call would overlap another |
 | POST | /calls/:id/transition | per §4 | { to, comment?, ninjaLink?, actualDurationMinutes?, realIncome? } → 200 with updated Call; 400 when a required field for the step is missing (§4.2); 409 (invalid edge, or `expert_busy` when moving to a blocking status would double-book the Expert) |
 | GET | /calls/:id/history | participants | Status history (Experts: without invoicing steps) |
 | GET | /calls/:id/messages | participants | **Switched off** (404). Cursor paginated when on |
 | POST | /calls/:id/messages | participants | **Switched off** (404). { body } when on |
+
+### 6.5a Finance **[Implementation]**
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /finance/calls | all | The caller's own financial dashboard: calls from `finished` on that pay them or that they pay out of — everything for the Founder; for a Manager the calls they are paid for and their own and their team's calls still on the way to the bank; an Associate their own calls; an Expert the calls they took. Query: paid = all \| unpaid \| paid, from, to, q, page, pageSize (≤ 200, default 50). Returns a page of Calls (with `payouts`) and `summary` (income, expert, manager, associate, keeps), which counts every matching call whatever the paid filter |
+| POST | /finance/payouts | Founder; Manager for `associate` | { payee: expert \| manager \| associate, callIds (1–500), paid = true }. Marks that person's pay as paid (or, with `paid: false`, not paid after all) on every call. All or nothing: 409 `payout_unavailable` when one of the calls has nothing to mark for the caller (not finished, no rate, not paid to bank, not the Manager paid for it). Returns { updated }; each newly paid person gets one `call.paid` notification per batch |
+
+"Unpaid" means something the viewer pays or is paid is still open on the call,
+now or once the bank pays: for the Founder the Expert or the Manager, for a
+Manager their share or the Associate's part, for an Associate their part, for
+an Expert their pay.
 
 **[Implementation]** Per-Call message threads are switched off
 (`FEATURES.messages` in `packages/shared/src/features.ts`): the routes return
@@ -1031,7 +1091,14 @@ now happen in one-to-one chat (§6.11).
   "rating": null,
   "feedback": null,
   "allowedTransitions": ["on_rescheduling"],
-  "permissions": { "edit": true, "reassignAssociate": false, "reassignExpert": false, "editIncome": false, "editGptLink": false, "editRate": true },
+  "permissions": { "edit": true, "reassignAssociate": false, "reassignExpert": false, "editIncome": false, "editGptLink": false, "editRate": true, "editExpertRate": false },
+  "payouts": {
+    "expert": null,
+    "manager": null,
+    "associate": null,
+    "canMark": []
+  },
+  "bankReady": null,
   "createdBy": { "id": "…", "nickname": "…", "role": "associate", "avatarId": "…" },
   "createdAt": "…",
   "updatedAt": "…"
@@ -1039,7 +1106,12 @@ now happen in one-to-one chat (§6.11).
 ```
 
 `allowedTransitions` and `permissions` are computed server-side for the
-requesting user so clients never guess. For Experts, `status` never shows an
+requesting user so clients never guess. `payouts` is too (§3.1): `expert`
+{ user, rate, minutes, amount, paidAt } from `finished` on, `manager`
+{ user, percent, amount, keeps, paidAt } and `associate` { user, percent,
+amount, paidAt } once paid to bank, each only for the viewers who may see it,
+and `canMark` lists the lines the viewer may mark. `bankReady` (Founder only)
+says whether the Profile has an open bank account. For Experts, `status` never shows an
 invoicing status and every money field is null (§2.3); `gptLink` goes only to
 the Founder and the call's Expert.
 
@@ -1123,6 +1195,9 @@ are all closed counts as having no bank.
   `finished` or an invoice status. Tentative `on_scheduling` calls are left out.
 - `byStatus` for Experts counts invoiced calls under `finished`.
 - `tasks.invoicesToSubmit`: calls in `finished` (no invoice submitted yet).
+- `tasks.callsNeedingResearch`: booked calls still to come (`scheduled`,
+  `confirmed`, `on_rescheduling`) without deep search data for the Expert to
+  prepare with.
 - `tasks.profilesNeedingBank`: Profiles with a booked call and no open bank
   account, with the number of booked calls and the next upcoming one.
 - `tasks.profilesNeedingRate`: Profile × platform pairs with finished calls but
@@ -1160,6 +1235,7 @@ that the rules no longer allow stays readable, with `canSend: false`.
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
 | GET | /todos/assignees | all | People the caller may give a task to: themselves first, then everyone below them (every Associate for a Manager, everyone for the Founder) |
 | POST | /todos | all | { assigneeId, title, details? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own |
+| POST | /todos/:id/move | the giver | { assigneeId }: hands an open task to someone else the giver may give tasks to (dragged onto their panel); it goes to the top of their panel and they get `todo.assigned`. 409 for a task from a chat (it stays with that chat) or one that is no longer open |
 | POST | /todos/reorder | the panel's owner, or anyone who may give them tasks | { assigneeId, ids }: the panel's new top-to-bottom order (what the filter hides keeps its order below it). 409 when an id is not that person's. Emits `chat:todos-reordered` |
 | DELETE | /todos/:id | the giver | Removes a task that is open, or completed and no longer needed. 409 while it waits for confirmation |
 | GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (every Associate for a Manager; everyone for the Founder). Each panel: the person, whether the caller may give them tasks, their tasks (whoever gave them) and counts. Query: status as below |
@@ -1217,7 +1293,7 @@ Every change (POST, PATCH, PUT, DELETE) and every sensitive read (bank details,
 database dumps, someone's sessions or sign-in details, the Profile statistics)
 is recorded once the response is known, so refused attempts (403, 409) are kept
 too. Reading the trail itself is **not** recorded: it only filled the trail with
-itself. Token refreshes, read receipts and presence
+itself, and the entries it had left were cleared by the `payouts_and_profile_associates` migration. Token refreshes, read receipts and presence
 are skipped as noise. Each entry has the actor, a plain summary, the request,
 its outcome, and the device, IP and country (§3.1 AuditLog). A failed sign-in
 keeps the attempted email; a successful one does not.
@@ -1367,19 +1443,19 @@ Everyone sees whether the people they may chat with are at their screen.
 | Screen | Roles | Content |
 |---|---|---|
 | Login | all | Email + password, and "Sign in with Google" when the API has a Google client ID |
-| Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, Profiles that need a bank, with an Add bank shortcut, and Profiles that need a rate), the **database size**, and **Backups** (the last nightly dump with its size and row count, Run now, and Download per kept dump). Manager: team counts per stage |
-| Call list | all | Table with filters (status, associate, expert, date range, search), live updates; filters live in the URL. **When** reads in plain words: "in 13 hours" over "Tomorrow 11 AM · 45 min" (exact date and range in the tooltip) |
-| Call detail | participants | Header with "View profile details", the platform, when it is in plain words, and its money once finished as a pill — **Expected income** (rate × real duration), "No rate yet", or **Real income** once paid, repeated as a field in the Details card; not for Experts — a **Delete call** button for the Founder, status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions` and a quiet **Cancel call** button while the call has not started (whoever runs it, any Manager, the Founder; the dialog warns it cannot be undone, frees the Expert's time and earns nothing, and takes an optional reason), a warning before **Invoice submitted** when the Profile has no open bank account, assignment controls, status history, a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls), a **GPT link** card (the Founder edits it, the Expert reads it) and a **Rate** card (the platform rate plus a special rate for this call, hidden from Experts). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
+| Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, booked calls without deep search data, Profiles that need a bank, with an Add bank shortcut, and Profiles that need a rate), the **database size**, and **Backups** (the last nightly dump with its size and row count, Run now, and Download per kept dump). Manager: team counts per stage |
+| Calls | all | Two tabs. **In progress**: the calls still on their way (being scheduled or running; cancelled ones on request), a table with filters (status, associate, expert, date range, search) and live updates, filters in the URL; **When** reads in plain words ("in 13 hours" over "Tomorrow 11 AM · 45 min"); a **Deep search** column for the Founder and the Expert (Open, or "Not added yet" on a booked call); and a Cancel button on every call the viewer may cancel. **Finance**: each person's own financial dashboard over the calls that took place (§6.5a) — totals at the top (the Founder: income and what is owed to Experts and Managers; a Manager: their share, what they owe their Associates and what they keep; an Associate: their part; an Expert: their pay to date), a filter All / still to pay / settled, dates and search, and one row per call with its income (Expected, then Real) and each visible payee's amount with a paid mark. The Founder and Managers select rows and press **Paid to expert / manager / associate**; the menu undoes a payment that did not happen |
+| Call detail | participants | Header with "View profile details", the platform, when it is in plain words, and its money once finished as a pill — **Expected income** (rate × real duration), "No rate yet", or **Real income** once paid, repeated as a field in the Details card; not for Experts — a **Delete call** button for the Founder, status timeline (Experts: without Invoicing), transition buttons from `allowedTransitions` and a quiet **Cancel call** button while the call has not started (whoever runs it, any Manager, the Founder; the dialog warns it cannot be undone, frees the Expert's time and earns nothing, and takes an optional reason), a warning before **Invoice submitted** when the Profile has no open bank account, assignment controls, status history, a Call card (Ninja link with "Join call", actual duration, and the rating and note of older calls), a **Deep search data** card (the Founder adds the link, the Expert reads it; first on the page while the call is being prepared, and offered again when the Expert confirms or starts), a **Payouts** card (who is paid what for the call and whether it is paid, with Mark paid for whoever pays; the Founder corrects the Expert's rate for the call there) and a **Rate** card (the platform rate plus a special rate for this call, hidden from Experts). Confirming shows the time in the Expert's zone; starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason. The message thread is hidden while messaging is off |
 | New Call | Founder, Manager, Associate | Required fields are marked with *. In this order: Profile (approved and active only, no inline create); Project (platform, platform associate, project details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. A Manager runs the call themselves by default, or picks any Associate. Past times are refused. Saving asks for confirmation when the time is today, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Every call block carries a status badge (SCHEDULING, SCHEDULED, CONFIRMED, RESCHEDULING, ONGOING, DONE, INVOICED, APPROVED, PAID) next to its colour; others' calls still being scheduled show as "Being scheduled"; past slots cannot start a call. Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
-| Profiles | all | One table: profile, status, **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with its status (green registered, grey not registered, red banned) and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons. Filters All / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) |
-| Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit; a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (name, status dot, rate, status) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
+| Profiles | all | One table: profile, status, **Associate** (who looks after it), **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with a green dot where the Profile is registered and a red one where it is not (a red ring when banned), and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons. No rates in the table. Filters All / Mine (an Associate's own Profiles; My team for a Manager) / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) |
+| Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit, **Looked after by** (with a hand-on button for the Founder and the team's Manager) and **Manager share** (the Founder edits it, Managers read it); a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (one row each with its green or red dot; clicking a platform unfolds its status and rate, which the Founder edits there) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
 | Chat | all | Each chat row has a menu with **Clear chat history**. Messages can be deleted by their sender (a placeholder stays), carry pictures (paste, drop or attach; click to enlarge) and emoji reactions; an emoji picker sits by the message box. An arriving message raises a toast with an Open button unless that chat is already on screen, plus a browser notification when one is allowed. Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
-| Tasks | all | One panel per person: your own tasks first, then the people below you (every Associate for a Manager; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person — including your own panel, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged up and down by the handle on the left (mouse, touch or keyboard) and the order is saved for everyone who sees that panel. Panels with nothing in them start folded |
+| Tasks | all | One panel per person: your own tasks first, then the people below you (every Associate for a Manager; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person — including your own panel, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged up and down by the handle on the left (mouse, touch or keyboard) and the order is saved for everyone who sees that panel; the giver drags an open task onto someone else's panel (it lights up) to hand it to them. **New task** at the top adds one for yourself, or for someone you pick. Panels with nothing in them start folded |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create, deactivate |
-| Users | Founder | All users, create any role. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
-| Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Submitting invoices warns about calls without a rate or whose Profile has no open bank account |
+| Users | Founder | All users, create any role, with a **Pay** column (an Expert's hourly rate, an Associate's share) set in the create and edit dialogs; editing an Expert's rate can also price their finished calls that have none. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
+| Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Rows say "No bank yet" for a Profile with no open bank account, and submitting invoices warns about calls without a rate or without a bank (`bankReady`) |
 | Statistics | Founder, Manager, Associate | §6.14 |
 | Audit | Founder | §6.16 |
 | Notifications | all | List, mark read |
@@ -1524,12 +1600,12 @@ calendar has something to show.
 
 ### 12.4 Testing
 
-- Unit (`packages/shared`, 1099 tests): `canTransition` against every (role,
+- Unit (`packages/shared`, 1274 tests): `canTransition` against every (role,
   from, to) combination with and without the relationship; who may chat with
   whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 346 tests): transition endpoint returns 403 for wrong role,
+- API (`apps/api`, 373 tests): transition endpoint returns 403 for wrong role,
   409 for wrong edge, 200 and a history row for valid moves; confirmation,
   rescheduling requests, Ninja link and duration rules; Experts never seeing
   invoicing, rates, bank data or invoice figures; platform rates (Founder-only,
@@ -1545,7 +1621,10 @@ calendar has something to show.
   detection; rate limiting; database constraints; sessions and the audit
   trail; Google sign-in (token check mocked); tasks, the task board and
   retention; statistics; chat pictures, deletion, reactions and history
-  clearing; deleting users, Profiles and Calls; closed bank accounts.
+  clearing; deleting users, Profiles and Calls; closed bank accounts; who is
+  paid what (rates fixed at finish, shares at payment, who sees which line,
+  marking paid, the Finance tab's scope and totals); Profiles looked after by
+  an Associate; handing tasks on.
 - CI runs `pnpm typecheck` across every package (including test files), then
   the shared and API tests against a Postgres service, then both builds.
 - API tests run against a separate local database, `god_testsuite`, migrated
@@ -1655,6 +1734,9 @@ Container alternative:
 | Participant | The Associate (or Manager running it), Expert, the Associate's Manager, and Founder for a given Call |
 | Expected price | Rate × the call's real duration; what a finished call should bring in |
 | Real income | What actually reached the bank for a call, entered by the Founder when paying it |
+| Manager share | The Manager's percent of a call's real income (15 by default, per Profile), including the Associate's part |
+| Payout | One person's pay for a call: the Expert's (rate × real duration) or a share of the real income |
+| Deep search data | The research the Expert reads to prepare for a call; a link the Founder adds (`gpt_link`) |
 | Confirmed | The Expert has confirmed they are available for the scheduled time |
 | Ninja link | The VDO.Ninja meeting link the Expert adds when a call starts |
 | Platform status | A Profile's standing on an expert network platform: not registered, registered or banned |
@@ -1707,3 +1789,4 @@ Container alternative:
 | 2026-09-20 | A call can be **cancelled** before it starts by whoever runs it, any Manager or the Founder: terminal, off the calendar, the Expert's slot freed, no income. Experts never cancel |
 | 2026-09-20 | Anyone can put a task on their own panel; ticking it finishes it at once. Tasks are dragged into the order their panel should keep, and everyone sees that order |
 | 2026-09-20 | The call panel names its money in a field of its own: Expected income once finished, Real income once paid. The Profiles table shows the priority-one platform's status by name and unfolds every platform on click. Submitting an invoice from the call page warns when the Profile has no open bank account. Reading the audit trail is no longer written to the audit trail |
+| 2026-09-21 | **Who is paid what**: Experts have an hourly rate and Associates a share, set by the Founder; each call keeps the Expert's rate from when it finished and the shares from when it was paid to bank. The Founder pays the Expert and the Manager (15% of real income by default, per Profile), the Manager passes the Associate's part on. The Calls page has two tabs, In progress and Finance: each person's own money on the calls that took place, with totals, and rows the Founder and Managers select and mark paid. Profiles are looked after by an Associate, handed on by the Founder or within a Manager's team. Platform statuses are green and red dots, with the rate only on click. Calls can be cancelled from the list; the deep search data link leads the call page while it is being prepared, and the dashboard lists booked calls still without it. Tasks can be dragged onto another person's panel, and New task sits at the top of the page. Old "read the audit trail" entries were cleared |

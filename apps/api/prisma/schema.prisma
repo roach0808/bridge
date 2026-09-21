@@ -98,6 +98,10 @@ model User {
   /// An uploaded picture; shown instead of the catalog avatar when set.
   photoId      String?  @unique @map("photo_id") @db.Uuid
   timeZone     String   @default("America/New_York") @map("time_zone")
+  /// Experts: what they are paid per hour of call (USD). Set by the Founder; copied onto a call when it finishes.
+  hourlyRate   Decimal? @map("hourly_rate") @db.Decimal(12, 2)
+  /// Associates: their share of a call's real income (percent), part of their Manager's share. Set by the Founder.
+  sharePercent Decimal? @map("share_percent") @db.Decimal(5, 2)
   /// Last time the user was connected; used for "last seen" when they are offline.
   lastSeenAt   DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
@@ -112,6 +116,8 @@ model User {
   associateCalls     Call[]              @relation("CallAssociate")
   expertCalls        Call[]              @relation("CallExpert")
   createdCalls       Call[]              @relation("CallCreatedBy")
+  payeeCalls         Call[]              @relation("CallPayeeManager")
+  handledProfiles    Profile[]           @relation("ProfileAssociate")
   identities         AuthIdentity[]
   chatImages         ChatImage[]         @relation("ChatImageUploader")
   chatReactions      ChatReaction[]      @relation("ChatReactionUser")
@@ -194,6 +200,10 @@ model Profile {
   /// Set when the Founder deleted a Profile that already had calls: its personal details are erased,
   /// it leaves every list, and its calls and income stay under a removed name.
   deletedAt       DateTime?     @map("deleted_at") @db.Timestamptz(3)
+  /// The Manager's share of this Profile's real income (percent), set by the Founder.
+  managerSharePercent Decimal   @default(15) @map("manager_share_percent") @db.Decimal(5, 2)
+  /// The Associate (or Manager) who looks after this Profile.
+  associateId     String?       @map("associate_id") @db.Uuid
   createdById     String        @map("created_by") @db.Uuid
   reviewedById    String?       @map("reviewed_by") @db.Uuid
   reviewedAt      DateTime?     @map("reviewed_at") @db.Timestamptz(3)
@@ -207,11 +217,13 @@ model Profile {
   platformStatuses ProfilePlatformStatus[]
   addresses  ProfileAddress[]
   createdBy  User   @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  associate  User?  @relation("ProfileAssociate", fields: [associateId], references: [id], onDelete: SetNull)
   reviewedBy User?  @relation("ProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
   calls      Call[]
 
   @@index([status])
   @@index([createdById])
+  @@index([associateId])
   @@map("profiles")
 }
 
@@ -242,6 +254,16 @@ model Call {
   /// Expert's 1–5 rating of how the call went, plus their answer.
   rating                Int?
   feedback              String?
+  /// The Expert's hourly rate when the call finished: what the Expert is paid, with the real duration.
+  expertRate            Decimal?   @map("expert_rate") @db.Decimal(12, 2)
+  /// The shares (percent) when the call was processed to bank, and the Manager who is paid.
+  managerSharePercent   Decimal?   @map("manager_share_percent") @db.Decimal(5, 2)
+  associateSharePercent Decimal?   @map("associate_share_percent") @db.Decimal(5, 2)
+  payeeManagerId        String?    @map("payee_manager_id") @db.Uuid
+  /// When the Founder paid the Expert and the Manager, and the Manager paid the Associate.
+  expertPaidAt          DateTime?  @map("expert_paid_at") @db.Timestamptz(3)
+  managerPaidAt         DateTime?  @map("manager_paid_at") @db.Timestamptz(3)
+  associatePaidAt       DateTime?  @map("associate_paid_at") @db.Timestamptz(3)
   createdById          String     @map("created_by") @db.Uuid
   createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -251,6 +273,7 @@ model Call {
   associate User                @relation("CallAssociate", fields: [associateId], references: [id], onDelete: Restrict)
   expert    User?               @relation("CallExpert", fields: [expertId], references: [id], onDelete: Restrict)
   createdBy User                @relation("CallCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  payeeManager User?            @relation("CallPayeeManager", fields: [payeeManagerId], references: [id], onDelete: Restrict)
   history   CallStatusHistory[]
   messages  Message[]
 
@@ -259,6 +282,7 @@ model Call {
   @@index([expertId])
   @@index([expertId, scheduledAt])
   @@index([scheduledAt])
+  @@index([payeeManagerId])
   @@map("calls")
 }
 

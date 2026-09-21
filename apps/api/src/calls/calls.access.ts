@@ -1,4 +1,5 @@
 import {
+  FINANCE_STATUSES,
   INVOICING_STATUSES,
   STATUS_STAGE,
   allowedTransitions,
@@ -15,6 +16,7 @@ export interface CallAccessShape {
   status: CallStatus;
   associateId: string;
   expertId: string | null;
+  expertPaidAt?: Date | null;
   associate: { role: string; managerId: string | null };
 }
 
@@ -76,6 +78,8 @@ export function allowedTransitionsFor(actor: Pick<Actor, 'id' | 'role'>, call: C
  * - Associates may reassign the Expert on their own call only before it is
  *   scheduled; Managers and the Founder during the whole scheduling stage.
  * - Invoice fields belong to the Founder.
+ * - Once paid to bank the shares are settled on the call's Associate, so it
+ *   can no longer be handed to someone else.
  */
 export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape): CallPermissions {
   const scheduling = STATUS_STAGE[call.status] === 'scheduling';
@@ -85,11 +89,13 @@ export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAcc
 
   return {
     edit: ownsScheduling && (scheduling || actor.role === 'founder'),
-    reassignAssociate: supervises,
+    reassignAssociate: supervises && call.status !== 'process_to_bank',
     // The Associate may swap the Expert for as long as they own the scheduling stage.
     reassignExpert: (supervises || (actor.role === 'associate' && call.associateId === actor.id)) && scheduling,
     editIncome: actor.role === 'founder',
     editGptLink: actor.role === 'founder',
     editRate: ownsScheduling,
+    // The Expert's rate is fixed when the call finishes; the Founder may still correct it until the Expert is paid.
+    editExpertRate: actor.role === 'founder' && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,
   };
 }

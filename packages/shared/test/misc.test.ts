@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ACTIVE_STATUSES,
   AVATAR_CATALOG,
+  FINANCE_STATUSES,
+  associateShareWithin,
+  shareOf,
   canChat,
   canGiveTask,
   isSelfTask,
@@ -247,5 +251,26 @@ describe('experts do not see invoicing', () => {
     expect(statusFilterForRole('expert', ['finished']).sort()).toEqual(['finished', 'invoice_approve', 'invoice_submit', 'process_to_bank']);
     expect(statusFilterForRole('expert', ['invoice_submit'])).toEqual([]);
     expect(statusFilterForRole('founder', ['invoice_submit'])).toEqual(['invoice_submit']);
+  });
+});
+
+describe('payouts', () => {
+  it('takes a share to the cent', () => {
+    expect(shareOf(1000, 15)).toBe(150);
+    expect(shareOf(1000, 10)).toBe(100);
+    expect(shareOf(1234.56, 15)).toBe(185.18);
+    expect(shareOf(999.99, 12.5)).toBe(125);
+    expect(shareOf(0, 15)).toBe(0);
+  });
+
+  it('keeps the Associate’s part within the Manager’s share', () => {
+    expect(associateShareWithin(10, 15)).toBe(10);
+    expect(associateShareWithin(20, 15)).toBe(15);
+    expect(associateShareWithin(0, 15)).toBe(0);
+  });
+
+  it('splits the Calls page between calls on their way and calls that took place', () => {
+    expect([...ACTIVE_STATUSES, ...FINANCE_STATUSES, 'cancelled'].sort()).toEqual([...CALL_STATUSES].sort());
+    expect(ACTIVE_STATUSES.some((s) => FINANCE_STATUSES.includes(s))).toBe(false);
   });
 });

@@ -6,7 +6,7 @@
 import { PrismaClient, type CallStatus } from '@prisma/client';
 import argon2 from 'argon2';
 import { DateTime } from 'luxon';
-import { TRANSITIONS, TEAM_TIME_ZONE, edgeOwner, type Role } from '@god/shared';
+import { DEFAULT_ASSOCIATE_SHARE_PERCENT, DEFAULT_MANAGER_SHARE_PERCENT, TRANSITIONS, TEAM_TIME_ZONE, edgeOwner, type Role } from '@god/shared';
 
 const prisma = new PrismaClient();
 const PASSWORD = process.env.SEED_PASSWORD ?? 'Password123!';
@@ -40,7 +40,7 @@ async function main() {
     nickname: string,
     role: Role,
     avatarNo: number,
-    extra: { managerId?: string; timeZone?: string; email?: string } = {},
+    extra: { managerId?: string; timeZone?: string; email?: string; hourlyRate?: number; sharePercent?: number } = {},
   ) => {
     joined = joined.plus({ hours: 1 });
     return prisma.user.create({
@@ -52,6 +52,8 @@ async function main() {
         avatarId: `${role}-${String(avatarNo).padStart(2, '0')}`,
         managerId: extra.managerId,
         timeZone: extra.timeZone ?? TEAM_TIME_ZONE,
+        hourlyRate: extra.hourlyRate,
+        sharePercent: extra.sharePercent ?? (role === 'associate' ? DEFAULT_ASSOCIATE_SHARE_PERCENT : undefined),
         createdAt: joined.toJSDate(),
       },
     });
@@ -61,12 +63,14 @@ async function main() {
   const atlas = await mkUser('atlas', 'manager', 3);
   const beacon = await mkUser('beacon', 'manager', 8);
   const pixel = await mkUser('pixel', 'associate', 2, { managerId: atlas.id });
-  const sprout = await mkUser('sprout', 'associate', 5, { managerId: atlas.id });
+  const sprout = await mkUser('sprout', 'associate', 5, { managerId: atlas.id, sharePercent: 8 });
   const mango = await mkUser('mango', 'associate', 9, { managerId: beacon.id });
   const comet = await mkUser('comet', 'associate', 14, { managerId: beacon.id });
-  const ember = await mkUser('ember', 'expert', 4, { timeZone: 'Asia/Seoul' });
-  const flint = await mkUser('flint', 'expert', 7, { timeZone: 'Europe/London' });
-  const quill = await mkUser('quill', 'expert', 12, { timeZone: 'America/New_York' });
+  const ember = await mkUser('ember', 'expert', 4, { timeZone: 'Asia/Seoul', hourlyRate: 180 });
+  const flint = await mkUser('flint', 'expert', 7, { timeZone: 'Europe/London', hourlyRate: 220 });
+  const quill = await mkUser('quill', 'expert', 12, { timeZone: 'America/New_York', hourlyRate: 200 });
+  // Who looks after each Profile, in turn.
+  const handlers = [pixel, sprout, mango, comet];
 
   const platformRows = [
     { name: 'Northwind Insights', url: 'https://northwind.example.com', priority: 1, country: 'US' },
@@ -126,6 +130,7 @@ async function main() {
           addresses: { create: [{ label: 'Home', address: `${10 + i} Market Street, ${location}`, sortOrder: 0 }] },
           avatarId: `profile-${String(i + 1).padStart(2, '0')}`,
           status: 'approved',
+          associateId: handlers[i % handlers.length]!.id,
           createdById: founder.id,
           reviewedById: founder.id,
           reviewedAt: now,
@@ -159,6 +164,7 @@ async function main() {
       avatarId: 'profile-11',
       status: 'pending',
       createdById: pixel.id,
+      associateId: pixel.id,
     },
   });
   await prisma.profile.create({
@@ -168,6 +174,7 @@ async function main() {
       avatarId: 'profile-12',
       status: 'rejected',
       createdById: mango.id,
+      associateId: mango.id,
       reviewedById: founder.id,
       reviewedAt: now,
       rejectionReason: 'Could not verify the employment history.',
@@ -246,6 +253,18 @@ async function main() {
         actualDurationMinutes: c.report?.[0],
         rating: c.report?.[1],
         feedback: c.report?.[2],
+        // The Expert's rate is fixed when the call finishes; shares when it is paid to bank.
+        expertRate: c.report ? c.expert?.hourlyRate : undefined,
+        ...(c.status === 'process_to_bank'
+          ? {
+              managerSharePercent: DEFAULT_MANAGER_SHARE_PERCENT,
+              associateSharePercent: c.associate.sharePercent ?? 0,
+              payeeManagerId: c.associate.managerId,
+              // The Founder has paid the Expert and the Manager; the Manager still owes the Associate.
+              expertPaidAt: DateTime.fromJSDate(c.when).plus({ days: 3 }).toJSDate(),
+              managerPaidAt: DateTime.fromJSDate(c.when).plus({ days: 5 }).toJSDate(),
+            }
+          : {}),
         createdById: c.associate.id,
         createdAt: DateTime.fromJSDate(c.when).minus({ days: 4 }).toJSDate(),
       },

@@ -13,7 +13,7 @@ afterAll(async () => {
 async function invoicedCall() {
   const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'invoice_approve', scheduledAt: '2027-02-01T09:00:00Z' });
   await prisma.profilePlatformStatus.create({ data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 450 } });
-  await prisma.call.update({ where: { id: call.id }, data: { actualDurationMinutes: 60, status: 'process_to_bank', realIncome: 437.25 } });
+  await prisma.call.update({ where: { id: call.id }, data: { actualDurationMinutes: 60, status: 'process_to_bank', realIncome: 437.25, managerSharePercent: 15, associateSharePercent: 10, payeeManagerId: fx.m1.id } });
   const at = (h: number) => new Date(Date.UTC(2027, 1, 1, h));
   await prisma.callStatusHistory.createMany({
     data: [

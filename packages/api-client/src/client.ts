@@ -49,6 +49,9 @@ import type {
   ProfileStatsRow,
   StatsPeriodKind,
   TodoPanel,
+  FinanceCallsPage,
+  FinanceCallsQuery,
+  MarkPayoutsInput,
 } from '@god/shared';
 import { HttpClient, type ClientOptions, type Query } from './http';
 
@@ -73,6 +76,8 @@ export interface CreateUserBody {
   managerId?: string | null;
   avatarId?: string;
   timeZone?: string;
+  hourlyRate?: number | null;
+  sharePercent?: number | null;
 }
 
 export interface UpdateUserBody {
@@ -80,6 +85,12 @@ export interface UpdateUserBody {
   managerId?: string | null;
   isActive?: boolean;
   timeZone?: string;
+  /** Founder only: an Expert's hourly rate. */
+  hourlyRate?: number | null;
+  /** With `hourlyRate`: also give it to the Expert's finished calls without a rate. */
+  applyRateToUnpricedCalls?: boolean;
+  /** Founder only: an Associate's share of each call's real income (percent). */
+  sharePercent?: number | null;
 }
 
 export interface BlockMutationResult {
@@ -190,6 +201,9 @@ export function createApiClient(options: ClientOptions) {
       setActive: (id: string, isActive: boolean) => patch<ProfileDTO>(`/profiles/${enc(id)}/active`, { isActive }),
       setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number | null }) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}`, { body }),
+      /** Founder, or a Manager within their team: who looks after the Profile. */
+      setAssociate: (id: string, associateId: string | null) =>
+        http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/associate`, { body: { associateId } }),
     },
 
     calls: {
@@ -251,6 +265,15 @@ export function createApiClient(options: ClientOptions) {
       reopen: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/reopen`, note ? { note } : {}),
       /** The new top-to-bottom order of one person's panel, after a drag. */
       reorder: (input: { assigneeId: string; ids: string[] }) => post<void>('/todos/reorder', input),
+      /** The giver hands an open task to someone else (dragged onto their panel). */
+      move: (id: string, assigneeId: string) => post<TodoDTO>(`/todos/${enc(id)}/move`, { assigneeId }),
+    },
+
+    finance: {
+      /** Calls that took place, with who is paid what, and the viewer's totals. */
+      calls: (query?: FinanceCallsQuery) => get<FinanceCallsPage>('/finance/calls', query as Query),
+      /** Marks one person's pay on several calls as paid (or not paid after all). */
+      markPaid: (input: MarkPayoutsInput) => post<{ updated: number }>('/finance/payouts', input),
     },
 
     stats: {

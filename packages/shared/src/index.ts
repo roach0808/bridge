@@ -11,3 +11,4 @@ export * from './features';
 export * from './chat';
 export * from './presence';
 export * from './notificationText';
+export * from './payouts';

@@ -16,6 +16,7 @@ import { dumpsRouter } from './backup/dumps.routes';
 import { presenceRouter } from './presence/presence.routes';
 import { config } from './config';
 import { dashboardRouter } from './dashboard/dashboard.routes';
+import { financeRouter } from './finance/finance.routes';
 import { prisma } from './db';
 import { errorHandler, notFoundHandler } from './errors';
 import { camelizeBody } from './http';
@@ -77,6 +78,7 @@ export function createApp() {
   api.use(banksRouter);
   api.use(profilesRouter);
   api.use(callsRouter);
+  api.use(financeRouter);
   api.use(chatRouter);
   api.use(presenceRouter);
   api.use(dumpsRouter);

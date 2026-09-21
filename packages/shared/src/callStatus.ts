@@ -116,6 +116,13 @@ export const TERMINAL_STATUSES: readonly CallStatus[] = ['process_to_bank', 'can
  */
 export const CANCELLABLE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'];
 
+/**
+ * The two halves of the Calls page (§9.1): calls still on their way (being
+ * scheduled or running), and calls that took place, where the money is.
+ */
+export const ACTIVE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling', 'ongoing'];
+export const FINANCE_STATUSES: readonly CallStatus[] = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
+
 /** The invoicing stage. Experts never see it: to them these calls are simply finished. */
 export const INVOICING_STATUSES: readonly CallStatus[] = STAGE_STATUSES.invoicing;
 

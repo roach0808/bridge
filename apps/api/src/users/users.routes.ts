@@ -1,5 +1,7 @@
 import {
   CREATABLE_ROLES,
+  DEFAULT_ASSOCIATE_SHARE_PERCENT,
+  FINANCE_STATUSES,
   createUserSchema,
   defaultAvatarFor,
   isAvatarForAudience,
@@ -57,7 +59,7 @@ usersRouter.get('/users/me/team', requireRole('manager'), async (req, res) => {
     select: userSelect,
     orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
   });
-  res.json(team.map(toUserDTO));
+  res.json(team.map((u) => toUserDTO(u)));
 });
 
 usersRouter.get('/users', async (req, res) => {
@@ -75,7 +77,7 @@ usersRouter.get('/users', async (req, res) => {
     select: userSelect,
     orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
   });
-  res.json(users.map(toUserDTO));
+  res.json(users.map((u) => toUserDTO(u, actor.role === 'founder')));
 });
 
 usersRouter.post('/users', async (req, res) => {
@@ -98,6 +100,7 @@ usersRouter.post('/users', async (req, res) => {
   if (input.timeZone && input.role !== 'expert') {
     throw badRequest('Only Experts have their own time zone', { issues: [{ path: 'timeZone', message: 'Experts only' }] });
   }
+  assertPaySettings(actor, input.role, input);
   const avatarId = input.avatarId ?? defaultAvatarFor(input.role);
   if (!isAvatarForAudience(avatarId, input.role)) {
     throw badRequest('Choose an avatar from the role’s set', { issues: [{ path: 'avatarId', message: 'Wrong avatar set' }] });
@@ -121,16 +124,41 @@ usersRouter.post('/users', async (req, res) => {
       managerId,
       avatarId,
       ...(input.role === 'expert' && input.timeZone ? { timeZone: input.timeZone } : {}),
+      ...(input.role === 'expert' ? { hourlyRate: input.hourlyRate ?? null } : {}),
+      ...(input.role === 'associate' ? { sharePercent: input.sharePercent ?? DEFAULT_ASSOCIATE_SHARE_PERCENT } : {}),
     },
     select: userSelect,
   });
-  res.status(201).json(toUserDTO(user));
+  res.status(201).json(toUserDTO(user, actor.role === 'founder'));
 });
 
 usersRouter.get('/users/:id', async (req, res) => {
-  const user = await loadVisibleUser(actorOf(req), idParam(req));
-  res.json(toUserDTO(user));
+  const actor = actorOf(req);
+  const user = await loadVisibleUser(actor, idParam(req));
+  res.json(toUserDTO(user, actor.role === 'founder'));
 });
+
+/**
+ * Pay is the Founder's to set (§3.1): an hourly rate for Experts, a share of
+ * each call's real income for Associates.
+ */
+function assertPaySettings(
+  actor: Actor,
+  role: string,
+  input: { hourlyRate?: number | null; sharePercent?: number | null; applyRateToUnpricedCalls?: boolean },
+) {
+  const touches = input.hourlyRate !== undefined || input.sharePercent !== undefined || input.applyRateToUnpricedCalls;
+  if (touches && actor.role !== 'founder') throw forbidden('Only the Founder sets what people are paid');
+  if (input.hourlyRate != null && role !== 'expert') {
+    throw badRequest('Only Experts have an hourly rate', { issues: [{ path: 'hourlyRate', message: 'Experts only' }] });
+  }
+  if (input.sharePercent != null && role !== 'associate') {
+    throw badRequest('Only Associates have their own share', { issues: [{ path: 'sharePercent', message: 'Associates only' }] });
+  }
+  if (input.applyRateToUnpricedCalls && input.hourlyRate == null) {
+    throw badRequest('Choose the rate to give those calls', { issues: [{ path: 'hourlyRate', message: 'Required' }] });
+  }
+}
 
 /**
  * Founder only: deletes the account. Everything personal goes (email, password, Google,
@@ -241,6 +269,7 @@ usersRouter.patch('/users/:id', async (req, res) => {
     if (target.role !== 'associate') throw badRequest('Only Associates have a Manager');
     await assertManager(input.managerId);
   }
+  assertPaySettings(actor, target.role, input);
   if (input.nickname) {
     const taken = await prisma.user.findFirst({
       where: { nickname: { equals: input.nickname, mode: 'insensitive' }, NOT: { id: target.id } },
@@ -257,14 +286,23 @@ usersRouter.patch('/users/:id', async (req, res) => {
         isActive: input.isActive,
         timeZone: input.timeZone,
         ...(input.managerId !== undefined ? { managerId: input.managerId } : {}),
+        hourlyRate: input.hourlyRate,
+        sharePercent: input.sharePercent,
       },
       select: userSelect,
     });
+    // Calls that finished before the Expert had a rate can take this one; calls with a rate keep theirs.
+    if (input.applyRateToUnpricedCalls && input.hourlyRate != null) {
+      await tx.call.updateMany({
+        where: { expertId: target.id, expertRate: null, status: { in: [...FINANCE_STATUSES] } },
+        data: { expertRate: input.hourlyRate },
+      });
+    }
     if (input.isActive === false) {
       await tx.refreshToken.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: new Date() } });
     }
     return user;
   });
   if (input.isActive === false) disconnectUser(target.id);
-  res.json(toUserDTO(updated));
+  res.json(toUserDTO(updated, actor.role === 'founder'));
 });

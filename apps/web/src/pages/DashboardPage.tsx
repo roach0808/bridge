@@ -191,7 +191,8 @@ function RateTaskLine({ item }: { item: ProfileNeedingRate }) {
 
 function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['tasks']>; zone: string }) {
   const [bankFor, setBankFor] = useState<ProfileNeedingBank['profile'] | null>(null);
-  const total = tasks.invoicesToSubmit.length + tasks.profilesNeedingBank.length + tasks.profilesNeedingRate.length;
+  const total =
+    tasks.invoicesToSubmit.length + tasks.callsNeedingResearch.length + tasks.profilesNeedingBank.length + tasks.profilesNeedingRate.length;
   return (
     <>
       <Panel title="Pending tasks" count={total}>
@@ -214,6 +215,18 @@ function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['ta
                 <Empty>Every finished call is invoiced.</Empty>
               ) : (
                 tasks.invoicesToSubmit.slice(0, 8).map((c) => <CallLine key={c.id} call={c} zone={zone} showDay />)
+              )}
+              {tasks.callsNeedingResearch.length > 0 && (
+                <>
+                  <Box sx={{ px: 1, py: 0.5, mt: 1, minHeight: 34, display: 'flex', alignItems: 'center' }}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                      Add deep search data · {tasks.callsNeedingResearch.length}
+                    </Typography>
+                  </Box>
+                  {tasks.callsNeedingResearch.slice(0, 8).map((c) => (
+                    <CallLine key={c.id} call={c} zone={zone} showDay />
+                  ))}
+                </>
               )}
             </Box>
             <Box sx={{ minWidth: 0 }}>

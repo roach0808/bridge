@@ -111,9 +111,7 @@ export default function InvoicingPage() {
   // The API refuses to invoice a call whose Profile has no rate yet.
   const withoutRate = next === 'invoice_submit' ? eligible.filter((c) => c.expectedPrice === null) : [];
   // Money invoiced now has to be paid somewhere later, so flag Profiles with no open bank account.
-  const profiles = useQuery({ queryKey: qk.profiles.list({ scope: 'invoicing' }), queryFn: () => api.profiles.list(), staleTime: 60_000 });
-  const noBank = new Set((profiles.data ?? []).filter((p) => (p.bankCount ?? 1) === 0).map((p) => p.id));
-  const withoutBank = next === 'invoice_submit' ? eligible.filter((c) => noBank.has(c.profile.id)) : [];
+  const withoutBank = next === 'invoice_submit' ? eligible.filter((c) => c.bankReady === false) : [];
   const [bankWarning, setBankWarning] = useState(false);
 
   const changeTab = (status: InvoiceStatus) => {
@@ -496,6 +494,11 @@ function InvoiceTable({
                       </Typography>
                       <Typography variant="caption" color="text.secondary" noWrap component="div" sx={{ maxWidth: 200 }} title={c.platform.name}>
                         {c.platform.name}
+                        {c.bankReady === false && c.status !== 'process_to_bank' && (
+                          <Box component="span" sx={{ color: 'warning.main', fontWeight: 600 }} title="The Profile has no open bank account yet">
+                            {' · No bank yet'}
+                          </Box>
+                        )}
                       </Typography>
                     </Box>
                   </Stack>

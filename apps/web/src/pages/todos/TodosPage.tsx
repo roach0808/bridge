@@ -13,14 +13,16 @@ import { Box, Button, Card, Checkbox, Collapse, Divider, IconButton, Skeleton, S
 import { ROLE_LABELS, isSelfTask, type TodoDTO, type TodoPanel, type UserRef } from '@god/shared';
 import {
   DndContext,
+  DragOverlay,
   KeyboardSensor,
   PointerSensor,
   closestCenter,
+  useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { restrictToParentElement, restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -64,7 +66,11 @@ export default function TodosPage() {
   const [params, setParams] = useSearchParams();
   const filter = (FILTERS.find((f) => f.value === params.get('filter'))?.value ?? 'active') as Filter;
   const [newTaskFor, setNewTaskFor] = useState<UserRef | null>(null);
+  const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [reopenFor, setReopenFor] = useState<TodoDTO | null>(null);
+  const [dragging, setDragging] = useState<TodoDTO | null>(null);
+  const queryClient = useQueryClient();
+  const toast = useToast();
 
   const query = useQuery({
     queryKey: qk.todos.board(filter),
@@ -73,14 +79,92 @@ export default function TodosPage() {
   const panels = query.data ?? [];
   const gives = panels.some((p) => p.canGive && !p.isMe);
 
+  const sensors = useSensors(
+    // A few pixels of movement, so a tap on the handle still behaves like a tap.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const setBoard = (update: (old: TodoPanel[]) => TodoPanel[]) =>
+    queryClient.setQueryData<TodoPanel[]>(qk.todos.board(filter), (old) => (old ? update(old) : old));
+  const onFailed = (err: unknown) => {
+    toast.error(errorMessage(err));
+    void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+  };
+  const reorder = useMutation({
+    mutationFn: (v: { assigneeId: string; ids: string[] }) => api.todos.reorder(v),
+    onError: onFailed,
+  });
+  const move = useMutation({
+    mutationFn: (v: { todo: TodoDTO; to: UserRef }) => api.todos.move(v.todo.id, v.to.id),
+    onSuccess: (saved, v) => {
+      toast.success(v.to.id === me.id ? 'Moved to your tasks' : `Handed to ${saved.assignee.nickname}`);
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+    },
+    onError: onFailed,
+  });
+
+  const panelOf = (taskId: string) => panels.find((p) => p.tasks.some((t) => t.id === taskId));
+  const panelFor = (overId: string) =>
+    overId.startsWith('panel:') ? panels.find((p) => `panel:${p.person.id}` === overId) : panelOf(overId);
+
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragging(null);
+    if (!over) return;
+    const from = panelOf(String(active.id));
+    const to = panelFor(String(over.id));
+    const task = from?.tasks.find((t) => t.id === active.id);
+    if (!from || !to || !task) return;
+
+    if (to.person.id === from.person.id) {
+      // Up and down its own panel: a new order, saved for everyone who sees the panel.
+      if (String(over.id).startsWith('panel:') || active.id === over.id || !mayArrange(from)) return;
+      const next = arrayMove(
+        from.tasks,
+        from.tasks.findIndex((t) => t.id === active.id),
+        from.tasks.findIndex((t) => t.id === over.id),
+      );
+      setBoard((old) => old.map((p) => (p.person.id === from.person.id ? { ...p, tasks: next } : p)));
+      reorder.mutate({ assigneeId: from.person.id, ids: next.map((t) => t.id) });
+      return;
+    }
+    // Onto someone else's panel: the task is handed to them, at the top of their list.
+    if (!canHandOn(task, me.id) || !to.canGive) {
+      toast.info(
+        task.conversationId
+          ? 'A task from a chat stays with the person in that chat'
+          : task.createdBy.id !== me.id
+            ? 'Only the person who gave a task can hand it to someone else'
+            : task.status !== 'open'
+              ? 'Only open tasks can be handed on'
+              : `You cannot give tasks to ${to.person.nickname}`,
+      );
+      return;
+    }
+    setBoard((old) =>
+      old.map((p) =>
+        p.person.id === from.person.id
+          ? { ...p, tasks: p.tasks.filter((t) => t.id !== task.id) }
+          : p.person.id === to.person.id
+            ? { ...p, tasks: [{ ...task, assignee: to.person }, ...p.tasks] }
+            : p,
+      ),
+    );
+    move.mutate({ todo: task, to: to.person });
+  };
+
   return (
     <Box>
       <PageHeader
         title="Tasks"
         subtitle={
           gives
-            ? 'Your tasks first, then one panel per person. Add your own, drag to reorder, and confirm theirs when they are done.'
+            ? 'Your tasks first, then one panel per person. Drag a task to reorder it, or onto someone’s panel to hand it to them.'
             : 'Your own to-dos and the tasks given to you. Add one, drag to reorder, and tick it off when it is finished.'
+        }
+        actions={
+          <Button variant="contained" startIcon={<AddTaskRounded />} onClick={() => setNewTaskOpen(true)}>
+            New task
+          </Button>
         }
       />
 
@@ -104,21 +188,45 @@ export default function TodosPage() {
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
       ) : (
-        <Stack spacing={2}>
-          {panels.map((panel) => (
-            <PersonPanel
-              key={panel.person.id}
-              panel={panel}
-              filter={filter}
-              onNewTask={() => setNewTaskFor(panel.person)}
-              onReopen={setReopenFor}
-            />
-          ))}
-        </Stack>
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragStart={({ active }) => setDragging(panelOf(String(active.id))?.tasks.find((t) => t.id === active.id) ?? null)}
+          onDragCancel={() => setDragging(null)}
+          onDragEnd={onDragEnd}
+        >
+          {/* What follows the pointer, so a task can travel to another panel. */}
+          <DragOverlay>
+            {dragging ? (
+              <Card sx={{ px: 1.5, py: 1, boxShadow: 6, borderLeft: 3, borderLeftColor: TODO_COLORS[dragging.status], cursor: 'grabbing' }}>
+                <Stack direction="row" spacing={1} alignItems="center">
+                  <DragIndicatorRounded sx={{ fontSize: 17, color: 'text.disabled' }} />
+                  <Typography variant="body2" noWrap sx={{ fontWeight: dragging.title ? 550 : 400 }}>
+                    {todoText(dragging)}
+                  </Typography>
+                </Stack>
+              </Card>
+            ) : null}
+          </DragOverlay>
+          <Stack spacing={2}>
+            {panels.map((panel) => (
+              <PersonPanel
+                key={panel.person.id}
+                panel={panel}
+                filter={filter}
+                dragging={dragging}
+                onNewTask={() => setNewTaskFor(panel.person)}
+                onReopen={setReopenFor}
+              />
+            ))}
+          </Stack>
+        </DndContext>
       )}
 
       <TodoReopenDialog todo={reopenFor} onClose={() => setReopenFor(null)} />
       <NewTaskDialog open={Boolean(newTaskFor)} assignee={newTaskFor ?? undefined} onClose={() => setNewTaskFor(null)} />
+      <NewTaskDialog open={newTaskOpen} onClose={() => setNewTaskOpen(false)} />
       {me.role !== 'expert' && panels.length === 0 && !query.isLoading && !query.isError && (
         <Card>
           <EmptyState icon={<ChecklistRounded />} title="Nothing here yet" />
@@ -128,54 +236,46 @@ export default function TodosPage() {
   );
 }
 
+/** Your own panel is yours to arrange, and so is the panel of anyone you give tasks to. */
+const mayArrange = (panel: TodoPanel) => (panel.isMe || panel.canGive) && panel.tasks.length > 1;
+
+/** The giver hands an open task to someone else; a task from a chat stays with that chat. */
+const canHandOn = (t: TodoDTO, meId: string) => t.createdBy.id === meId && t.status === 'open' && !t.conversationId;
+
 /** One person's tasks. The caller's own panel opens first and is always expanded. */
 function PersonPanel({
   panel,
   filter,
+  dragging,
   onNewTask,
   onReopen,
 }: {
   panel: TodoPanel;
   filter: Filter;
+  dragging: TodoDTO | null;
   onNewTask: () => void;
   onReopen: (t: TodoDTO) => void;
 }) {
+  const me = useMe();
   const { person, counts, tasks, isMe } = panel;
   // Panels with nothing in them start folded, so a long team stays readable.
   const [open, setOpen] = useState(isMe || tasks.length > 0);
   const waiting = counts.done;
-  const queryClient = useQueryClient();
-  const toast = useToast();
-  // Your own panel is yours to arrange, and so is the panel of anyone you give tasks to.
-  const mayArrange = (isMe || panel.canGive) && tasks.length > 1;
-  const sensors = useSensors(
-    // A few pixels of movement, so a tap on the handle still behaves like a tap.
-    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
-  const reorder = useMutation({
-    mutationFn: (ids: string[]) => api.todos.reorder({ assigneeId: person.id, ids }),
-    onError: (err) => {
-      toast.error(errorMessage(err));
-      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
-    },
-  });
-
-  const onDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return;
-    const from = tasks.findIndex((t) => t.id === active.id);
-    const to = tasks.findIndex((t) => t.id === over.id);
-    if (from < 0 || to < 0) return;
-    const next = arrayMove(tasks, from, to);
-    // Move it under the hand right away; the order is saved for everyone.
-    queryClient.setQueryData<TodoPanel[]>(qk.todos.board(filter), (old) =>
-      old?.map((p) => (p.person.id === person.id ? { ...p, tasks: next } : p)),
-    );
-    reorder.mutate(next.map((t) => t.id));
-  };
+  // While a task is dragged, the panels it could be handed to light up.
+  const target = Boolean(dragging) && dragging!.assignee.id !== person.id && panel.canGive && canHandOn(dragging!, me.id);
+  const { setNodeRef, isOver } = useDroppable({ id: `panel:${person.id}`, disabled: !target });
+  const arrange = mayArrange(panel);
 
   return (
-    <Card>
+    <Card
+      ref={setNodeRef}
+      sx={(t) => ({
+        transition: 'box-shadow .15s ease, outline-color .15s ease',
+        outline: '2px dashed transparent',
+        outlineOffset: -2,
+        ...(target ? { outlineColor: `rgba(${t.vars!.palette.primary.mainChannel} / ${isOver ? 0.9 : 0.35})` } : {}),
+      })}
+    >
       <Stack
         direction="row"
         spacing={1.5}
@@ -190,12 +290,18 @@ function PersonPanel({
           <Typography variant="subtitle1" noWrap>
             {isMe ? 'Your tasks' : person.nickname}
           </Typography>
-          <Typography variant="caption" color="text.secondary">
-            {isMe ? 'Yours' : ROLE_LABELS[person.role]}
-            {!person.isActive && ' · deactivated'}
-            {counts.open > 0 && ` · ${counts.open} open`}
-            {waiting > 0 && ` · ${waiting} waiting for confirmation`}
-            {counts.open === 0 && waiting === 0 && ' · nothing to do'}
+          <Typography variant="caption" color={target && isOver ? 'primary.main' : 'text.secondary'}>
+            {target && isOver ? (
+              `Drop to hand it to ${isMe ? 'yourself' : person.nickname}`
+            ) : (
+              <>
+                {isMe ? 'Yours' : ROLE_LABELS[person.role]}
+                {!person.isActive && ' · deactivated'}
+                {counts.open > 0 && ` · ${counts.open} open`}
+                {waiting > 0 && ` · ${waiting} waiting for confirmation`}
+                {counts.open === 0 && waiting === 0 && ' · nothing to do'}
+              </>
+            )}
           </Typography>
         </Box>
         {panel.canGive && (
@@ -220,36 +326,23 @@ function PersonPanel({
           <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
             {filter === 'active' ? 'No tasks right now.' : 'No tasks match this filter.'}
           </Typography>
-        ) : mayArrange ? (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            modifiers={[restrictToVerticalAxis, restrictToParentElement]}
-            onDragEnd={onDragEnd}
-          >
-            <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-              <Stack divider={<Divider />}>
-                {tasks.map((t) => (
-                  <SortableTask key={t.id} todo={t} onReopen={() => onReopen(t)} />
-                ))}
-              </Stack>
-            </SortableContext>
-          </DndContext>
         ) : (
-          <Stack divider={<Divider />}>
-            {tasks.map((t) => (
-              <TaskRow key={t.id} todo={t} onReopen={() => onReopen(t)} />
-            ))}
-          </Stack>
+          <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+            <Stack divider={<Divider />}>
+              {tasks.map((t) => (
+                <SortableTask key={t.id} todo={t} draggable={arrange || canHandOn(t, me.id)} onReopen={() => onReopen(t)} />
+              ))}
+            </Stack>
+          </SortableContext>
         )}
       </Collapse>
     </Card>
   );
 }
 
-/** A task that can be dragged up and down its panel by its handle. */
-function SortableTask({ todo, onReopen }: { todo: TodoDTO; onReopen: () => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: todo.id });
+/** A task that can be dragged up and down its panel, or onto another panel, by its handle. */
+function SortableTask({ todo, draggable, onReopen }: { todo: TodoDTO; draggable: boolean; onReopen: () => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: todo.id, disabled: !draggable });
   return (
     <TaskRow
       todo={todo}
@@ -260,20 +353,25 @@ function SortableTask({ todo, onReopen }: { todo: TodoDTO; onReopen: () => void 
         transition,
         position: 'relative',
         zIndex: isDragging ? 2 : undefined,
-        opacity: isDragging ? 0.75 : 1,
+        // The overlay carries it; its place in the list stays faintly visible.
+        opacity: isDragging ? 0.35 : 1,
       }}
       handle={
-        <Tooltip title="Drag to reorder">
-          <IconButton
-            size="small"
-            aria-label={`Reorder \u201c${todoText(todo)}\u201d`}
-            {...attributes}
-            {...listeners}
-            sx={{ cursor: 'grab', touchAction: 'none', color: 'text.disabled', p: 0.25, '&:active': { cursor: 'grabbing' } }}
-          >
-            <DragIndicatorRounded sx={{ fontSize: 17 }} />
-          </IconButton>
-        </Tooltip>
+        draggable ? (
+          <Tooltip title="Drag to reorder, or onto someone’s panel">
+            <IconButton
+              size="small"
+              aria-label={`Move “${todoText(todo)}”`}
+              {...attributes}
+              {...listeners}
+              sx={{ cursor: 'grab', touchAction: 'none', color: 'text.disabled', p: 0.25, '&:active': { cursor: 'grabbing' } }}
+            >
+              <DragIndicatorRounded sx={{ fontSize: 17 }} />
+            </IconButton>
+          </Tooltip>
+        ) : (
+          <Box sx={{ width: 21.5, flexShrink: 0 }} />
+        )
       }
     />
   );

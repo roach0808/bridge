@@ -8,6 +8,8 @@ export const qk = {
     all: ['calls'] as const,
     list: (params: ListCallsParams) => ['calls', 'list', params] as const,
     detail: (id: string) => ['calls', 'detail', id] as const,
+    /** The Finance tab: calls that took place, with the viewer's totals. */
+    finance: (params: object) => ['calls', 'finance', params] as const,
     waiting: ['calls', 'waiting'] as const,
     messages: (id: string) => ['calls', 'messages', id] as const,
   },

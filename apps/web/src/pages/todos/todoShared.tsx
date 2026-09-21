@@ -170,23 +170,27 @@ export function TodoReopenDialog({ todo, onClose }: { todo: TodoDTO | null; onCl
   );
 }
 
-/** A task that doesn't come from a chat message. With `assignee` it is already decided who it is for. */
+/**
+ * A task that doesn't come from a chat message. With `assignee` it is already
+ * decided who it is for; without, it is for yourself unless you pick someone.
+ */
 export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assignee?: UserRef; onClose: () => void }) {
   const me = useMe();
   const refresh = useRefreshTodos();
   const toast = useToast();
-  // A task for yourself is a to-do, not something you hand out.
-  const self = assignee?.id === me.id;
   const [assigneeId, setAssigneeId] = useState('');
+  // A task for yourself is a to-do, not something you hand out.
+  const self = assigneeId === me.id;
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
   const assignees = useQuery({ queryKey: [...qk.todos.all, 'assignees'], queryFn: api.todos.assignees, enabled: open && !assignee });
   useEffect(() => {
     if (open) {
-      setAssigneeId(assignee?.id ?? '');
+      setAssigneeId(assignee?.id ?? me.id);
       setTitle('');
       setDetails('');
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, assignee?.id]);
 
   const mutation = useMutation({

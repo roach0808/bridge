@@ -98,6 +98,8 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       // History lives only on the detail payload; refresh it in the background.
       void queryClient.invalidateQueries({ queryKey: qk.calls.detail(call.id), refetchType: 'active' });
       if (!knownInList) void queryClient.invalidateQueries({ queryKey: ['calls', 'list'] });
+      // Totals and paid marks on the Finance tab move with every change.
+      void queryClient.invalidateQueries({ queryKey: ['calls', 'finance'] });
       void queryClient.invalidateQueries({ queryKey: qk.dashboard });
       void queryClient.invalidateQueries({ queryKey: qk.calendar.all });
     };

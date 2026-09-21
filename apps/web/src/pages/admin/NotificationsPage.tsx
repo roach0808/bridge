@@ -6,6 +6,7 @@ import DoneRounded from '@mui/icons-material/DoneRounded';
 import EditNoteRounded from '@mui/icons-material/EditNoteRounded';
 import GppBadOutlined from '@mui/icons-material/GppBadOutlined';
 import NotificationsNoneRounded from '@mui/icons-material/NotificationsNoneRounded';
+import PaidOutlined from '@mui/icons-material/PaidOutlined';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import PersonAddAlt1Outlined from '@mui/icons-material/PersonAddAlt1Outlined';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
@@ -45,6 +46,7 @@ const TYPE_META: Record<NotificationType, { icon: ComponentType<SvgIconProps>; l
   'call.message': { icon: ChatBubbleOutlineRounded, label: 'Message' },
   'call.updated': { icon: EditNoteRounded, label: 'Update' },
   'call.created': { icon: AddRounded, label: 'New call' },
+  'call.paid': { icon: PaidOutlined, label: 'Payment' },
   'todo.assigned': { icon: ChecklistRounded, label: 'Task' },
   'todo.done': { icon: TaskAltRounded, label: 'Task done' },
   'todo.completed': { icon: TaskAltRounded, label: 'Task completed' },

@@ -1,5 +1,6 @@
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import EditOutlined from '@mui/icons-material/EditOutlined';
+import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
 import LinkedIn from '@mui/icons-material/LinkedIn';
 import LockOutlined from '@mui/icons-material/LockOutlined';
 import {
@@ -63,11 +64,35 @@ export function DotPill({ color, children }: { color: string; children: ReactNod
   );
 }
 
+/** Green where the Profile is registered, red where it is not (a red ring where it is banned). */
 export const PLATFORM_REGISTRATION_COLORS: Record<PlatformRegistration, string> = {
-  not_registered: '#9aa0a6',
+  not_registered: '#dc4a4a',
   registered: '#3fb68b',
   banned: '#dc4a4a',
 };
+
+/** A Profile's standing on one platform at a glance: a green or red dot, named on hover. */
+export function PlatformDot({ status, size = 10 }: { status: PlatformRegistration; size?: number }) {
+  return (
+    <Tooltip title={PLATFORM_REGISTRATION_LABELS[status]}>
+      <Box
+        component="span"
+        aria-label={PLATFORM_REGISTRATION_LABELS[status]}
+        sx={{
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          flexShrink: 0,
+          display: 'inline-block',
+          boxSizing: 'border-box',
+          ...(status === 'banned'
+            ? { border: 2, borderColor: PLATFORM_REGISTRATION_COLORS.banned, bgcolor: 'transparent' }
+            : { bgcolor: PLATFORM_REGISTRATION_COLORS[status] }),
+        }}
+      />
+    </Tooltip>
+  );
+}
 
 export function PlatformStatusChip({ status }: { status: PlatformRegistration }) {
   return <DotPill color={PLATFORM_REGISTRATION_COLORS[status]}>{PLATFORM_REGISTRATION_LABELS[status]}</DotPill>;
@@ -240,6 +265,74 @@ function TextBlock({ label, text }: { label: string; text: string | null }) {
   );
 }
 
+/**
+ * One platform: its dot and name, folded. Unfolded it says where the Profile
+ * stands and at what rate, and the Founder changes either there.
+ */
+function PlatformRow({
+  profile,
+  entry: { platform, status, rate },
+  editable,
+}: {
+  profile: ProfileDTO;
+  entry: NonNullable<ProfileDTO['platformStatuses']>[number];
+  editable: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Box>
+      <Stack
+        component="button"
+        type="button"
+        direction="row"
+        spacing={1}
+        alignItems="center"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        sx={{
+          width: '100%',
+          border: 0,
+          bgcolor: 'transparent',
+          color: 'inherit',
+          font: 'inherit',
+          textAlign: 'left',
+          cursor: 'pointer',
+          py: 1,
+          px: 0.5,
+          borderRadius: 1,
+          '&:hover': { bgcolor: 'action.hover' },
+        }}
+      >
+        <PlatformDot status={status} />
+        <Typography variant="body2" fontWeight={status === 'registered' ? 600 : 400} noWrap sx={{ flex: 1 }}>
+          {platform.name}
+        </Typography>
+        <ExpandMoreRounded sx={{ fontSize: 18, color: 'text.secondary', transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+      </Stack>
+      {open && (
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center', pl: 3.5, pr: 0.5, pb: 1.25 }}>
+          <Field label="Status">
+            {editable ? (
+              <PlatformStatusSelect profile={profile} platformId={platform.id} status={status} rate={rate} />
+            ) : (
+              <PlatformStatusChip status={status} />
+            )}
+          </Field>
+          <Field label="Rate">
+            {editable ? (
+              <PlatformRateField profile={profile} platformId={platform.id} rate={rate} registered={status === 'registered'} />
+            ) : (
+              <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.primary'}>
+                {rate === null ? 'No rate' : formatRate(rate)}
+              </Typography>
+            )}
+          </Field>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
 export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
   const isFounder = useMe().role === 'founder';
   const [banksOpen, setBanksOpen] = useState(false);
@@ -311,11 +404,11 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
         <>
           <Divider />
           <Box>
-            <Typography variant="subtitle2" sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
               Expert network platforms
             </Typography>
             <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
-              Rate per hour on each platform. Required to mark a Profile registered, and editable at any time afterwards. Not shown to Experts.
+              Green: registered · red: not registered. Click a platform for its status{isFounder ? ' and rate' : ''}.
             </Typography>
             {p.platformStatuses.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -323,56 +416,8 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
               </Typography>
             ) : (
               <Stack divider={<Divider flexItem />}>
-                {p.platformStatuses.map(({ platform, status, rate }) => (
-                  <Box
-                    key={platform.id}
-                    sx={{
-                      display: 'grid',
-                      // The name keeps its own column, so it never gets squeezed out by the rate field.
-                      gridTemplateColumns: { xs: '1fr auto', sm: 'minmax(120px, 1fr) 120px 150px' },
-                      alignItems: 'center',
-                      columnGap: 2,
-                      rowGap: 0.5,
-                      py: 0.75,
-                      minHeight: 44,
-                    }}
-                  >
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
-                      <Box
-                        component="span"
-                        sx={{
-                          width: 9,
-                          height: 9,
-                          borderRadius: '50%',
-                          flexShrink: 0,
-                          bgcolor: PLATFORM_REGISTRATION_COLORS[status],
-                          opacity: status === 'not_registered' ? 0.45 : 1,
-                        }}
-                      />
-                      <Typography variant="body2" fontWeight={status === 'registered' ? 600 : 400} noWrap>
-                        {platform.name}
-                      </Typography>
-                    </Stack>
-                    {isFounder ? (
-                      <>
-                        <Box sx={{ justifySelf: { sm: 'end' }, gridColumn: { xs: '1 / -1', sm: 'auto' } }}>
-                          <PlatformRateField profile={p} platformId={platform.id} rate={rate} registered={status === 'registered'} />
-                        </Box>
-                        <Box sx={{ justifySelf: 'end' }}>
-                          <PlatformStatusSelect profile={p} platformId={platform.id} status={status} rate={rate} />
-                        </Box>
-                      </>
-                    ) : (
-                      <>
-                        <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.secondary'} sx={{ justifySelf: { sm: 'end' } }}>
-                          {rate === null ? 'No rate' : formatRate(rate)}
-                        </Typography>
-                        <Box sx={{ justifySelf: 'end' }}>
-                          <PlatformStatusChip status={status} />
-                        </Box>
-                      </>
-                    )}
-                  </Box>
+                {p.platformStatuses.map((s) => (
+                  <PlatformRow key={s.platform.id} profile={p} entry={s} editable={isFounder} />
                 ))}
               </Stack>
             )}

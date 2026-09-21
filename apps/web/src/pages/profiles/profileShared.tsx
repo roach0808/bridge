@@ -1,8 +1,10 @@
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
-import { Box, Stack, Typography } from '@mui/material';
-import { PLATFORM_REGISTRATION_LABELS, type PlatformRegistration, type ProfileDTO } from '@god/shared';
+import { Stack, Tooltip, Typography } from '@mui/material';
+import { PLATFORM_REGISTRATION_LABELS, type ProfileDTO } from '@god/shared';
 import type { MouseEvent } from 'react';
-import { PLATFORM_REGISTRATION_COLORS } from '@/components/ProfileDetails';
+import { PlatformDot } from '@/components/ProfileDetails';
+
+export { PlatformDot };
 
 /**
  * What a profile still needs before it is fully set up. Only what the viewer
@@ -23,32 +25,17 @@ export function pendingItems(p: ProfileDTO): string[] {
   return items;
 }
 
-/** Green registered, grey not registered, red banned. */
-export function PlatformDot({ status }: { status: PlatformRegistration }) {
-  return (
-    <Box
-      component="span"
-      sx={{
-        width: 10,
-        height: 10,
-        borderRadius: '50%',
-        flexShrink: 0,
-        bgcolor: PLATFORM_REGISTRATION_COLORS[status],
-        opacity: status === 'not_registered' ? 0.45 : 1,
-      }}
-    />
-  );
-}
-
 /**
- * The row only carries the platform that matters most (priority one), by name,
- * so it is plain where the Profile is registered. Clicking opens the rest.
+ * The row only carries the platform that matters most (priority one): a green
+ * dot where the Profile is registered, red where it is not. Clicking unfolds
+ * every platform underneath the row.
  */
 export function TopPlatformStatus({ profile, expanded, onToggle }: { profile: ProfileDTO; expanded: boolean; onToggle: () => void }) {
   const statuses = profile.platformStatuses ?? [];
   const top = statuses[0];
   if (!top) return null;
   const rest = statuses.length - 1;
+  const registered = statuses.filter((s) => s.status === 'registered').length;
   return (
     <Stack
       component="button"
@@ -61,6 +48,7 @@ export function TopPlatformStatus({ profile, expanded, onToggle }: { profile: Pr
         onToggle();
       }}
       aria-expanded={expanded}
+      aria-label={`${top.platform.name}: ${PLATFORM_REGISTRATION_LABELS[top.status]}. Show every platform`}
       sx={{
         border: 0,
         p: 0.25,
@@ -76,13 +64,12 @@ export function TopPlatformStatus({ profile, expanded, onToggle }: { profile: Pr
       <Typography variant="body2" noWrap>
         {top.platform.name}
       </Typography>
-      <Typography variant="caption" noWrap sx={{ color: PLATFORM_REGISTRATION_COLORS[top.status], fontWeight: 600 }}>
-        {PLATFORM_REGISTRATION_LABELS[top.status]}
-      </Typography>
       {rest > 0 && (
-        <Typography variant="caption" color="text.secondary">
-          +{rest}
-        </Typography>
+        <Tooltip title={`Registered on ${registered} of ${statuses.length} platforms`}>
+          <Typography variant="caption" color="text.secondary">
+            +{rest}
+          </Typography>
+        </Tooltip>
       )}
       <ExpandMoreRounded sx={{ fontSize: 16, color: 'text.secondary', transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
     </Stack>
@@ -98,7 +85,7 @@ export function AllPlatformStatuses({ profile }: { profile: ProfileDTO }) {
         <Stack key={s.platform.id} direction="row" spacing={0.75} alignItems="center">
           <PlatformDot status={s.status} />
           <Typography variant="body2">{s.platform.name}</Typography>
-          <Typography variant="caption" sx={{ color: PLATFORM_REGISTRATION_COLORS[s.status], fontWeight: 600 }}>
+          <Typography variant="caption" sx={{ color: s.status === 'registered' ? 'success.main' : 'error.main', fontWeight: 600 }}>
             {PLATFORM_REGISTRATION_LABELS[s.status]}
           </Typography>
         </Stack>

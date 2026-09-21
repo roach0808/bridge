@@ -27,14 +27,14 @@ import { useNavigate } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
 import { DeactivatedPill, PROFILE_STATUS_META, ProfileStatusChip } from '@/components/ProfileDetails';
 import { EmptyState, ErrorState, LoadingRows, PageHeader } from '@/components/common';
-import { UserAvatar } from '@/components/identity';
+import { UserAvatar, UserChip } from '@/components/identity';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { FilterChips, Hint, SearchField, TableSurface, useDebouncedValue } from '../admin/adminShared';
 import { ProfileDialog } from '../admin/ProfileDialogs';
 import { AllPlatformStatuses, TopPlatformStatus, pendingItems } from './profileShared';
 
-type Filter = 'all' | ProfileStatus | 'needs_bank' | 'deactivated';
+type Filter = 'all' | 'mine' | ProfileStatus | 'needs_bank' | 'deactivated';
 const STATUS_ORDER: Record<ProfileStatus, number> = { pending: 0, rejected: 1, approved: 2 };
 
 /** One table of every profile: what each still needs, and where they stand on each platform. */
@@ -55,10 +55,14 @@ export default function ProfilesPage() {
     placeholderData: keepPreviousData,
   });
 
+  // An Associate's own Profiles; for a Manager, those their team looks after.
+  const isMine = (p: ProfileDTO) =>
+    me.role === 'manager' ? p.associate !== null && p.canAssign : p.associate?.id === me.id;
   const counts = useMemo(() => {
-    const c: Record<Filter, number> = { all: 0, pending: 0, approved: 0, rejected: 0, needs_bank: 0, deactivated: 0 };
+    const c: Record<Filter, number> = { all: 0, mine: 0, pending: 0, approved: 0, rejected: 0, needs_bank: 0, deactivated: 0 };
     for (const p of query.data ?? []) {
       c.all++;
+      if (isMine(p)) c.mine++;
       c[p.status]++;
       if (p.needsBank) c.needs_bank++;
       if (!p.isActive) c.deactivated++;
@@ -72,27 +76,38 @@ export default function ProfilesPage() {
         .filter((p) =>
           filter === 'all'
             ? true
-            : filter === 'needs_bank'
+            : filter === 'mine'
+              ? isMine(p)
+              : filter === 'needs_bank'
               ? p.needsBank
               : filter === 'deactivated'
                 ? !p.isActive
                 : p.status === filter,
         )
         .sort((a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [query.data, filter],
   );
 
   // Non-founders only see the statuses they actually have (their own submissions).
-  const filterOptions = (['all', 'pending', 'approved', 'rejected', 'needs_bank', 'deactivated'] as const)
+  const filterOptions = (['all', 'mine', 'pending', 'approved', 'rejected', 'needs_bank', 'deactivated'] as const)
     .filter((f) =>
-      f === 'needs_bank' || f === 'deactivated' ? isFounder : isFounder || f === 'all' || (!isExpert && (f === 'approved' || counts[f] > 0)),
+      f === 'mine'
+        ? me.role === 'associate' || me.role === 'manager'
+        : f === 'needs_bank' || f === 'deactivated'
+          ? isFounder
+          : isFounder || f === 'all' || (!isExpert && (f === 'approved' || counts[f] > 0)),
     )
     .map((f) => ({
       value: f,
       label:
         f === 'all'
           ? 'All'
-          : f === 'needs_bank'
+          : f === 'mine'
+            ? me.role === 'manager'
+              ? 'My team'
+              : 'Mine'
+            : f === 'needs_bank'
             ? 'Needs bank'
             : f === 'deactivated'
               ? 'Deactivated'
@@ -199,6 +214,7 @@ export default function ProfilesPage() {
               <TableRow>
                 <TableCell sx={{ minWidth: 200 }}>Profile</TableCell>
                 <TableCell>Status</TableCell>
+                {!isExpert && <TableCell sx={{ minWidth: 130 }}>Associate</TableCell>}
                 <TableCell sx={{ minWidth: 190 }}>Pending</TableCell>
                 {!isExpert && <TableCell sx={{ minWidth: 230 }}>Platforms</TableCell>}
                 <TableCell align="right" width={96}>
@@ -248,6 +264,17 @@ function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isE
             {!p.isActive && <DeactivatedPill />}
           </Stack>
         </TableCell>
+        {!isExpert && (
+          <TableCell>
+            {p.associate ? (
+              <UserChip user={p.associate} size={22} showRole={false} />
+            ) : (
+              <Typography variant="body2" color="text.disabled">
+                —
+              </Typography>
+            )}
+          </TableCell>
+        )}
         <TableCell>
           {pending.length === 0 ? (
             <Typography variant="body2" color="text.disabled">
@@ -287,7 +314,7 @@ function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isE
       </TableRow>
       {platformsOpen && !isExpert && (
         <TableRow>
-          <TableCell colSpan={5} sx={{ bgcolor: 'action.hover', py: 1 }}>
+          <TableCell colSpan={6} sx={{ bgcolor: 'action.hover', py: 1 }}>
             <AllPlatformStatuses profile={p} />
           </TableCell>
         </TableRow>

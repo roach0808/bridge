@@ -156,6 +156,15 @@ export async function makeCall(fx: Fixtures, opts: MakeCallOptions) {
       platformAssociateName: 'Jordan at GLG',
       notes: opts.notes ?? null,
       realIncome: opts.realIncome !== undefined ? opts.realIncome : opts.status === 'process_to_bank' ? 1000 : null,
+      // A paid call has its shares settled (the database requires them): 15% to the Manager,
+      // 10% of it for an Associate running the call.
+      ...(opts.status === 'process_to_bank'
+        ? {
+            managerSharePercent: 15,
+            associateSharePercent: opts.associate.role === 'associate' ? 10 : 0,
+            payeeManagerId: opts.associate.role === 'associate' ? opts.associate.managerId : opts.associate.id,
+          }
+        : {}),
       createdById: (opts.createdBy ?? opts.associate).id,
     },
   });

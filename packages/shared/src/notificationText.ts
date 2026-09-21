@@ -18,6 +18,8 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
       return { title: `${who} created a call`, body: n.payload.summary ?? '' };
     case 'call.updated':
       return { title: `${who} updated a call`, body: n.payload.summary ?? '' };
+    case 'call.paid':
+      return { title: `${who} paid you`, body: n.payload.summary ?? '' };
     case 'todo.assigned':
       return { title: `${who} gave you a task`, body: n.payload.summary ?? '' };
     case 'todo.done':
@@ -40,6 +42,7 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
 /** Where a notification leads in the web app, or null. */
 export function notificationLink(n: NotificationDTO): string | null {
   if (n.payload.callId) return `/calls/${n.payload.callId}`;
+  if (n.type === 'call.paid') return '/calls?tab=finance';
   if (n.payload.todoId && n.type !== 'todo.done') return '/todos';
   if (n.type === 'todo.done') return '/todos?scope=created';
   if (n.payload.conversationId) return `/chat/${n.payload.conversationId}`;

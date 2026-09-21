@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
+import { PAYEES } from './payouts';
 import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, TODO_STATUSES } from './chat';
 import { ROLES } from './roles';
 import {
@@ -51,6 +52,31 @@ export const nickname = z
   .regex(/^[\p{L}\p{N}_.-]+$/u, 'Nickname may contain letters, numbers, dot, dash and underscore');
 export const password = z.string().min(10, 'Password must be at least 10 characters').max(200);
 
+// --- Money ------------------------------------------------------------------
+
+export const MAX_PLATFORM_RATE = 1_000_000;
+
+/** Founder sets a Profile's standing and/or rate on one platform (USD per hour). */
+export const rate = z.coerce
+  .number({ invalid_type_error: 'Enter a number' })
+  .min(0, 'The rate cannot be negative')
+  .max(MAX_PLATFORM_RATE, 'That rate is too high')
+  .multipleOf(0.01, 'Use at most two decimals');
+
+/** A USD amount with cents. */
+export const money = z.coerce
+  .number({ invalid_type_error: 'Enter an amount' })
+  .min(0, 'The amount cannot be negative')
+  .max(9_999_999_999.99, 'That amount is too large')
+  .multipleOf(0.01, 'Use at most two decimals');
+
+/** A share of a call's real income, in percent. */
+export const percent = z.coerce
+  .number({ invalid_type_error: 'Enter a percentage' })
+  .min(0, 'The share cannot be negative')
+  .max(100, 'The share cannot be more than 100%')
+  .multipleOf(0.01, 'Use at most two decimals');
+
 // --- Auth -------------------------------------------------------------------
 
 export const loginSchema = z.object({
@@ -82,6 +108,10 @@ export const createUserSchema = z.object({
   managerId: uuid.nullish(),
   avatarId: z.string().min(1).optional(),
   timeZone: timeZone.optional(),
+  /** Founder only. Experts: USD per hour of call. */
+  hourlyRate: rate.nullish(),
+  /** Founder only. Associates: percent of a call's real income (10 when left out). */
+  sharePercent: percent.nullish(),
 });
 
 export const updateUserSchema = z
@@ -90,6 +120,12 @@ export const updateUserSchema = z
     managerId: uuid.nullish(),
     isActive: z.boolean().optional(),
     timeZone: timeZone.optional(),
+    /** Founder only, Experts. Calls already finished keep the rate they finished with. */
+    hourlyRate: rate.nullable().optional(),
+    /** With `hourlyRate`: also give it to this Expert's finished calls that have no rate yet. */
+    applyRateToUnpricedCalls: z.boolean().optional(),
+    /** Founder only, Associates. Calls already paid to bank keep the share they were paid with. */
+    sharePercent: percent.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
@@ -169,6 +205,8 @@ export const profileSchema = z.object({
     .or(z.literal('').transform(() => null)),
   /** Founder only: when the Profile started working with us. */
   onboardedAt: isoDate.nullish().or(z.literal('').transform(() => null)),
+  /** Founder only: the Manager's percent of this Profile's real income (15 when left out). */
+  managerSharePercent: percent.optional(),
   /** Founder only: replaces the whole list, in order. */
   addresses: z
     .array(z.object({ label: trimmed('Label', 60), address: trimmed('Address', 1000) }))
@@ -177,22 +215,6 @@ export const profileSchema = z.object({
 });
 export const updateProfileSchema = profileSchema.partial();
 
-export const MAX_PLATFORM_RATE = 1_000_000;
-
-/** Founder sets a Profile's standing and/or rate on one platform (USD per hour). */
-export const rate = z.coerce
-  .number({ invalid_type_error: 'Enter a number' })
-  .min(0, 'The rate cannot be negative')
-  .max(MAX_PLATFORM_RATE, 'That rate is too high')
-  .multipleOf(0.01, 'Use at most two decimals');
-
-/** A USD amount with cents. */
-export const money = z.coerce
-  .number({ invalid_type_error: 'Enter an amount' })
-  .min(0, 'The amount cannot be negative')
-  .max(9_999_999_999.99, 'That amount is too large')
-  .multipleOf(0.01, 'Use at most two decimals');
-
 export const profilePlatformStatusSchema = z
   .object({
     status: z.enum(PLATFORM_REGISTRATIONS).optional(),
@@ -200,6 +222,9 @@ export const profilePlatformStatusSchema = z
     rate: rate.nullable().optional(),
   })
   .refine((v) => v.status !== undefined || v.rate !== undefined, 'Nothing to update');
+
+/** Who looks after a Profile: an Associate or a Manager, or nobody. */
+export const profileAssociateSchema = z.object({ associateId: uuid.nullable() });
 
 export const rejectProfileSchema = z.object({ reason: trimmed('Reason', 1000) });
 export const profileActiveSchema = z.object({ isActive: z.boolean() });
@@ -248,6 +273,8 @@ export const updateCallSchema = z
       .or(z.literal('').transform(() => null)),
     /** A special rate for this call only; null falls back to the Profile's platform rate. */
     rateOverride: rate.nullable().optional(),
+    /** Founder only: the Expert's hourly rate for this finished call, until the Expert is paid. */
+    expertRate: rate.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
@@ -302,6 +329,24 @@ export const listCallsQuerySchema = z.object({
   sort: z.enum(['scheduledAt', '-scheduledAt', 'updatedAt', '-updatedAt', 'createdAt', '-createdAt']).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(25),
+});
+
+/** The finance tab of the Calls page: calls that took place, with who is paid what. */
+export const financeCallsQuerySchema = z.object({
+  /** `unpaid`: someone the viewer pays or is paid by is still waiting for this call. */
+  paid: z.enum(['all', 'unpaid', 'paid']).default('all'),
+  from: isoDateTime.optional(),
+  to: isoDateTime.optional(),
+  q: z.string().trim().optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+});
+
+/** Marks one payee paid (or not paid after all) on several calls at once. */
+export const markPayoutsSchema = z.object({
+  payee: z.enum(PAYEES),
+  callIds: z.array(uuid).min(1, 'Choose at least one call').max(500),
+  paid: z.boolean().default(true),
 });
 
 export const messageSchema = z.object({ body: trimmed('Message', 5000) });
@@ -362,6 +407,8 @@ export const createTodoSchema = z.object({
   title: trimmed('Title', 200),
   details: optionalText(5000).optional(),
 });
+/** Hands a task to someone else (dragged onto their panel). */
+export const moveTodoSchema = z.object({ assigneeId: uuid });
 /** The tasks of one panel, in the order they should be shown from now on. */
 export const reorderTodosSchema = z.object({
   assigneeId: uuid,
@@ -512,6 +559,8 @@ export type ProfileInput = z.input<typeof profileSchema>;
 export type CreateCallInput = z.input<typeof createCallSchema>;
 export type UpdateCallInput = z.input<typeof updateCallSchema>;
 export type TransitionInput = z.input<typeof transitionSchema>;
+export type FinanceCallsQuery = z.input<typeof financeCallsQuerySchema>;
+export type MarkPayoutsInput = z.input<typeof markPayoutsSchema>;
 export type ListCallsQuery = z.input<typeof listCallsQuerySchema>;
 export type BlockBodyInput = z.input<typeof blockBodySchema>;
 export type BlockPatchInput = z.input<typeof blockPatchSchema>;

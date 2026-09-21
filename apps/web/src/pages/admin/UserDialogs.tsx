@@ -9,7 +9,9 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  Checkbox,
   FormControlLabel,
+  InputAdornment,
   ListItemIcon,
   ListItemText,
   MenuItem,
@@ -22,6 +24,8 @@ import {
   Typography,
 } from '@mui/material';
 import {
+  DEFAULT_ASSOCIATE_SHARE_PERCENT,
+  MAX_PLATFORM_RATE,
   ROLE_LABELS,
   TEAM_TIME_ZONE,
   createUserSchema,
@@ -136,9 +140,12 @@ interface CreateForm {
   avatarId: string;
   managerId: string;
   timeZone: string | null;
+  /** Founder only: an Expert's hourly rate, an Associate's share. */
+  hourlyRate: string;
+  sharePercent: string;
 }
 
-const CREATE_FIELDS = ['role', 'nickname', 'email', 'password', 'avatarId', 'managerId', 'timeZone'];
+const CREATE_FIELDS = ['role', 'nickname', 'email', 'password', 'avatarId', 'managerId', 'timeZone', 'hourlyRate', 'sharePercent'];
 
 const initialCreate = (role: CreatableRole): CreateForm => ({
   role,
@@ -148,7 +155,75 @@ const initialCreate = (role: CreatableRole): CreateForm => ({
   avatarId: defaultAvatarFor(role),
   managerId: '',
   timeZone: TEAM_TIME_ZONE,
+  hourlyRate: '',
+  sharePercent: String(DEFAULT_ASSOCIATE_SHARE_PERCENT),
 });
+
+/** A typed amount: null when empty, NaN when not a number. */
+const parseAmount = (text: string): number | null => (text.trim() === '' ? null : Number(text));
+
+/**
+ * What the person is paid, set by the Founder (§3.1): an Expert per hour of
+ * call, an Associate a share of each call's real income.
+ */
+function PayFields({
+  role,
+  hourlyRate,
+  sharePercent,
+  onRate,
+  onShare,
+  errors,
+}: {
+  role: Role;
+  hourlyRate: string;
+  sharePercent: string;
+  onRate: (v: string) => void;
+  onShare: (v: string) => void;
+  errors: FieldErrors;
+}) {
+  if (role === 'expert') {
+    return (
+      <TextField
+        label="Hourly rate"
+        type="number"
+        value={hourlyRate}
+        onChange={(e) => onRate(e.target.value)}
+        error={Boolean(errors.hourlyRate)}
+        helperText={errors.hourlyRate ?? 'What the Expert is paid per hour of call. Each call keeps the rate it finished with.'}
+        slotProps={{
+          input: { startAdornment: <InputAdornment position="start">$</InputAdornment>, endAdornment: <InputAdornment position="end">/h</InputAdornment> },
+          htmlInput: { min: 0, step: 5 },
+        }}
+      />
+    );
+  }
+  if (role === 'associate') {
+    return (
+      <TextField
+        label="Share of each call"
+        type="number"
+        value={sharePercent}
+        onChange={(e) => onShare(e.target.value)}
+        error={Boolean(errors.sharePercent)}
+        helperText={
+          errors.sharePercent ??
+          'Percent of the real income, paid by their Manager out of the Manager’s share. Calls already paid keep the share they had.'
+        }
+        slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> }, htmlInput: { min: 0, max: 100, step: 1 } }}
+      />
+    );
+  }
+  return null;
+}
+
+function payErrors(role: Role, hourlyRate: string, sharePercent: string): FieldErrors {
+  const errs: FieldErrors = {};
+  const rate = parseAmount(hourlyRate);
+  const share = parseAmount(sharePercent);
+  if (role === 'expert' && rate !== null && !(Number.isFinite(rate) && rate >= 0 && rate <= MAX_PLATFORM_RATE)) errs.hourlyRate = 'Enter a rate of 0 or more';
+  if (role === 'associate' && share !== null && !(Number.isFinite(share) && share >= 0 && share <= 100)) errs.sharePercent = 'Enter a share from 0 to 100';
+  return errs;
+}
 
 /**
  * Create a user. The Founder picks any creatable role; a Manager only adds
@@ -199,6 +274,8 @@ export function CreateUserDialog({
         avatarId: f.avatarId,
         ...(f.role === 'associate' && me.role === 'founder' ? { managerId: f.managerId } : {}),
         ...(f.role === 'expert' && f.timeZone ? { timeZone: f.timeZone } : {}),
+        ...(me.role === 'founder' && f.role === 'expert' ? { hourlyRate: parseAmount(f.hourlyRate) } : {}),
+        ...(me.role === 'founder' && f.role === 'associate' ? { sharePercent: parseAmount(f.sharePercent) ?? DEFAULT_ASSOCIATE_SHARE_PERCENT } : {}),
       }),
     onSuccess: (user, f) => {
       void queryClient.invalidateQueries({ queryKey: qk.users.all });
@@ -243,6 +320,7 @@ export function CreateUserDialog({
     const errs = issuesToErrors(createUserSchema.safeParse(payload));
     if (needsManagerSelect && !form.managerId) errs.managerId = 'Choose a Manager';
     if (form.role === 'expert' && !form.timeZone) errs.timeZone = 'Choose the Expert’s time zone';
+    if (me.role === 'founder') Object.assign(errs, payErrors(form.role, form.hourlyRate, form.sharePercent));
     setErrors(errs);
     setGeneral(null);
     if (Object.keys(errs).length === 0) mutation.mutate(form);
@@ -368,6 +446,17 @@ export function CreateUserDialog({
         </Box>
       )}
 
+      {me.role === 'founder' && (
+        <PayFields
+          role={form.role}
+          hourlyRate={form.hourlyRate}
+          sharePercent={form.sharePercent}
+          onRate={(v) => set('hourlyRate', v)}
+          onShare={(v) => set('sharePercent', v)}
+          errors={errors}
+        />
+      )}
+
       <FormSection label="Avatar" hint={`${ROLE_LABELS[form.role]} set`} error={errors.avatarId}>
         <AvatarPicker key={form.role} audience={form.role} value={form.avatarId} onChange={(id) => set('avatarId', id)} size={48} />
       </FormSection>
@@ -439,14 +528,28 @@ interface EditForm {
   managerId: string;
   timeZone: string | null;
   isActive: boolean;
+  hourlyRate: string;
+  sharePercent: string;
+  /** Give the new rate to the Expert's finished calls that have none yet. */
+  applyToUnpriced: boolean;
 }
+
+const amountText = (n: number | null) => (n === null ? '' : String(n));
 
 /** Founder edit: nickname, manager (associates), time zone (experts), active. */
 export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClose: () => void }) {
   const me = useMe();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState<EditForm>({ nickname: '', managerId: '', timeZone: null, isActive: true });
+  const [form, setForm] = useState<EditForm>({
+    nickname: '',
+    managerId: '',
+    timeZone: null,
+    isActive: true,
+    hourlyRate: '',
+    sharePercent: '',
+    applyToUnpriced: false,
+  });
   const [errors, setErrors] = useState<FieldErrors>({});
   const [general, setGeneral] = useState<string | null>(null);
   // Keep the last user so the dialog can animate out after `user` clears.
@@ -455,7 +558,15 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
   useEffect(() => {
     if (!user) return;
     setTarget(user);
-    setForm({ nickname: user.nickname, managerId: user.managerId ?? '', timeZone: user.timeZone, isActive: user.isActive });
+    setForm({
+      nickname: user.nickname,
+      managerId: user.managerId ?? '',
+      timeZone: user.timeZone,
+      isActive: user.isActive,
+      hourlyRate: amountText(user.hourlyRate),
+      sharePercent: amountText(user.sharePercent),
+      applyToUnpriced: false,
+    });
     setErrors({});
     setGeneral(null);
   }, [user]);
@@ -474,7 +585,7 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
         setGeneral(null);
         return;
       }
-      const { fields, general } = splitServerError(err, ['nickname', 'managerId', 'timeZone', 'isActive']);
+      const { fields, general } = splitServerError(err, ['nickname', 'managerId', 'timeZone', 'isActive', 'hourlyRate', 'sharePercent']);
       setErrors(fields);
       setGeneral(general);
     },
@@ -500,6 +611,15 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
   if (current.role === 'associate' && form.managerId && form.managerId !== current.managerId) body.managerId = form.managerId;
   if (current.role === 'expert' && form.timeZone && form.timeZone !== current.timeZone) body.timeZone = form.timeZone;
   if (form.isActive !== current.isActive) body.isActive = form.isActive;
+  const paysSet = me.role === 'founder';
+  const rate = parseAmount(form.hourlyRate);
+  const share = parseAmount(form.sharePercent);
+  if (paysSet && current.role === 'expert' && rate !== current.hourlyRate && !Number.isNaN(rate)) body.hourlyRate = rate;
+  if (paysSet && current.role === 'expert' && rate !== null && form.applyToUnpriced) {
+    body.hourlyRate = rate;
+    body.applyRateToUnpricedCalls = true;
+  }
+  if (paysSet && current.role === 'associate' && share !== current.sharePercent && !Number.isNaN(share)) body.sharePercent = share;
   const dirty = Object.keys(body).length > 0;
 
   const submit = () => {
@@ -508,6 +628,7 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
     if (!nick.success) errs.nickname = nick.error.issues[0]?.message ?? 'Invalid nickname';
     if (current.role === 'associate' && !form.managerId) errs.managerId = 'Choose a Manager';
     if (current.role === 'expert' && !form.timeZone) errs.timeZone = 'Choose a time zone';
+    if (paysSet) Object.assign(errs, payErrors(current.role, form.hourlyRate, form.sharePercent));
     setErrors(errs);
     setGeneral(null);
     if (Object.keys(errs).length === 0 && dirty) mutation.mutate({ id: current.id, body });
@@ -559,6 +680,25 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
           <Box sx={{ mt: 0.5, pl: 1.75 }}>
             <LocalTimePreview zone={form.timeZone} />
           </Box>
+        </Box>
+      )}
+      {paysSet && (
+        <Box>
+          <PayFields
+            role={current.role}
+            hourlyRate={form.hourlyRate}
+            sharePercent={form.sharePercent}
+            onRate={(v) => set('hourlyRate', v)}
+            onShare={(v) => set('sharePercent', v)}
+            errors={errors}
+          />
+          {current.role === 'expert' && rate !== null && (
+            <FormControlLabel
+              sx={{ mt: 0.5 }}
+              control={<Checkbox size="small" checked={form.applyToUnpriced} onChange={(e) => set('applyToUnpriced', e.target.checked)} />}
+              label={<Typography variant="body2">Also use it for their finished calls that have no rate yet</Typography>}
+            />
+          )}
         </Box>
       )}
       <Box>

@@ -3,6 +3,7 @@ import {
   FEATURES,
   INVOICING_STATUSES,
   STATUS_LABELS,
+  associateShareWithin,
   canTransition,
   isOverride,
   isValidEdge,
@@ -36,10 +37,10 @@ type TransitionInput = z.output<typeof transitionSchema>;
 
 const actorRef = (actor: Actor) => ({ nickname: actor.nickname, role: actor.role });
 
-/** The Associate, Expert, the Associate's Manager, and every active Founder. */
+/** The Associate, Expert, the Associate's Manager (and the Manager paid for it), and every active Founder. */
 export async function participantIds(db: Tx | typeof prisma, call: CallRow): Promise<string[]> {
   const founders = await db.user.findMany({ where: { role: 'founder', isActive: true }, select: { id: true } });
-  const ids = [call.associateId, call.expertId, call.associate.managerId, ...founders.map((f) => f.id)];
+  const ids = [call.associateId, call.expertId, call.associate.managerId, call.payeeManagerId, ...founders.map((f) => f.id)];
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
@@ -286,6 +287,17 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
       throw conflict('Real income is entered when the call is processed to bank');
     }
     if (input.realIncome === null) throw badRequest('A paid call must keep its real income', { issues: [{ path: 'realIncome', message: 'Required once paid' }] });
+    // The shares were worked out from it and handed over; changing it now would rewrite paid amounts.
+    if (input.realIncome !== Number(current.realIncome) && (current.managerPaidAt || current.associatePaidAt)) {
+      throw conflict('The shares of this call were already paid out; mark them unpaid before correcting the real income');
+    }
+  }
+  if (input.expertRate !== undefined) {
+    if (!perms.editExpertRate) {
+      throw current.expertPaidAt
+        ? conflict('The Expert was already paid for this call; mark it unpaid before changing the rate')
+        : forbidden('Only the Founder sets the Expert’s rate for a call, once it has taken place');
+    }
   }
   if (input.gptLink !== undefined && !perms.editGptLink) {
     throw forbidden('Only the Founder sets the GPT link');
@@ -325,6 +337,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
           realIncome: input.realIncome === undefined ? undefined : input.realIncome,
           gptLink: input.gptLink,
           rateOverride: input.rateOverride === undefined ? undefined : input.rateOverride,
+          expertRate: input.expertRate === undefined ? undefined : input.expertRate,
         },
         include: callInclude,
       })
@@ -345,7 +358,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     const before = new Set(await participantIds(tx, current));
     const after = await participantIds(tx, updated);
     // Money-only edits are none of the Expert's business.
-    const MONEY_FIELDS = ['realIncome', 'rateOverride'];
+    const MONEY_FIELDS = ['realIncome', 'rateOverride', 'expertRate'];
     const moneyOnly = Object.entries(input).every(([k, v]) => v === undefined || MONEY_FIELDS.includes(k));
     const recipients = [...new Set([...before, ...after])].filter(
       (uid) => uid !== actor.id && !(moneyOnly && uid === updated.expertId),
@@ -420,9 +433,24 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
       data.actualDurationMinutes = input.actualDurationMinutes;
       data.rating = input.rating;
       data.feedback = input.feedback ?? null;
+      // The Expert is paid at the rate they had when the call took place; changing it later
+      // only changes calls still to come.
+      data.expertRate = current.expert?.hourlyRate ?? null;
     }
-    // The bank never pays exactly the expected price: record what actually arrived.
-    if (to === 'process_to_bank') data.realIncome = input.realIncome;
+    if (to === 'process_to_bank') {
+      // The bank never pays exactly the expected price: record what actually arrived.
+      data.realIncome = input.realIncome;
+      // The shares are settled now, from the Profile's Manager share and the Associate's own.
+      // A Manager running a call themselves keeps the whole Manager share.
+      const managerShare = Number(current.profile.managerSharePercent);
+      const runByAssociate = current.associate.role === 'associate';
+      data.managerSharePercent = managerShare;
+      data.associateSharePercent = runByAssociate
+        ? associateShareWithin(Number(current.associate.sharePercent ?? 0), managerShare)
+        : 0;
+      const payee = runByAssociate ? current.associate.managerId : current.associateId;
+      data.payeeManager = payee ? { connect: { id: payee } } : { disconnect: true };
+    }
     const updated = await tx.call
       .update({ where: { id }, data, include: callInclude })
       .catch(rethrowOverlap);

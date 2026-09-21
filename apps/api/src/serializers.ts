@@ -36,6 +36,8 @@ export const userSelect = {
   managerId: true,
   isActive: true,
   timeZone: true,
+  hourlyRate: true,
+  sharePercent: true,
   createdAt: true,
   updatedAt: true,
   manager: { select: userRefSelect },
@@ -43,19 +45,25 @@ export const userSelect = {
 
 export type UserRow = Prisma.UserGetPayload<{ select: typeof userSelect }>;
 
-export const toUserDTO = (u: UserRow): UserDTO => ({
+/**
+ * `pay`: include the Expert's hourly rate and the Associate's share. Only the
+ * Founder, who sets them, and the person themselves see what they are paid.
+ */
+export const toUserDTO = (u: UserRow, pay = false): UserDTO => ({
   ...toUserRef(u),
   managerId: u.managerId,
   manager: u.manager ? toUserRef(u.manager) : null,
   isActive: u.isActive,
   timeZone: u.timeZone,
+  hourlyRate: pay && u.hourlyRate !== null ? Number(u.hourlyRate) : null,
+  sharePercent: pay && u.sharePercent !== null ? Number(u.sharePercent) : null,
   createdAt: iso(u.createdAt),
   updatedAt: iso(u.updatedAt),
 });
 
 export const meSelect = { ...userSelect, email: true } satisfies Prisma.UserSelect;
 export type MeRow = Prisma.UserGetPayload<{ select: typeof meSelect }>;
-export const toMeDTO = (u: MeRow): MeDTO => ({ ...toUserDTO(u), email: u.email });
+export const toMeDTO = (u: MeRow): MeDTO => ({ ...toUserDTO(u, true), email: u.email });
 
 export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO => ({
   id: p.id,
@@ -69,6 +77,7 @@ export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO
 
 export const profileInclude = {
   createdBy: { select: userRefSelect },
+  associate: { select: { ...userRefSelect, managerId: true } },
   reviewedBy: { select: userRefSelect },
   platformStatuses: { select: { platformId: true, status: true, rate: true } },
 } satisfies Prisma.ProfileInclude;
@@ -96,10 +105,27 @@ type ProfileCounts = {
 };
 
 /**
+ * Who may hand a Profile to another Associate: the Founder, and a Manager for a
+ * Profile their own team looks after (or that nobody looks after yet).
+ */
+export function canAssignProfile(
+  viewer: { id: string; role: Role },
+  associate: { id: string; managerId: string | null } | null,
+): boolean {
+  if (viewer.role === 'founder') return true;
+  if (viewer.role !== 'manager') return false;
+  return associate === null || associate.id === viewer.id || associate.managerId === viewer.id;
+}
+
+/**
  * `platforms` lists every platform for viewers who may see platform statuses;
  * pass null for Experts, who only get the personal details.
  */
-export const toProfileDTO = (p: ProfileRow & ProfileCounts, platforms: PlatformRef[] | null): ProfileDTO => ({
+export const toProfileDTO = (
+  p: ProfileRow & ProfileCounts,
+  platforms: PlatformRef[] | null,
+  viewer: { id: string; role: Role },
+): ProfileDTO => ({
   id: p.id,
   name: p.name,
   linkedinUrl: p.linkedinUrl,
@@ -132,6 +158,9 @@ export const toProfileDTO = (p: ProfileRow & ProfileCounts, platforms: PlatformR
     : null,
   bankCount: p._count ? p._count.banks : null,
   needsBank: p._count ? p._count.calls > 0 && p._count.banks === 0 : null,
+  associate: platforms && p.associate ? toUserRef(p.associate) : null,
+  canAssign: canAssignProfile(viewer, p.associate),
+  managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,
   createdBy: toUserRef(p.createdBy),
   reviewedBy: p.reviewedBy ? toUserRef(p.reviewedBy) : null,
   reviewedAt: isoOrNull(p.reviewedAt),

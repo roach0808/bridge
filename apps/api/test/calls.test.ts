@@ -469,13 +469,20 @@ describe.runIf(FEATURES.messages)('messages', () => {
 });
 
 describe('database constraints', () => {
-  const insert = (over: Partial<Record<'project' | 'duration' | 'status' | 'expert' | 'income', string | number | null>> = {}) =>
-    prisma.$executeRaw`
+  const insert = (over: Partial<Record<'project' | 'duration' | 'status' | 'expert' | 'income' | 'share' | 'associateShare', string | number | null>> = {}) => {
+    // A paid call carries its settled shares unless the test says otherwise.
+    const paid = over.status === 'process_to_bank';
+    const share = over.share !== undefined ? over.share : paid ? 15 : null;
+    const associateShare = over.associateShare !== undefined ? over.associateShare : paid ? 10 : null;
+    return prisma.$executeRaw`
       INSERT INTO calls (id, status, platform_id, profile_id, associate_id, expert_id, scheduled_at, duration_minutes,
-                         project_details, platform_associate_name, real_income, created_by, updated_at)
+                         project_details, platform_associate_name, real_income, manager_share_percent, associate_share_percent,
+                         created_by, updated_at)
       VALUES (gen_random_uuid(), ${over.status ?? 'on_scheduling'}::"CallStatus", ${fx.platform.id}::uuid, ${fx.approvedProfile.id}::uuid,
               ${fx.a1.id}::uuid, ${over.expert === undefined ? fx.e1.id : over.expert}::uuid, '2027-02-01T09:00:00Z', ${over.duration ?? 30},
-              ${over.project ?? 'Details'}, 'Pat', ${over.income ?? null}::numeric, ${fx.a1.id}::uuid, now())`;
+              ${over.project ?? 'Details'}, 'Pat', ${over.income ?? null}::numeric, ${share}::numeric, ${associateShare}::numeric,
+              ${fx.a1.id}::uuid, now())`;
+  };
 
   it('a valid raw insert works and the trigger sets ends_at', async () => {
     expect(await insert()).toBe(1);
@@ -499,6 +506,17 @@ describe('database constraints', () => {
     await expect(insert({ status: 'process_to_bank' })).rejects.toThrow(/calls_paid_has_real_income/);
     await expect(insert({ income: -1 })).rejects.toThrow(/calls_real_income_nonnegative/);
     expect(await insert({ status: 'process_to_bank', income: 500 })).toBe(1);
+  });
+
+  it('a paid call has its shares settled, and the Associate’s part fits in the Manager’s', async () => {
+    // Written without shares, the database settles them from the Profile and the Associate.
+    await prisma.user.update({ where: { id: fx.a1.id }, data: { sharePercent: 12 } });
+    expect(await insert({ status: 'process_to_bank', income: 500, share: null, associateShare: null })).toBe(1);
+    const row = await prisma.call.findFirstOrThrow({ where: { status: 'process_to_bank' } });
+    expect([row.managerSharePercent?.toNumber(), row.associateSharePercent?.toNumber(), row.payeeManagerId]).toEqual([15, 12, fx.m1.id]);
+    await prisma.call.deleteMany();
+    await expect(insert({ status: 'process_to_bank', income: 500, share: 15, associateShare: 20 })).rejects.toThrow(/calls_shares_range/);
+    await expect(insert({ status: 'process_to_bank', income: 500, share: 101 })).rejects.toThrow(/calls_shares_range/);
   });
 
   it('the exclusion constraint rejects overlapping blocking calls', async () => {

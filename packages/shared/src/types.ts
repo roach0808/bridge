@@ -3,6 +3,7 @@ import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
 import type { BlockRule, Occurrence } from './scheduleBlocks';
 import type { ChatMessageKind, TodoStatus } from './chat';
+import type { Payee } from './payouts';
 import type { PresenceStatus } from './presence';
 import type { PlatformRegistration } from './schemas';
 
@@ -21,6 +22,10 @@ export interface UserDTO extends UserRef {
   manager: UserRef | null;
   isActive: boolean;
   timeZone: string;
+  /** Experts: USD per hour of call. Only the Founder and the Expert themselves receive it. */
+  hourlyRate: number | null;
+  /** Associates: their percent of a call's real income. Only the Founder and the Associate themselves receive it. */
+  sharePercent: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -125,6 +130,12 @@ export interface ProfileDTO {
   bankCount: number | null;
   /** Founder only: the Profile has a booked call but no bank. */
   needsBank: boolean | null;
+  /** The Associate (or Manager) who looks after this Profile. Null for Experts. */
+  associate: UserRef | null;
+  /** The viewer may hand the Profile to another Associate (the Founder; a Manager within their team). */
+  canAssign: boolean;
+  /** The Manager's percent of this Profile's real income. Founder and Managers only. */
+  managerSharePercent: number | null;
   createdBy: UserRef;
   reviewedBy: UserRef | null;
   reviewedAt: string | null;
@@ -155,7 +166,7 @@ export interface CallDTO {
   realIncome: number | null;
   /** Added by the Expert when the call starts. */
   ninjaLink: string | null;
-  /** Research link. Only the Founder (who sets it) and the Expert receive it. */
+  /** The deep search data for preparing the call. Only the Founder (who sets it) and the Expert receive it. */
   gptLink: string | null;
   /** The Profile's rate on the call's platform, and this call's override. Null for Experts. */
   platformRate: number | null;
@@ -167,9 +178,39 @@ export interface CallDTO {
   feedback: string | null;
   allowedTransitions: CallStatus[];
   permissions: CallPermissions;
+  /** What the call pays, showing only the lines the viewer may see. */
+  payouts: CallPayouts;
+  /** Founder only: the Profile has an open bank account to be paid into. Null for everyone else. */
+  bankReady: boolean | null;
   createdBy: UserRef;
   createdAt: string;
   updatedAt: string;
+}
+
+/** One person's pay for a call, and whether it was paid. */
+export interface PayoutLine {
+  /** USD. Null while it cannot be worked out yet (no rate). */
+  amount: number | null;
+  paidAt: string | null;
+}
+
+/**
+ * Who is paid what for a call (§3.1). Each line is null until it means
+ * something, and for viewers who may not see it:
+ * - `expert` once the call finished: the Founder and the Expert;
+ * - `manager` once paid to bank: the Founder and the Manager being paid;
+ * - `associate` once paid to bank, when the Associate has a share: the Founder,
+ *   the Manager who pays it and the Associate.
+ */
+export interface CallPayouts {
+  /** The Expert's rate when the call finished × the real duration. */
+  expert: (PayoutLine & { user: UserRef; rate: number | null; minutes: number | null }) | null;
+  /** The Manager's share of the real income, including the Associate's part. `keeps` is what stays with the Manager. */
+  manager: (PayoutLine & { user: UserRef | null; percent: number; keeps: number | null }) | null;
+  /** The Associate's part of the Manager's share, paid by the Manager. */
+  associate: (PayoutLine & { user: UserRef; percent: number }) | null;
+  /** The lines the viewer may mark paid or unpaid. */
+  canMark: Payee[];
 }
 
 /** Server-computed, so clients never guess which controls to render. */
@@ -183,6 +224,8 @@ export interface CallPermissions {
   editGptLink: boolean;
   /** The call's Associate, their Manager, or the Founder. */
   editRate: boolean;
+  /** Founder only: the Expert's rate for this call, until the Expert is paid. */
+  editExpertRate: boolean;
 }
 
 export interface StatusHistoryDTO {
@@ -236,6 +279,8 @@ export type NotificationType =
   | 'call.message'
   | 'call.updated'
   | 'call.created'
+  /** The Founder (or the Manager) marked someone's pay for one or more calls as paid. */
+  | 'call.paid'
   | 'todo.assigned'
   | 'todo.done'
   | 'todo.completed'
@@ -414,6 +459,8 @@ export interface DashboardSummary {
   /** Founder only. */
   tasks?: {
     invoicesToSubmit: CallDTO[];
+    /** Booked calls coming up without deep search data to prepare with. */
+    callsNeedingResearch: CallDTO[];
     profilesNeedingBank: ProfileNeedingBank[];
     profilesNeedingRate: ProfileNeedingRate[];
   };
@@ -565,6 +612,29 @@ export interface FinanceStats {
   /** Over all the periods, largest real income first. */
   byPlatform: Array<{ platform: { id: string; name: string }; cell: FinanceCell }>;
   byProfile: Array<{ profile: { id: string; name: string; isActive: boolean }; cell: FinanceCell }>;
+}
+
+/**
+ * Totals for the finance tab of the Calls page, over every call that matches
+ * the dates and search (the paid filter aside). Each part is null for viewers
+ * it does not concern.
+ */
+export interface FinanceSummary {
+  calls: number;
+  /** Expected income of the calls not paid to bank yet, and real income of those that were. */
+  income: { expected: number; real: number; unpriced: number } | null;
+  /** Founder: owed to Experts. Expert: their own pay (and the minutes behind it). */
+  expert: { paid: number; unpaid: number; unpriced: number; minutes: number } | null;
+  /** Founder: owed to Managers. Manager: their own shares. */
+  manager: { paid: number; unpaid: number } | null;
+  /** Founder and Manager: owed to Associates. Associate: their own part. */
+  associate: { paid: number; unpaid: number } | null;
+  /** Manager: what stays with them once the Associates have their part. */
+  keeps: number | null;
+}
+
+export interface FinanceCallsPage extends Paginated<CallDTO> {
+  summary: FinanceSummary;
 }
 
 /** One person's tasks on the task board. */

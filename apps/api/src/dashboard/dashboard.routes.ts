@@ -86,9 +86,16 @@ async function profilesNeedingRate(): Promise<ProfileNeedingRate[]> {
 
 async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary['tasks']>> {
   const booked = { status: { in: [...BLOCKING_STATUSES] } };
-  const [invoices, profiles] = await Promise.all([
+  const [invoices, unprepared, profiles] = await Promise.all([
     prisma.call.findMany({
       where: { status: 'finished' },
+      include: callInclude,
+      orderBy: { scheduledAt: 'asc' },
+      take: 100,
+    }),
+    // Preparing a call: the Expert reads the deep search data before it starts.
+    prisma.call.findMany({
+      where: { status: { in: ['scheduled', 'confirmed', 'on_rescheduling'] }, gptLink: null, scheduledAt: { gte: new Date() } },
       include: callInclude,
       orderBy: { scheduledAt: 'asc' },
       take: 100,
@@ -117,6 +124,7 @@ async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary[
 
   return {
     invoicesToSubmit: invoices.map((c) => toCallDTO(c, actor)),
+    callsNeedingResearch: unprepared.map((c) => toCallDTO(c, actor)),
     profilesNeedingRate: await profilesNeedingRate(),
     profilesNeedingBank: profiles
       .map((p) => {

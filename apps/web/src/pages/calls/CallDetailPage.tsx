@@ -5,6 +5,8 @@ import EditRounded from '@mui/icons-material/EditRounded';
 import BadgeOutlined from '@mui/icons-material/BadgeOutlined';
 import VideocamRounded from '@mui/icons-material/VideocamRounded';
 import LinkedIn from '@mui/icons-material/LinkedIn';
+import ManageSearchRounded from '@mui/icons-material/ManageSearchRounded';
+import PaidOutlined from '@mui/icons-material/PaidOutlined';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import {
   Alert,
@@ -38,14 +40,14 @@ import {
   MAX_PLATFORM_RATE,
   FEATURES,
   MAX_ACTUAL_DURATION_MINUTES,
-  INVOICING_STATUSES,
+  PAYEE_LABELS,
   STATUS_LABELS,
   edgeOwner,
   isOverride,
   type CallDetailDTO,
   type CallDTO,
   type CallStatus,
-  type Role,
+  type Payee,
   type TransitionInput,
   type UpdateCallInput,
   type UserRef,
@@ -68,6 +70,7 @@ import { durationLabel, formatDateTime, formatUsd, inZone, relativeTime, soon, t
 import { useCallOwners } from './callOwners';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertAvailability';
 import { MessageThread } from './MessageThread';
+import { MoneyPill, PaidMark, callMoney, formatPercent } from './money';
 import { StatusProgress } from './StatusProgress';
 
 
@@ -86,32 +89,6 @@ function useUpdateCall(call: CallDTO) {
 // ---------------------------------------------------------------------------
 
 const RATING_LABELS: Record<number, string> = { 1: 'Went badly', 2: 'Not great', 3: 'Okay', 4: 'Went well', 5: 'Went very well' };
-
-/**
- * What the call is worth, as soon as that means anything: the expected income
- * once it is finished (rate × real duration), and what really arrived once the
- * bank has paid. Experts never see money.
- */
-function callMoney(call: CallDTO, role: Role): { label: string; value: string; hint: string; color: string } | null {
-  if (role === 'expert') return null;
-  if (call.status === 'cancelled') {
-    return { label: 'Income', value: 'None — cancelled', hint: 'A cancelled call earns nothing', color: 'text.secondary' };
-  }
-  const done = call.status === 'finished' || INVOICING_STATUSES.includes(call.status);
-  if (!done) return null;
-  if (call.realIncome !== null) {
-    return { label: 'Real income', value: formatUsd(call.realIncome), hint: 'What reached the bank', color: 'success.main' };
-  }
-  if (call.expectedPrice !== null) {
-    return {
-      label: 'Expected income',
-      value: formatUsd(call.expectedPrice),
-      hint: `Rate × the call’s real duration (${call.actualDurationMinutes ?? call.durationMinutes} min)`,
-      color: 'primary.main',
-    };
-  }
-  return { label: 'Expected income', value: 'No rate yet', hint: 'Set the Profile’s rate on this platform', color: 'warning.main' };
-}
 
 function TransitionBar({ call }: { call: CallDTO }) {
   const me = useMe();
@@ -136,13 +113,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
   };
 
   // §6.10: an invoice for a Profile with no open bank account cannot be paid out.
-  const invoicing = call.allowedTransitions.includes('invoice_submit');
-  const profile = useQuery({
-    queryKey: qk.profiles.detail(call.profile.id),
-    queryFn: () => api.profiles.get(call.profile.id),
-    enabled: invoicing,
-  });
-  const noBank = invoicing && profile.data?.bankCount === 0;
+  const noBank = call.allowedTransitions.includes('invoice_submit') && call.bankReady === false;
 
   const transition = useMutation({
     mutationFn: ({ to, ...extra }: TransitionInput) => api.calls.transition(call.id, to, extra),
@@ -281,6 +252,24 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   You confirm that {me.role === 'expert' ? 'you are' : 'the Expert is'} available on{' '}
                   <strong>{formatDateTime(call.scheduledAt, call.expert?.timeZone ?? me.timeZone)}</strong> for{' '}
                   {call.durationMinutes} minutes and can take the call.
+                </Alert>
+              )}
+              {(target === 'confirmed' || target === 'ongoing') && me.role === 'expert' && (
+                <Alert
+                  severity={call.gptLink ? 'success' : 'warning'}
+                  icon={<ManageSearchRounded />}
+                  sx={{ mb: 2 }}
+                  action={
+                    call.gptLink ? (
+                      <Button color="inherit" size="small" href={call.gptLink} target="_blank" rel="noopener noreferrer">
+                        Open
+                      </Button>
+                    ) : undefined
+                  }
+                >
+                  {call.gptLink
+                    ? 'Prepare with the deep search data before the call.'
+                    : 'The deep search data for this call is not there yet; the Founder adds it before the call.'}
                 </Alert>
               )}
               {cancelling && (
@@ -689,8 +678,11 @@ function RealIncomeEditor({ call }: { call: CallDTO }) {
   );
 }
 
-/** The research link: set by the Founder, read by the Founder and the Expert. */
-function GptLinkCard({ call }: { call: CallDTO }) {
+/**
+ * The deep search data the Expert prepares the call with (§9.1): the Founder
+ * adds the link while the call is being prepared, the Expert reads it.
+ */
+function DeepSearchCard({ call }: { call: CallDTO }) {
   const toast = useToast();
   const update = useUpdateCall(call);
   const [link, setLink] = useState(call.gptLink ?? '');
@@ -701,9 +693,9 @@ function GptLinkCard({ call }: { call: CallDTO }) {
   const dirty = trimmed !== (call.gptLink ?? '');
 
   return (
-    <SectionCard title="GPT link">
+    <SectionCard title="Deep search data">
       <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.5 }}>
-        Only the Founder and the Expert can see this.
+        What the Expert reads to prepare for the call. Only the Founder and the Expert can see this.
       </Typography>
       {editable ? (
         <Stack spacing={1.5}>
@@ -713,7 +705,7 @@ function GptLinkCard({ call }: { call: CallDTO }) {
             value={link}
             onChange={(e) => setLink(e.target.value)}
             error={!valid}
-            helperText={valid ? 'Paste the research chat for this call' : 'Enter a full link starting with https://'}
+            helperText={valid ? 'Paste the link to the deep search for this call' : 'Enter a full link starting with https://'}
             placeholder="https://chatgpt.com/share/…"
           />
           <Stack direction="row" spacing={1.5} alignItems="center">
@@ -737,8 +729,8 @@ function GptLinkCard({ call }: { call: CallDTO }) {
           </Stack>
         </Stack>
       ) : call.gptLink ? (
-        <Button variant="contained" href={call.gptLink} target="_blank" rel="noopener noreferrer">
-          Open GPT link
+        <Button variant="contained" startIcon={<ManageSearchRounded />} href={call.gptLink} target="_blank" rel="noopener noreferrer">
+          Open deep search data
         </Button>
       ) : (
         <Typography variant="body2" color="text.secondary">
@@ -848,6 +840,185 @@ function RateCard({ call }: { call: CallDTO }) {
               {update.isPending ? <CircularProgress size={18} /> : 'Save'}
             </Button>
           </Stack>
+        )}
+      </Stack>
+    </SectionCard>
+  );
+}
+
+/** One person's pay on the call, with the button to mark it for whoever pays it. */
+function PayoutRow({
+  call,
+  payee,
+  who,
+  detail,
+  amount,
+  paidAt,
+  zone,
+  extra,
+}: {
+  call: CallDTO;
+  payee: Payee;
+  who: UserRef | null;
+  detail: string;
+  amount: number | null;
+  paidAt: string | null;
+  zone: string;
+  extra?: ReactNode;
+}) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const me = useMe();
+  const mark = useMutation({
+    mutationFn: (paid: boolean) => api.finance.markPaid({ payee, callIds: [call.id], paid }),
+    onSuccess: (_, paid) => {
+      void queryClient.invalidateQueries({ queryKey: qk.calls.all });
+      toast.success(paid ? `Marked paid to ${who?.nickname ?? PAYEE_LABELS[payee]}` : 'Marked not paid');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const canMark = call.payouts.canMark.includes(payee);
+  const mine = who?.id === me.id;
+  return (
+    <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr auto', sm: 'minmax(0, 1fr) auto auto' }, gap: 1.5, alignItems: 'center', py: 1.25 }}>
+      <Box sx={{ minWidth: 0 }}>
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography variant="caption" color="text.secondary" sx={{ width: 76, flexShrink: 0 }}>
+            {PAYEE_LABELS[payee]}
+          </Typography>
+          {who ? <UserChip user={who} size={22} showRole={false} /> : <Typography variant="body2" color="text.secondary">Nobody</Typography>}
+          {mine && (
+            <Typography variant="caption" color="primary.main" fontWeight={600}>
+              you
+            </Typography>
+          )}
+        </Stack>
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.25, pl: { sm: '84px' } }}>
+          {detail}
+        </Typography>
+        {extra}
+      </Box>
+      <Stack alignItems="flex-end" spacing={0.25}>
+        <Typography variant="body1" fontWeight={650} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+          {amount === null ? '—' : formatUsd(amount)}
+        </Typography>
+        {amount !== null && <PaidMark line={{ amount, paidAt }} zone={zone} />}
+      </Stack>
+      {canMark ? (
+        <Button
+          size="small"
+          variant={paidAt ? 'text' : 'outlined'}
+          color={paidAt ? 'inherit' : 'primary'}
+          disabled={mark.isPending}
+          onClick={() => mark.mutate(!paidAt)}
+          sx={{ gridColumn: { xs: '1 / -1', sm: 'auto' }, justifySelf: { xs: 'start', sm: 'end' }, whiteSpace: 'nowrap', color: paidAt ? 'text.secondary' : undefined }}
+        >
+          {mark.isPending ? <CircularProgress size={16} color="inherit" /> : paidAt ? 'Mark not paid' : 'Mark paid'}
+        </Button>
+      ) : (
+        <Box sx={{ display: { xs: 'none', sm: 'block' } }} />
+      )}
+    </Box>
+  );
+}
+
+/** Founder: the Expert's rate on this call, fixed when it finished, correctable until the Expert is paid. */
+function ExpertRateEditor({ call }: { call: CallDTO }) {
+  const toast = useToast();
+  const update = useUpdateCall(call);
+  const current = call.payouts.expert?.rate ?? null;
+  const text = (r: number | null) => (r === null ? '' : String(r));
+  const [value, setValue] = useState(text(current));
+  useEffect(() => setValue(text(current)), [current]);
+  const empty = value.trim() === '';
+  const n = Number(value);
+  const valid = empty || (Number.isFinite(n) && n >= 0 && n <= MAX_PLATFORM_RATE);
+  const next = empty ? null : Math.round(n * 100) / 100;
+  return (
+    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1, pl: { sm: '84px' } }}>
+      <TextField
+        size="small"
+        label="Rate for this call ($/h)"
+        type="number"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        error={!valid}
+        slotProps={{ htmlInput: { min: 0, step: 5 } }}
+        sx={{ width: 180 }}
+      />
+      <Button
+        size="small"
+        variant="outlined"
+        disabled={!valid || next === current || update.isPending}
+        onClick={() =>
+          update.mutate({ expertRate: next }, { onSuccess: () => toast.success('Expert rate saved'), onError: (e) => toast.error(errorMessage(e)) })
+        }
+      >
+        {update.isPending ? <CircularProgress size={16} /> : 'Save'}
+      </Button>
+    </Stack>
+  );
+}
+
+/**
+ * Who is paid what for this call (§3.1), as far as the viewer may know: the
+ * Founder pays the Expert and the Manager, the Manager passes the Associate's
+ * part on. Each line says whether it has been paid.
+ */
+function PayoutsCard({ call, zone }: { call: CallDTO; zone: string }) {
+  const me = useMe();
+  const { expert, manager, associate } = call.payouts;
+  const took = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'].includes(call.status);
+  const waitingForBank = took && call.status !== 'process_to_bank' && (me.role === 'manager' || me.role === 'associate');
+  if (!expert && !manager && !associate && !waitingForBank) return null;
+
+  return (
+    <SectionCard title={me.role === 'expert' ? 'Your pay' : 'Payouts'} action={<PaidOutlined sx={{ fontSize: 20, color: 'text.secondary' }} />}>
+      <Stack divider={<Box sx={{ borderTop: 1, borderColor: 'divider' }} />}>
+        {expert && (
+          <PayoutRow
+            call={call}
+            payee="expert"
+            who={expert.user}
+            amount={expert.amount}
+            paidAt={expert.paidAt}
+            zone={zone}
+            detail={
+              expert.rate === null
+                ? 'No hourly rate yet — set it on the Expert, or for this call below'
+                : `${formatUsd(expert.rate)}/h × ${expert.minutes ?? '—'} min, the rate when the call finished`
+            }
+            extra={call.permissions.editExpertRate ? <ExpertRateEditor call={call} /> : undefined}
+          />
+        )}
+        {manager && (
+          <PayoutRow
+            call={call}
+            payee="manager"
+            who={manager.user}
+            amount={manager.amount}
+            paidAt={manager.paidAt}
+            zone={zone}
+            detail={`${formatPercent(manager.percent)} of the real income${
+              associate && manager.keeps !== null ? ` — ${formatUsd(manager.keeps)} to keep after the Associate’s part` : ''
+            }`}
+          />
+        )}
+        {associate && (
+          <PayoutRow
+            call={call}
+            payee="associate"
+            who={associate.user}
+            amount={associate.amount}
+            paidAt={associate.paidAt}
+            zone={zone}
+            detail={`${formatPercent(associate.percent)} of the real income, paid by the Manager out of their share`}
+          />
+        )}
+        {waitingForBank && (
+          <Typography variant="body2" color="text.secondary" sx={{ py: 1.25 }}>
+            {me.role === 'manager' ? 'Your share' : 'Your part'} is worked out from the real income once this call is paid to bank.
+          </Typography>
         )}
       </Stack>
     </SectionCard>
@@ -1008,6 +1179,7 @@ export default function CallDetailPage() {
   const expertZone = call.expert?.timeZone ?? null;
   const perms = call.permissions;
   const money = callMoney(call, me.role);
+  const preparing = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling', 'ongoing'].includes(call.status);
 
   return (
     <>
@@ -1069,27 +1241,7 @@ export default function CallDetailPage() {
                       <Typography variant="body2" color="text.disabled">
                         ·
                       </Typography>
-                      <Tooltip title={money.hint}>
-                        <Box
-                          sx={{
-                            display: 'inline-flex',
-                            alignItems: 'baseline',
-                            gap: 0.75,
-                            px: 1,
-                            py: 0.25,
-                            borderRadius: 999,
-                            bgcolor: 'action.selected',
-                            color: money.color,
-                            fontWeight: 700,
-                            fontSize: '0.875rem',
-                          }}
-                        >
-                          <Box component="span" sx={{ fontSize: '0.75rem', fontWeight: 600, opacity: 0.85 }}>
-                            {money.label}
-                          </Box>
-                          {money.value}
-                        </Box>
-                      </Tooltip>
+                      <MoneyPill money={money} />
                     </>
                   )}
                 </Stack>
@@ -1112,6 +1264,8 @@ export default function CallDetailPage() {
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.4fr) minmax(360px, 1fr)' }, alignItems: 'start' }}>
         <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+          {/* While the call is being prepared, the deep search data comes first. */}
+          {(me.role === 'founder' || me.role === 'expert') && preparing && <DeepSearchCard call={call} />}
           <SectionCard
             title="Details"
             action={
@@ -1204,8 +1358,9 @@ export default function CallDetailPage() {
             )}
           </SectionCard>
 
-          {(me.role === 'founder' || me.role === 'expert') && <GptLinkCard call={call} />}
+          <PayoutsCard call={call} zone={zone} />
           {me.role !== 'expert' && <RateCard call={call} />}
+          {(me.role === 'founder' || me.role === 'expert') && !preparing && <DeepSearchCard call={call} />}
 
 
           {FEATURES.messages && (

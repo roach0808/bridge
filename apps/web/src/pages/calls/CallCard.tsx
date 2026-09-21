@@ -1,12 +1,31 @@
-import { Box, Card, CardActionArea, Stack, Typography } from '@mui/material';
+import CancelOutlined from '@mui/icons-material/CancelOutlined';
+import { Box, Button, Card, CardActionArea, Stack, Typography } from '@mui/material';
 import type { CallDTO } from '@god/shared';
 import { Link as RouterLink } from 'react-router';
+import { useMe } from '@/auth/AuthProvider';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { StatusChip } from '@/components/StatusChip';
 import { countdown, whenAndLength } from '@/lib/time';
+import { MoneyPill, callMoney } from './money';
 
-/** Compact call summary used by the dashboard and mobile lists. */
-export function CallCard({ call, zone, showExpert = true }: { call: CallDTO; zone: string; showExpert?: boolean }) {
+/**
+ * Compact call summary used by the dashboard and mobile lists. Once the call has
+ * taken place it shows its money; `onCancel` adds a way to call it off right here.
+ */
+export function CallCard({
+  call,
+  zone,
+  showExpert = true,
+  onCancel,
+}: {
+  call: CallDTO;
+  zone: string;
+  showExpert?: boolean;
+  onCancel?: (call: CallDTO) => void;
+}) {
+  const me = useMe();
+  const money = callMoney(call, me.role);
+  const cancellable = onCancel && call.allowedTransitions.includes('cancelled');
   return (
     <Card>
       <CardActionArea component={RouterLink} to={`/calls/${call.id}`} sx={{ p: 2 }}>
@@ -27,6 +46,11 @@ export function CallCard({ call, zone, showExpert = true }: { call: CallDTO; zon
             <Typography variant="body2" sx={{ mt: 1, fontVariantNumeric: 'tabular-nums' }}>
               {countdown(call.scheduledAt)} · {whenAndLength(call.scheduledAt, zone, call.durationMinutes)}
             </Typography>
+            {money && (
+              <Box sx={{ mt: 1 }}>
+                <MoneyPill money={money} size="small" />
+              </Box>
+            )}
             {showExpert && (
               <Stack direction="row" spacing={2} sx={{ mt: 1.25 }} flexWrap="wrap" useFlexGap>
                 <UserChip user={call.associate} size={20} />
@@ -36,6 +60,13 @@ export function CallCard({ call, zone, showExpert = true }: { call: CallDTO; zon
           </Box>
         </Stack>
       </CardActionArea>
+      {cancellable && (
+        <Box sx={{ px: 1.5, pb: 1, display: 'flex', justifyContent: 'flex-end' }}>
+          <Button size="small" color="error" startIcon={<CancelOutlined />} onClick={() => onCancel(call)}>
+            Cancel call
+          </Button>
+        </Box>
+      )}
     </Card>
   );
 }

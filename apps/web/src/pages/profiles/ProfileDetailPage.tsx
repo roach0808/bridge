@@ -18,6 +18,7 @@ import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { RejectProfileDialog, useProfileForm } from '../admin/ProfileDialogs';
 import { pendingItems } from './profileShared';
+import { ManagerShareField, ProfileAssociateField } from './ProfileTeam';
 
 /** One profile on its own page: details, review, banks, and the edit form in place. */
 export default function ProfileDetailPage() {
@@ -104,6 +105,13 @@ export default function ProfileDetailPage() {
                   )}
                 </Stack>
               </Stack>
+
+              {me.role !== 'expert' && (
+                <Stack direction="row" spacing={4} flexWrap="wrap" useFlexGap sx={{ mt: 2 }}>
+                  <ProfileAssociateField profile={p} />
+                  <ManagerShareField profile={p} />
+                </Stack>
+              )}
 
               <PendingList profile={p} />
 

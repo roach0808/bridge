@@ -321,7 +321,12 @@ export default function NewCallPage() {
               options={(profiles.data ?? []).filter((p) => p.isActive)}
               loading={profiles.isLoading}
               value={form.profile}
-              onChange={(_, v) => set('profile', v)}
+              onChange={(_, v) => {
+                set('profile', v);
+                // The Associate who looks after the Profile usually runs its calls.
+                const handler = v?.associate && associates.data.find((a) => a.id === v.associate!.id);
+                if (needsAssociate && handler) set('associateId', handler.id);
+              }}
               getOptionLabel={(p) => p.name}
               isOptionEqualToValue={(a, b) => a.id === b.id}
               filterOptions={(opts, { inputValue }) => {

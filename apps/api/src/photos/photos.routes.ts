@@ -88,9 +88,9 @@ async function setProfilePhoto(actorId: string, profileId: string | null, upload
 // Only the Founder edits profiles (§2.3), so only the Founder sets their pictures.
 photosRouter.put('/profiles/:id/photo', requireAuth, requireRole('founder'), async (req, res) => {
   const upload = decodePhoto(parseBody(photoUploadSchema, req).dataUrl);
-  res.json(toProfileDTO(await setProfilePhoto(actorOf(req).id, idParam(req), upload), await platformRefs()));
+  res.json(toProfileDTO(await setProfilePhoto(actorOf(req).id, idParam(req), upload), await platformRefs(), actorOf(req)));
 });
 
 photosRouter.delete('/profiles/:id/photo', requireAuth, requireRole('founder'), async (req, res) => {
-  res.json(toProfileDTO(await setProfilePhoto(actorOf(req).id, idParam(req), null), await platformRefs()));
+  res.json(toProfileDTO(await setProfilePhoto(actorOf(req).id, idParam(req), null), await platformRefs(), actorOf(req)));
 });

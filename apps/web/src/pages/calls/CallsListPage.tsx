@@ -1,5 +1,7 @@
 import AddRounded from '@mui/icons-material/AddRounded';
+import CancelOutlined from '@mui/icons-material/CancelOutlined';
 import ClearRounded from '@mui/icons-material/ClearRounded';
+import ManageSearchRounded from '@mui/icons-material/ManageSearchRounded';
 import SearchRounded from '@mui/icons-material/SearchRounded';
 import {
   Autocomplete,
@@ -8,6 +10,7 @@ import {
   Card,
   Checkbox,
   Chip,
+  IconButton,
   InputAdornment,
   LinearProgress,
   ListItemText,
@@ -20,6 +23,8 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  Tab,
+  Tabs,
   Tooltip,
   TextField,
   Typography,
@@ -28,12 +33,14 @@ import {
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import {
-  CALL_STATUSES,
+  ACTIVE_STATUSES,
   STAGE_LABELS,
   STAGE_STATUSES,
   STATUS_LABELS,
   stagesForRole,
+  type CallDTO,
   type CallStatus,
+  type Stage,
   type UserRef,
 } from '@god/shared';
 import type { ListCallsParams } from '@god/api-client';
@@ -49,6 +56,16 @@ import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { countdown, formatRange, inZone, relativeTime, soon, whenAndLength, zoneAbbr } from '@/lib/time';
 import { CallCard } from './CallCard';
+import { CancelCallDialog } from './CancelCallDialog';
+import { FinanceTab } from './FinanceTab';
+
+/** The first tab: calls still on their way, and the ones called off. Once a call has taken place it moves to Finance. */
+const TAB_STATUSES: readonly CallStatus[] = [...ACTIVE_STATUSES, 'cancelled'];
+const tabStatuses = (stage: Stage) => STAGE_STATUSES[stage].filter((s) => TAB_STATUSES.includes(s));
+/** Booked calls the Expert prepares for with the deep search data. */
+const PREPARING: readonly CallStatus[] = ['scheduled', 'confirmed', 'on_rescheduling'];
+
+type CallsTab = 'calls' | 'finance';
 
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
@@ -93,17 +110,51 @@ function UserFilter({
   );
 }
 
+/**
+ * Calls, in two tabs (§9.1): the calls still on their way, to help them succeed,
+ * and Finance, each person's own money on the calls that took place.
+ */
 export default function CallsListPage() {
+  const me = useMe();
+  const [params, setParams] = useSearchParams();
+  const tab: CallsTab = params.get('tab') === 'finance' ? 'finance' : 'calls';
+  // Each tab keeps its own filters, so switching starts clean.
+  const switchTab = (next: CallsTab) => setParams(next === 'finance' ? { tab: 'finance' } : {}, { replace: true });
+
+  return (
+    <>
+      <PageHeader
+        title="Calls"
+        subtitle={tab === 'finance' ? 'The calls that took place: who is paid what, and what is paid.' : 'Calls being scheduled and run.'}
+        actions={
+          me.role !== 'expert' && (
+            <Button variant="contained" startIcon={<AddRounded />} component={RouterLink} to="/calls/new">
+              New call
+            </Button>
+          )
+        }
+      />
+      <Tabs value={tab} onChange={(_, v: CallsTab) => switchTab(v)} sx={{ mb: 2.5, borderBottom: 1, borderColor: 'divider' }}>
+        <Tab value="calls" label="In progress" />
+        <Tab value="finance" label="Finance" />
+      </Tabs>
+      {tab === 'finance' ? <FinanceTab /> : <ActiveCallsTab />}
+    </>
+  );
+}
+
+function ActiveCallsTab() {
   const me = useMe();
   const { zone } = useAuth();
   const navigate = useNavigate();
   const theme = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down('md'));
   const [params, setParams] = useSearchParams();
+  const [cancelling, setCancelling] = useState<CallDTO | null>(null);
 
-  // Experts never see the invoicing stage.
-  const stages = stagesForRole(me.role);
-  const statuses = params.getAll('status').filter((s): s is CallStatus => (CALL_STATUSES as readonly string[]).includes(s));
+  // Experts never see the invoicing stage, and nobody sees it here: those calls are under Finance.
+  const stages = stagesForRole(me.role).filter((stage) => tabStatuses(stage).length > 0);
+  const statuses = params.getAll('status').filter((s): s is CallStatus => TAB_STATUSES.includes(s as CallStatus));
   const associateId = params.get('associateId');
   const expertId = params.get('expertId');
   const from = params.get('from');
@@ -131,7 +182,8 @@ export default function CallsListPage() {
   }, [q]);
 
   const query: ListCallsParams = {
-    status: statuses.length ? statuses : undefined,
+    // Everything on its way unless a status is chosen; cancelled calls only when asked for.
+    status: statuses.length ? statuses : [...ACTIVE_STATUSES],
     associateId: associateId ?? undefined,
     expertId: expertId ?? undefined,
     from: from ? DateTime.fromISO(from, { zone }).startOf('day').toUTC().toISO()! : undefined,
@@ -160,24 +212,14 @@ export default function CallsListPage() {
   const experts = useMemo(() => (users ?? []).filter((u) => u.role === 'expert'), [users]);
 
   const activeFilters = statuses.length + (associateId ? 1 : 0) + (expertId ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) + (q ? 1 : 0);
+  // The deep search data is the Founder's to add and the Expert's to read.
+  const showResearch = me.role === 'founder' || me.role === 'expert';
 
   return (
     <>
-      <PageHeader
-        title="Calls"
-        subtitle={
-          <>
-            {data ? `${data.total} call${data.total === 1 ? '' : 's'}` : 'Loading…'} · times in {zoneAbbr(zone)}
-          </>
-        }
-        actions={
-          me.role !== 'expert' && (
-            <Button variant="contained" startIcon={<AddRounded />} component={RouterLink} to="/calls/new">
-              New call
-            </Button>
-          )
-        }
-      />
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+        {data ? `${data.total} call${data.total === 1 ? '' : 's'}` : 'Loading…'} · times in {zoneAbbr(zone)}
+      </Typography>
 
       <Box sx={{ mb: 2, '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}>
         <Stack spacing={1.5}>
@@ -220,7 +262,7 @@ export default function CallsListPage() {
                     {STAGE_LABELS[stage]}
                   </Typography>
                 </MenuItem>,
-                ...STAGE_STATUSES[stage].map((s) => (
+                ...tabStatuses(stage).map((s) => (
                   <MenuItem key={s} value={s} dense>
                     <Checkbox size="small" checked={statuses.includes(s)} sx={{ py: 0 }} />
                     <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: STATUS_COLORS[s], mr: 1 }} />
@@ -250,13 +292,14 @@ export default function CallsListPage() {
           </Stack>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center" sx={{ rowGap: 1.5 }}>
             {stages.map((stage) => {
-              const active = STAGE_STATUSES[stage].every((s) => statuses.includes(s)) && statuses.length === STAGE_STATUSES[stage].length;
+              const own = tabStatuses(stage);
+              const active = own.every((s) => statuses.includes(s)) && statuses.length === own.length;
               return (
                 <Chip
                   key={stage}
                   label={STAGE_LABELS[stage]}
                   aria-pressed={active}
-                  onClick={() => update({ status: active ? [] : STAGE_STATUSES[stage] })}
+                  onClick={() => update({ status: active ? [] : own })}
                   sx={{
                     height: 30,
                     bgcolor: active ? 'action.selected' : 'transparent',
@@ -312,7 +355,7 @@ export default function CallsListPage() {
       ) : mobile ? (
         <Stack spacing={1.5}>
           {data.items.map((c) => (
-            <CallCard key={c.id} call={c} zone={zone} />
+            <CallCard key={c.id} call={c} zone={zone} onCancel={setCancelling} />
           ))}
         </Stack>
       ) : (
@@ -327,7 +370,9 @@ export default function CallsListPage() {
                   <TableCell>Associate</TableCell>
                   <TableCell>Expert</TableCell>
                   <TableCell>Status</TableCell>
+                  {showResearch && <TableCell>Deep search</TableCell>}
                   <TableCell align="right">Updated</TableCell>
+                  <TableCell padding="checkbox" />
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -374,10 +419,24 @@ export default function CallsListPage() {
                       <TableCell>
                         <StatusChip status={c.status} />
                       </TableCell>
+                      {showResearch && (
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <ResearchLink call={c} />
+                        </TableCell>
+                      )}
                       <TableCell align="right">
                         <Typography variant="caption" color="text.secondary">
                           {relativeTime(c.updatedAt)}
                         </Typography>
+                      </TableCell>
+                      <TableCell padding="checkbox" onClick={(e) => e.stopPropagation()}>
+                        {c.allowedTransitions.includes('cancelled') && (
+                          <Tooltip title="Cancel call">
+                            <IconButton size="small" aria-label={`Cancel the call with ${c.profile.name}`} onClick={() => setCancelling(c)}>
+                              <CancelOutlined sx={{ fontSize: 18, color: 'text.secondary', '&:hover': { color: 'error.main' } }} />
+                            </IconButton>
+                          </Tooltip>
+                        )}
                       </TableCell>
                     </TableRow>
                   );
@@ -396,6 +455,7 @@ export default function CallsListPage() {
           />
         </Card>
       )}
+      <CancelCallDialog call={cancelling} onClose={() => setCancelling(null)} />
       {mobile && data && data.total > pageSize && (
         <TablePagination
           component="div"
@@ -407,5 +467,35 @@ export default function CallsListPage() {
         />
       )}
     </>
+  );
+}
+
+/** The deep search data the Expert prepares with: a link when it is there, a nudge while a booked call lacks it. */
+function ResearchLink({ call }: { call: CallDTO }) {
+  if (call.gptLink) {
+    return (
+      <Button
+        size="small"
+        startIcon={<ManageSearchRounded />}
+        href={call.gptLink}
+        target="_blank"
+        rel="noopener noreferrer"
+        sx={{ whiteSpace: 'nowrap' }}
+      >
+        Open
+      </Button>
+    );
+  }
+  if (PREPARING.includes(call.status)) {
+    return (
+      <Typography variant="caption" sx={{ color: 'warning.main', fontWeight: 600, whiteSpace: 'nowrap' }}>
+        Not added yet
+      </Typography>
+    );
+  }
+  return (
+    <Typography variant="caption" color="text.disabled">
+      —
+    </Typography>
   );
 }
