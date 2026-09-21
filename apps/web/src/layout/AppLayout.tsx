@@ -34,6 +34,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
+import { BrandLogo } from '@/components/BrandLogo';
 import { UserAvatar } from '@/components/identity';
 import { zoneCity } from '@/lib/time';
 import { useRealtime } from '@/realtime/RealtimeProvider';
@@ -68,6 +69,9 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
 
   return (
     <Stack sx={{ height: '100%' }}>
+      <Box sx={{ px: 2.25, pt: 2.25, pb: 0.5 }}>
+        <BrandLogo height={36} />
+      </Box>
       <Brand />
       <Box sx={{ flex: 1, overflowY: 'auto', px: 1.25 }}>
         {groups.map((group, i) => (
@@ -303,6 +307,7 @@ export function AppLayout() {
                 <MenuRounded />
               </IconButton>
             )}
+            {!desktop && <BrandLogo variant="mark" height={28} />}
             <Box sx={{ flex: 1 }} />
             <ZoneClock />
             <ConnectionDot />

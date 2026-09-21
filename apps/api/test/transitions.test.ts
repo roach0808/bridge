@@ -195,8 +195,12 @@ describe('starting and finishing need the Expert’s input', () => {
     const res = await post(e1, call.id, { to: 'ongoing', ninjaLink: 'https://vdo.ninja/?room=abc' });
     expect(res.status, res.text).toBe(200);
     expect(res.body).toMatchObject({ status: 'ongoing', ninjaLink: 'https://vdo.ninja/?room=abc' });
-    // The associate sees it too.
-    expect((await (await as(fx.a1)).get(`/calls/${call.id}`)).body.ninjaLink).toBe('https://vdo.ninja/?room=abc');
+    // The meeting link is for the Expert and the Founder only.
+    expect((await (await as(fx.founder)).get(`/calls/${call.id}`)).body.ninjaLink).toBe('https://vdo.ninja/?room=abc');
+    expect((await (await as(fx.a1)).get(`/calls/${call.id}`)).body.ninjaLink).toBeNull();
+    expect((await (await as(fx.m1)).get(`/calls/${call.id}`)).body.ninjaLink).toBeNull();
+    const listed = (await (await as(fx.m1)).get('/calls')).body.items as Array<{ id: string; ninjaLink: string | null }>;
+    expect(listed.find((c) => c.id === call.id)?.ninjaLink).toBeNull();
   });
 
   it('finished needs only the actual duration', async () => {

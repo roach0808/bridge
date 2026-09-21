@@ -322,7 +322,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
                     value={ninjaLink}
                     onChange={(e) => setNinjaLink(e.target.value)}
                     error={Boolean(errors.ninjaLink) || (ninjaLink !== '' && !linkValid)}
-                    helperText={errors.ninjaLink ?? (ninjaLink !== '' && !linkValid ? 'Enter a full link starting with https://' : 'Everyone on the call can open it')}
+                    helperText={errors.ninjaLink ?? (ninjaLink !== '' && !linkValid ? 'Enter a full link starting with https://' : 'Only the Expert and the Founder can see it')}
                     autoFocus
                   />
                 )}

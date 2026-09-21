@@ -1,4 +1,6 @@
-# God System
+# Silver Horizon
+
+*Connecting Expertise. Expanding Perspective.* (The code keeps its original `god` package names.)
 
 Real-time, role-based coordination of expert-consultation **Calls**, from scheduling through execution to invoicing. Everyone sees each other only by nickname and role.
 

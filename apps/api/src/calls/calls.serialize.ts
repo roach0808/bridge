@@ -43,7 +43,7 @@ export type CallRow = Prisma.CallGetPayload<{ include: typeof callInclude }>;
 
 /** Experts see invoiced calls as finished, without invoice figures. */
 export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallDTO {
-  // Experts see no money at all, and only the Founder and the Expert see the GPT link.
+  // Experts see no money at all, and only the Founder and the Expert see the GPT and Ninja links.
   const hideMoney = viewer.role === 'expert';
   const { platformStatuses, managerSharePercent: _share, _count, ...profile } = call.profile;
   const platformRate = platformStatuses.find((s) => s.platformId === call.platformId)?.rate ?? null;
@@ -65,7 +65,8 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
     platformAssociateName: call.platformAssociateName,
     expectedPrice: hideMoney ? null : expectedPrice(rate === null ? null : Number(rate), call.actualDurationMinutes),
     realIncome: hideMoney || call.realIncome === null ? null : Number(call.realIncome),
-    ninjaLink: call.ninjaLink,
+    // The meeting itself: only the Expert on it and the Founder may join.
+    ninjaLink: viewer.role === 'founder' || viewer.role === 'expert' ? call.ninjaLink : null,
     gptLink: viewer.role === 'founder' || viewer.role === 'expert' ? call.gptLink : null,
     platformRate: hideMoney || platformRate === null ? null : Number(platformRate),
     rateOverride: hideMoney || call.rateOverride === null ? null : Number(call.rateOverride),

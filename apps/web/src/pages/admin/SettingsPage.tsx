@@ -367,7 +367,7 @@ function AboutSection() {
     <SectionCard id="settings-about" title="About">
       <Stack spacing={2}>
         <Typography variant="body2" color="text.secondary">
-          God System is anonymous by design: teammates only see nicknames, roles and avatars. Emails stay private to
+          Silver Horizon is anonymous by design: teammates only see nicknames, roles and avatars. Emails stay private to
           each person.
         </Typography>
         <Box>

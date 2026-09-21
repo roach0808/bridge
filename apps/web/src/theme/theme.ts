@@ -46,7 +46,8 @@ export const theme = createTheme({
   colorSchemes: {
     light: {
       palette: {
-        primary: { main: '#5b5bd6', light: '#8b8bf0', dark: '#4343b8', contrastText: '#fff' },
+        // Silver Horizon navy, from the logo.
+        primary: { main: '#1c3955', light: '#3f6089', dark: '#12263b', contrastText: '#fff' },
         secondary: { main: '#71717a' },
         success: { main: '#2f9e6e' },
         warning: { main: '#d9822b' },
@@ -62,7 +63,7 @@ export const theme = createTheme({
     },
     dark: {
       palette: {
-        primary: { main: '#8b8bf5', light: '#a9a9f8', dark: '#6d6af0', contrastText: '#0f0f11' },
+        primary: { main: '#9fb6d6', light: '#c3d2e6', dark: '#7d98bf', contrastText: '#0f0f11' },
         secondary: { main: '#a1a1aa' },
         success: { main: '#4cc38a' },
         warning: { main: '#f0a44b' },

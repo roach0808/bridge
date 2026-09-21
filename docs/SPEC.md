@@ -1,4 +1,6 @@
-# God System — Project Specification
+# Silver Horizon — Project Specification
+
+The product is branded **Silver Horizon** (logo, favicon, app icons and sign-in banner in `apps/web/public/brand`); earlier versions of this document call it the God System, and the code keeps the `god` names.
 
 Version 1.6 · 2026-09-21 · Status: Phase 1 implemented, deployed
 
@@ -110,6 +112,7 @@ grouped under Managers; they are assigned per Call.
 | Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | own | |
 | Set the Call's deep search data link (`gpt_link`) | ✓ | | | |
 | Read the Call's deep search data link | ✓ | | | ✓ (assigned) |
+| Read the Call's Ninja (meeting) link | ✓ | | | ✓ (assigned; the Expert adds it when starting) |
 | Set an Expert's hourly rate, an Associate's share, a Profile's Manager share | ✓ | | | |
 | See own pay (§3.1 "Who is paid what") | ✓ (everyone's) | own share and the Associate's part they pass on | own part | own pay |
 | Mark the Expert or the Manager paid for a call | ✓ | | | |
@@ -281,7 +284,7 @@ A Profile's standing on each expert network platform. A missing row means
 | notes | text | Internal notes |
 | project_details | text | Required, never blank. The project brief from the platform |
 | platform_associate_name | text | Required, never blank. The platform's own staff contact, not our associate |
-| ninja_link | text, nullable | Meeting link the Expert must add when starting the call |
+| ninja_link | text, nullable | Meeting link the Expert must add when starting the call. Sent only to the Founder and the Expert |
 | gpt_link | text, nullable | Research link, set by the Founder. Sent only to the Founder and the Expert |
 | rate_override | numeric(12,2), nullable | A special rate (USD per hour) for this Call only; falls back to the Profile's platform rate. Never sent to Experts |
 | actual_duration_minutes | integer, nullable | Entered by the Expert when finishing; the booked `duration_minutes` (and the calendar slot) stay unchanged |
@@ -1112,8 +1115,8 @@ requesting user so clients never guess. `payouts` is too (§3.1): `expert`
 amount, paidAt } once paid to bank, each only for the viewers who may see it,
 and `canMark` lists the lines the viewer may mark. `bankReady` (Founder only)
 says whether the Profile has an open bank account. For Experts, `status` never shows an
-invoicing status and every money field is null (§2.3); `gptLink` goes only to
-the Founder and the call's Expert.
+invoicing status and every money field is null (§2.3); `gptLink` and `ninjaLink` go only
+to the Founder and the call's Expert.
 
 ### 6.9 Calendar and availability
 
@@ -1790,3 +1793,4 @@ Container alternative:
 | 2026-09-20 | Anyone can put a task on their own panel; ticking it finishes it at once. Tasks are dragged into the order their panel should keep, and everyone sees that order |
 | 2026-09-20 | The call panel names its money in a field of its own: Expected income once finished, Real income once paid. The Profiles table shows the priority-one platform's status by name and unfolds every platform on click. Submitting an invoice from the call page warns when the Profile has no open bank account. Reading the audit trail is no longer written to the audit trail |
 | 2026-09-21 | **Who is paid what**: Experts have an hourly rate and Associates a share, set by the Founder; each call keeps the Expert's rate from when it finished and the shares from when it was paid to bank. The Founder pays the Expert and the Manager (15% of real income by default, per Profile), the Manager passes the Associate's part on. The Calls page has two tabs, In progress and Finance: each person's own money on the calls that took place, with totals, and rows the Founder and Managers select and mark paid. Profiles are looked after by an Associate, handed on by the Founder or within a Manager's team. Platform statuses are green and red dots, with the rate only on click. Calls can be cancelled from the list; the deep search data link leads the call page while it is being prepared, and the dashboard lists booked calls still without it. Tasks can be dragged onto another person's panel, and New task sits at the top of the page. Old "read the audit trail" entries were cleared |
+| 2026-09-21 | Rebranded as **Silver Horizon**: logo in the sidebar, the banner on the sign-in page, new favicon, app and notification icons, navy as the primary colour. The Ninja link of a call now reaches only the Founder and the Expert |

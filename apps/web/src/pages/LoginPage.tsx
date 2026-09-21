@@ -14,6 +14,7 @@ import {
   Typography,
 } from '@mui/material';
 import { useEffect, useState, type FormEvent } from 'react';
+import { BrandLogo } from '@/components/BrandLogo';
 import { useAuth } from '@/auth/AuthProvider';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { api } from '@/lib/api';
@@ -73,27 +74,25 @@ export default function LoginPage() {
         bgcolor: 'background.default',
       }}
     >
+      {/* The brand banner on wider screens; its tagline is part of the picture. */}
+      <Box
+        component="img"
+        src="/brand/banner.jpg"
+        alt="Silver Horizon — Connecting Expertise. Expanding Perspective."
+        sx={{
+          display: { xs: 'none', sm: 'block' },
+          width: '100%',
+          maxWidth: 1080,
+          height: 'auto',
+          borderRadius: '18px',
+          mb: 4,
+          boxShadow: '0 12px 40px rgba(28, 57, 85, 0.12)',
+        }}
+      />
       <Box sx={{ width: '100%', maxWidth: 380 }}>
-        <Stack direction="row" spacing={1.25} alignItems="center" justifyContent="center" sx={{ mb: 3 }}>
-          <Box
-            sx={{
-              width: 30,
-              height: 30,
-              borderRadius: '50%',
-              display: 'grid',
-              placeItems: 'center',
-              bgcolor: 'primary.main',
-              color: 'primary.contrastText',
-              fontWeight: 650,
-              fontSize: 14,
-            }}
-          >
-            G
-          </Box>
-          <Typography variant="subtitle1" component="div">
-            God System
-          </Typography>
-        </Stack>
+        <Box sx={{ display: { xs: 'flex', sm: 'none' }, justifyContent: 'center', mb: 3 }}>
+          <BrandLogo height={40} />
+        </Box>
         <Card component="form" onSubmit={submit} noValidate sx={{ p: { xs: 3, sm: 4 } }}>
           <Typography variant="h5" component="h1" sx={{ mb: 0.5 }}>
             Welcome back

@@ -1,4 +1,4 @@
-/* God System service worker: shows push notifications and opens the right page when one is clicked. */
+/* Silver Horizon service worker: shows push notifications and opens the right page when one is clicked. */
 
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
@@ -10,7 +10,7 @@ self.addEventListener('push', (event) => {
   try {
     data = event.data.json();
   } catch {
-    data = { title: 'God System', body: event.data ? event.data.text() : '', url: '/', tag: 'god', kind: 'notification' };
+    data = { title: 'Silver Horizon', body: event.data ? event.data.text() : '', url: '/', tag: 'god', kind: 'notification' };
   }
 
   event.waitUntil(
@@ -26,7 +26,7 @@ self.addEventListener('push', (event) => {
           : data.kind === 'chat' ? focused.some((c) => new URL(c.url).pathname === target.pathname) : focused.length > 0;
       if (watching) return;
 
-      await self.registration.showNotification(data.title || 'God System', {
+      await self.registration.showNotification(data.title || 'Silver Horizon', {
         body: data.body || '',
         tag: data.tag,
         renotify: Boolean(data.tag),

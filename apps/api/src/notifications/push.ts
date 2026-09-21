@@ -15,7 +15,7 @@ function titleFor(n: NotificationDTO): { title: string; body: string } {
     case 'call.assigned':
       return { title: 'Call assigned', body: `${who} assigned you a call` };
     default:
-      return { title: 'God System', body: n.payload.summary ?? 'You have a new notification' };
+      return { title: 'Silver Horizon', body: n.payload.summary ?? 'You have a new notification' };
   }
 }
 

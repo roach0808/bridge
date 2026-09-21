@@ -11,7 +11,7 @@ const server = createServer(app);
 const io = createSocketServer(server);
 
 server.listen(config.PORT, config.HOST, () => {
-  logger.info(`God System API listening on http://${config.HOST}:${config.PORT}`);
+  logger.info(`Silver Horizon API listening on http://${config.HOST}:${config.PORT}`);
 });
 
 // Nightly database dumps for the Founder (§6.13); catches up after downtime.
