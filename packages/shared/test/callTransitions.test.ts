@@ -22,8 +22,14 @@ const SPEC: Array<[CallStatus, CallStatus, Role[]]> = [
   ['scheduled', 'on_rescheduling', ['associate', 'manager', 'expert', 'founder']],
   ['confirmed', 'on_rescheduling', ['associate', 'manager', 'expert', 'founder']],
   ['on_rescheduling', 'scheduled', ['associate', 'manager', 'founder']],
-  ['confirmed', 'ongoing', ['expert', 'founder']],
-  ['confirmed', 'finished', ['expert', 'founder']],
+  // The Founder prepares the research data; then the Expert starts or finishes the call.
+  ['confirmed', 'research_ready', ['founder']],
+  ['research_ready', 'on_rescheduling', ['associate', 'manager', 'expert', 'founder']],
+  ['research_ready', 'ongoing', ['expert', 'founder']],
+  ['research_ready', 'finished', ['expert', 'founder']],
+  // Only the Founder may skip the research step.
+  ['confirmed', 'ongoing', ['founder']],
+  ['confirmed', 'finished', ['founder']],
   ['ongoing', 'finished', ['expert', 'founder']],
   ['finished', 'invoice_submit', ['founder']],
   ['invoice_submit', 'invoice_approve', ['founder']],
@@ -32,6 +38,7 @@ const SPEC: Array<[CallStatus, CallStatus, Role[]]> = [
   ['on_scheduling', 'cancelled', ['associate', 'manager', 'founder']],
   ['scheduled', 'cancelled', ['associate', 'manager', 'founder']],
   ['confirmed', 'cancelled', ['associate', 'manager', 'founder']],
+  ['research_ready', 'cancelled', ['associate', 'manager', 'founder']],
   ['on_rescheduling', 'cancelled', ['associate', 'manager', 'founder']],
 ];
 
@@ -84,7 +91,7 @@ describe('TRANSITIONS table', () => {
   it('cancelling is final, only before the call runs, and never by the Expert', () => {
     expect(TRANSITIONS.filter((t) => t.from === 'cancelled')).toEqual([]);
     expect(TRANSITIONS.filter((t) => t.to === 'cancelled').map((t) => t.from).sort()).toEqual(
-      ['confirmed', 'on_rescheduling', 'on_scheduling', 'scheduled'],
+      ['confirmed', 'on_rescheduling', 'on_scheduling', 'research_ready', 'scheduled'],
     );
     for (const t of TRANSITIONS.filter((t) => t.to === 'cancelled')) expect(t.roles).not.toContain('expert');
   });
@@ -152,9 +159,11 @@ describe('allowedTransitions', () => {
     expect([...allowedTransitions(role, from, NONE)].sort()).toEqual([...expected].sort());
   });
 
-  it('a call must be confirmed before it can start or finish', () => {
+  it('a call must be confirmed and its research data ready before the Expert can start or finish it', () => {
     expect([...allowedTransitions('expert', 'scheduled', ctxFor('expert'))].sort()).toEqual(['confirmed', 'on_rescheduling']);
-    expect([...allowedTransitions('expert', 'confirmed', ctxFor('expert'))].sort()).toEqual(['finished', 'on_rescheduling', 'ongoing']);
+    expect([...allowedTransitions('expert', 'confirmed', ctxFor('expert'))].sort()).toEqual(['on_rescheduling']);
+    expect([...allowedTransitions('expert', 'research_ready', ctxFor('expert'))].sort()).toEqual(['finished', 'on_rescheduling', 'ongoing']);
+    expect([...allowedTransitions('founder', 'confirmed', ctxFor('founder'))].sort()).toEqual(['cancelled', 'finished', 'on_rescheduling', 'ongoing', 'research_ready']);
     expect(isValidEdge('scheduled', 'ongoing')).toBe(false);
     expect(isValidEdge('scheduled', 'finished')).toBe(false);
   });
@@ -175,7 +184,16 @@ describe('isOverride and edgeOwner', () => {
       expect(isOverride('founder', from, to)).toBe(true);
     },
   );
-  const founderEdges = SPEC.filter(([, , r]) => r.length === 1 && r[0] === 'founder');
+  // Skipping the research step is founder-only but stands in for the Expert.
+  const SKIP = (f: CallStatus, t: CallStatus) => f === 'confirmed' && (t === 'ongoing' || t === 'finished');
+  const founderEdges = SPEC.filter(([f, t, r]) => r.length === 1 && r[0] === 'founder' && !SKIP(f, t));
+
+  it('the Founder skipping the research step acts for the Expert (an override)', () => {
+    for (const to of ['ongoing', 'finished'] as const) {
+      expect(edgeOwner('confirmed', to)).toBe('expert');
+      expect(isOverride('founder', 'confirmed', to)).toBe(true);
+    }
+  });
 
   it.each(associateEdges.map(([f, t]) => [f, t] as const))('associate edge %s → %s', (from, to) => {
     expect(edgeOwner(from, to)).toBe('associate');

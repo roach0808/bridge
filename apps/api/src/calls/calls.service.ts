@@ -1,14 +1,13 @@
 import {
   ERROR_CODES,
   FEATURES,
-  INVOICING_STATUSES,
   STATUS_LABELS,
-  associateShareWithin,
   canTransition,
   isOverride,
   isValidEdge,
   listCallsQuerySchema,
   statusFilterForRole,
+  statusForRole,
   type CallDetailDTO,
   type CallDTO,
   type CallStatus,
@@ -172,7 +171,7 @@ export async function getCallDetail(actor: Actor, id: string | null): Promise<Ca
   return {
     ...toCallDTO(call, actor),
     messages: messages.reverse().map(toMessageDTO),
-    history: history.map(toHistoryDTO),
+    history: history.map((h) => toHistoryDTO(h, actor.role)),
   };
 }
 
@@ -228,6 +227,7 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
         projectDetails: input.projectDetails,
         platformAssociateName: input.platformAssociateName,
         notes: input.notes ?? null,
+        meetingDetails: input.meetingDetails ?? null,
         createdById: actor.id,
       },
       include: callInclude,
@@ -299,8 +299,11 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
         : forbidden('Only the Founder sets the Expert’s rate for a call, once it has taken place');
     }
   }
-  if (input.gptLink !== undefined && !perms.editGptLink) {
-    throw forbidden('Only the Founder sets the GPT link');
+  if (input.researchLink !== undefined && !perms.editResearchLink) {
+    throw forbidden('Only the Founder sets the research data link');
+  }
+  if (input.meetingDetails !== undefined && !perms.editMeeting) {
+    throw forbidden('You cannot change this call’s meeting details');
   }
   if (input.rateOverride !== undefined && !perms.editRate) {
     throw forbidden('You cannot set this call’s rate');
@@ -313,11 +316,12 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
   if (input.scheduledAt !== undefined && new Date(input.scheduledAt).getTime() !== current.scheduledAt.getTime()) {
     assertNotInThePast(input.scheduledAt);
   }
-  // The Expert confirmed a specific time: moving it needs their confirmation again.
+  // The Expert confirmed a specific time: moving it needs their confirmation again
+  // (and the Founder then marks the research data ready again).
   const timeChanged =
     (input.scheduledAt !== undefined && new Date(input.scheduledAt).getTime() !== current.scheduledAt.getTime()) ||
     (input.durationMinutes !== undefined && input.durationMinutes !== current.durationMinutes);
-  const unconfirm = current.status === 'confirmed' && timeChanged;
+  const unconfirm = (current.status === 'confirmed' || current.status === 'research_ready') && timeChanged;
 
   const { call, delivers } = await prisma.$transaction(async (tx) => {
     await lockCall(tx, current.id);
@@ -332,10 +336,11 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
           platformAssociateName: input.platformAssociateName,
           platformId: input.platformId,
           notes: input.notes,
+          meetingDetails: input.meetingDetails,
           associateId: input.associateId,
           expertId: input.expertId,
           realIncome: input.realIncome === undefined ? undefined : input.realIncome,
-          gptLink: input.gptLink,
+          researchLink: input.researchLink,
           rateOverride: input.rateOverride === undefined ? undefined : input.rateOverride,
           expertRate: input.expertRate === undefined ? undefined : input.expertRate,
         },
@@ -346,7 +351,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
       await tx.callStatusHistory.create({
         data: {
           callId: current.id,
-          fromStatus: 'confirmed',
+          fromStatus: current.status,
           toStatus: 'scheduled',
           actorId: actor.id,
           isOverride: false,
@@ -411,6 +416,13 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     if (to === 'scheduled' && !current.expertId) {
       throw conflict('Assign an Expert before scheduling the call', ERROR_CODES.expertRequired);
     }
+    // The research data is ready only once the Expert has something to read.
+    const researchLink = input.researchLink ?? current.researchLink;
+    if (to === 'research_ready' && !researchLink) {
+      throw badRequest('Add the research data link first', {
+        issues: [{ path: 'researchLink', message: 'Paste the link to the research data for this call' }],
+      });
+    }
     // Money has to be known before a finished call can be invoiced (§ rates).
     if (to === 'invoice_submit' && current.rateOverride === null) {
       const platformRate = await tx.profilePlatformStatus.findUnique({
@@ -428,6 +440,7 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
 
     // The schema already requires these for `ongoing` / `finished`.
     const data: Prisma.CallUpdateInput = { status: to };
+    if (to === 'research_ready') data.researchLink = researchLink;
     if (to === 'ongoing') data.ninjaLink = input.ninjaLink;
     if (to === 'finished') {
       data.actualDurationMinutes = input.actualDurationMinutes;
@@ -438,16 +451,15 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
       data.expertRate = current.expert?.hourlyRate ?? null;
     }
     if (to === 'process_to_bank') {
-      // The bank never pays exactly the expected price: record what actually arrived.
+      // The bank never pays exactly the expected price: record what actually arrived, and when
+      // (it counts in the payment cycle it arrived in).
       data.realIncome = input.realIncome;
-      // The shares are settled now, from the Profile's Manager share and the Associate's own.
+      data.bankedAt = new Date();
+      // The shares are settled now: the Profile's Manager share, and the Associate's percent of it.
       // A Manager running a call themselves keeps the whole Manager share.
-      const managerShare = Number(current.profile.managerSharePercent);
       const runByAssociate = current.associate.role === 'associate';
-      data.managerSharePercent = managerShare;
-      data.associateSharePercent = runByAssociate
-        ? associateShareWithin(Number(current.associate.sharePercent ?? 0), managerShare)
-        : 0;
+      data.managerSharePercent = Number(current.profile.managerSharePercent);
+      data.associateSharePercent = runByAssociate ? Number(current.associate.sharePercent ?? 0) : 0;
       const payee = runByAssociate ? current.associate.managerId : current.associateId;
       data.payeeManager = payee ? { connect: { id: payee } } : { disconnect: true };
     }
@@ -464,20 +476,36 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
         comment: comment ?? null,
       },
     });
-    // Experts are not told about invoicing.
-    const invoicing = INVOICING_STATUSES.includes(to);
-    const recipients = (await participantIds(tx, updated)).filter(
-      (uid) => uid !== actor.id && !(invoicing && uid === updated.expertId),
-    );
-    const type: NotificationType = 'call.status_changed';
-    const deliver = await notify(tx, recipients, type, {
-      callId: id,
-      from,
-      to,
-      actor: actorRef(actor),
-      summary: `${updated.profile.name}: ${STATUS_LABELS[from]} → ${STATUS_LABELS[to]}`,
+    // Each person hears about the step as they see it: Experts are not told about invoicing,
+    // Associates and Managers not about the research step, and a step nobody sees tells them nothing.
+    const people = await tx.user.findMany({
+      where: { id: { in: (await participantIds(tx, updated)).filter((uid) => uid !== actor.id) } },
+      select: { id: true, role: true },
     });
-    return { call: updated, delivers: [deliver] };
+    const groups = new Map<string, { from: CallStatus; to: CallStatus; ids: string[] }>();
+    for (const person of people) {
+      const seenFrom = statusForRole(person.role, from);
+      const seenTo = statusForRole(person.role, to);
+      if (seenFrom === seenTo) continue;
+      const key = `${seenFrom}>${seenTo}`;
+      const group = groups.get(key) ?? { from: seenFrom, to: seenTo, ids: [] };
+      group.ids.push(person.id);
+      groups.set(key, group);
+    }
+    const type: NotificationType = 'call.status_changed';
+    const delivers: Deliver[] = [];
+    for (const g of groups.values()) {
+      delivers.push(
+        await notify(tx, g.ids, type, {
+          callId: id,
+          from: g.from,
+          to: g.to,
+          actor: actorRef(actor),
+          summary: `${updated.profile.name}: ${STATUS_LABELS[g.from]} → ${STATUS_LABELS[g.to]}`,
+        }),
+      );
+    }
+    return { call: updated, delivers };
   });
 
   deliverAll(delivers);

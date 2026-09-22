@@ -23,6 +23,7 @@ enum CallStatus {
   on_scheduling
   scheduled
   confirmed
+  research_ready
   on_rescheduling
   ongoing
   finished
@@ -118,6 +119,7 @@ model User {
   createdCalls       Call[]              @relation("CallCreatedBy")
   payeeCalls         Call[]              @relation("CallPayeeManager")
   handledProfiles    Profile[]           @relation("ProfileAssociate")
+  closedPayCycles    PayCycle[]          @relation("PayCycleClosedBy")
   identities         AuthIdentity[]
   chatImages         ChatImage[]         @relation("ChatImageUploader")
   chatReactions      ChatReaction[]      @relation("ChatReactionUser")
@@ -241,12 +243,14 @@ model Call {
   notes                 String?
   projectDetails        String     @map("project_details")
   platformAssociateName String     @map("platform_associate_name")
+  /// How to join the platform's meeting (link, passcode…), added by whoever runs the call.
+  meetingDetails        String?    @map("meeting_details")
   /// What actually reached the bank (USD), entered by the Founder when the call is processed to bank.
   realIncome            Decimal?   @map("real_income") @db.Decimal(12, 2)
   /// Meeting link the Expert adds when the call starts.
   ninjaLink             String?    @map("ninja_link")
-  /// Research link set by the Founder; only the Founder and the Expert may read it.
-  gptLink               String?    @map("gpt_link")
+  /// Research data link set by the Founder; only the Founder and the Expert may read it.
+  researchLink          String?    @map("gpt_link")
   /// A special rate for this call only (USD per hour), overriding the Profile's platform rate.
   rateOverride          Decimal?   @map("rate_override") @db.Decimal(12, 2)
   /// Entered by the Expert when finishing: how long the call really took.
@@ -264,6 +268,8 @@ model Call {
   expertPaidAt          DateTime?  @map("expert_paid_at") @db.Timestamptz(3)
   managerPaidAt         DateTime?  @map("manager_paid_at") @db.Timestamptz(3)
   associatePaidAt       DateTime?  @map("associate_paid_at") @db.Timestamptz(3)
+  /// When the money reached the bank (processed to bank): its income counts in that payment cycle.
+  bankedAt              DateTime?  @map("banked_at") @db.Timestamptz(3)
   createdById          String     @map("created_by") @db.Uuid
   createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)
@@ -283,6 +289,7 @@ model Call {
   @@index([expertId, scheduledAt])
   @@index([scheduledAt])
   @@index([payeeManagerId])
+  @@index([bankedAt])
   @@map("calls")
 }
 
@@ -682,4 +689,25 @@ model ChatReaction {
 
   @@id([messageId, userId, emoji])
   @@map("chat_reactions")
+}
+
+/// A monthly payment cycle the Founder closed by paying everyone they owed. Kept as it was:
+/// `lines` holds who was paid how much ({ userId, kind, amount, calls }).
+model PayCycle {
+  id             String    @id @default(uuid()) @db.Uuid
+  label          String
+  /// The end of the previous cycle; null for the first one.
+  startedAt      DateTime? @map("started_at") @db.Timestamptz(3)
+  closedAt       DateTime  @unique @map("closed_at") @db.Timestamptz(3)
+  closedById     String    @map("closed_by") @db.Uuid
+  income         Decimal   @db.Decimal(14, 2)
+  paidExperts    Decimal   @map("paid_experts") @db.Decimal(14, 2)
+  paidManagers   Decimal   @map("paid_managers") @db.Decimal(14, 2)
+  paidAssociates Decimal   @map("paid_associates") @db.Decimal(14, 2)
+  lines          Json
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  closedBy User @relation("PayCycleClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
+
+  @@map("pay_cycles")
 }

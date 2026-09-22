@@ -1,12 +1,24 @@
 import { Box, Stack, Tooltip, Typography } from '@mui/material';
-import { STAGE_LABELS, STATUS_LABELS, STATUS_STAGE, TRACK_STAGES, stagesForRole, type CallStatus, type Role } from '@god/shared';
+import { SHORT_STATUS_LABELS, STAGE_LABELS, STATUS_LABELS, STATUS_STAGE, TRACK_STAGES, hiddenStatusesFor, stagesForRole, type CallStatus, type Role } from '@god/shared';
 import { STATUS_COLORS } from '@/components/StatusChip';
 
 /** The happy path; `on_rescheduling` is shown as a detour on `scheduled`. */
-const TRACK: CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'ongoing', 'finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
+const FULL_TRACK: CallStatus[] = [
+  'on_scheduling',
+  'scheduled',
+  'confirmed',
+  'research_ready',
+  'ongoing',
+  'finished',
+  'invoice_submit',
+  'invoice_approve',
+  'process_to_bank',
+];
 
-/** Experts don't see the invoicing stage (their calls end at Finished). */
+/** Experts don't see the invoicing stage (their calls end at Finished); Associates and Managers don't see the research step. */
 export function StatusProgress({ status, role }: { status: CallStatus; role: Role }) {
+  const hidden = hiddenStatusesFor(role);
+  const TRACK = FULL_TRACK.filter((s) => !hidden.includes(s));
   const position = TRACK.indexOf(status === 'on_rescheduling' ? 'scheduled' : status);
   // A cancelled call left the track: the bar would say nothing true about it.
   if (status === 'cancelled') {
@@ -18,7 +30,7 @@ export function StatusProgress({ status, role }: { status: CallStatus; role: Rol
   }
   return (
     <Box sx={{ overflowX: 'auto', pb: 0.5 }}>
-      <Stack direction="row" sx={{ minWidth: 640 }}>
+      <Stack direction="row" sx={{ minWidth: 720 }}>
         {stagesForRole(role)
           .filter((stage) => TRACK_STAGES.includes(stage))
           .map((stage) => {
@@ -51,7 +63,7 @@ export function StatusProgress({ status, role }: { status: CallStatus; role: Rol
                           component="div"
                           sx={{ mt: 0.75, pl: 0.25, fontWeight: current ? 600 : 400, color: current ? 'text.primary' : done ? 'text.secondary' : 'text.disabled' }}
                         >
-                          {detour ? STATUS_LABELS.on_rescheduling : STATUS_LABELS[s]}
+                          {detour ? STATUS_LABELS.on_rescheduling : s === 'research_ready' ? SHORT_STATUS_LABELS[s] : STATUS_LABELS[s]}
                         </Typography>
                       </Box>
                     </Tooltip>

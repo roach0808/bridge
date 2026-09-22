@@ -249,6 +249,8 @@ export const createCallSchema = z.object({
   projectDetails: trimmed('Project details'),
   platformAssociateName: trimmed('Platform associate', 160),
   notes: optionalText(),
+  /** How to join the platform's meeting: link, passcode… */
+  meetingDetails: optionalText(2000),
 });
 
 export const updateCallSchema = z
@@ -261,10 +263,12 @@ export const updateCallSchema = z
     projectDetails: trimmed('Project details').optional(),
     platformAssociateName: trimmed('Platform associate', 160).optional(),
     notes: optionalText().optional(),
+    /** Whoever runs the call, their Manager or the Founder: how to join the platform's meeting. */
+    meetingDetails: optionalText(2000).optional(),
     /** Founder only: correct what reached the bank after the call was processed. */
     realIncome: money.nullable().optional(),
-    /** Founder only; the Expert reads it but never writes it. */
-    gptLink: z
+    /** Founder only: the research data for the call; the Expert reads it but never writes it. */
+    researchLink: z
       .string()
       .trim()
       .refine(isWebUrl, 'Enter a link starting with https://')
@@ -290,6 +294,8 @@ export const transitionSchema = z
     to: z.enum(CALL_STATUSES),
     comment: optionalText(2000).optional(),
     ninjaLink: webUrl('Enter a link starting with https://').optional(),
+    /** Moving to `research_ready`: the research data link, unless the call already has one. */
+    researchLink: webUrl('Enter a link starting with https://').optional(),
     actualDurationMinutes: z.coerce
       .number()
       .int('Enter whole minutes')
@@ -341,6 +347,9 @@ export const financeCallsQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
 });
+
+/** Closes the open payment cycle: everyone the Founder owes is paid, and the month is kept on record. */
+export const closeCycleSchema = z.object({ label: trimmed('Name', 60) });
 
 /** Marks one payee paid (or not paid after all) on several calls at once. */
 export const markPayoutsSchema = z.object({
@@ -561,6 +570,7 @@ export type UpdateCallInput = z.input<typeof updateCallSchema>;
 export type TransitionInput = z.input<typeof transitionSchema>;
 export type FinanceCallsQuery = z.input<typeof financeCallsQuerySchema>;
 export type MarkPayoutsInput = z.input<typeof markPayoutsSchema>;
+export type CloseCycleInput = z.input<typeof closeCycleSchema>;
 export type ListCallsQuery = z.input<typeof listCallsQuerySchema>;
 export type BlockBodyInput = z.input<typeof blockBodySchema>;
 export type BlockPatchInput = z.input<typeof blockPatchSchema>;

@@ -9,8 +9,8 @@ export interface Transition {
 
 /**
  * The single source of truth for the Call workflow (§4.3). The Expert confirms
- * a scheduled time before the call can start, and either side can send a
- * scheduled or confirmed call back for rescheduling.
+ * a scheduled time, the Founder marks the research data ready, and then the
+ * Expert starts the call. Either side can send a booked call back for rescheduling.
  */
 export const TRANSITIONS: Transition[] = [
   { from: 'on_scheduling',   to: 'scheduled',       roles: ['associate', 'manager', 'founder'] },
@@ -18,8 +18,14 @@ export const TRANSITIONS: Transition[] = [
   { from: 'scheduled',       to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
   { from: 'confirmed',       to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
   { from: 'on_rescheduling', to: 'scheduled',       roles: ['associate', 'manager', 'founder'] },
-  { from: 'confirmed',       to: 'ongoing',         roles: ['expert', 'founder'] },
-  { from: 'confirmed',       to: 'finished',        roles: ['expert', 'founder'] },
+  // The Founder prepares the research data the Expert reads before the call.
+  { from: 'confirmed',       to: 'research_ready',  roles: ['founder'] },
+  { from: 'research_ready',  to: 'on_rescheduling', roles: ['associate', 'manager', 'expert', 'founder'] },
+  { from: 'research_ready',  to: 'ongoing',         roles: ['expert', 'founder'] },
+  { from: 'research_ready',  to: 'finished',        roles: ['expert', 'founder'] },
+  // Skipping the research step is the Founder's call alone.
+  { from: 'confirmed',       to: 'ongoing',         roles: ['founder'] },
+  { from: 'confirmed',       to: 'finished',        roles: ['founder'] },
   { from: 'ongoing',         to: 'finished',        roles: ['expert', 'founder'] },
   { from: 'finished',        to: 'invoice_submit',  roles: ['founder'] },
   { from: 'invoice_submit',  to: 'invoice_approve', roles: ['founder'] },
@@ -28,6 +34,7 @@ export const TRANSITIONS: Transition[] = [
   { from: 'on_scheduling',   to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
   { from: 'scheduled',       to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
   { from: 'confirmed',       to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
+  { from: 'research_ready',  to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
   { from: 'on_rescheduling', to: 'cancelled',       roles: ['associate', 'manager', 'founder'] },
 ];
 
@@ -41,6 +48,10 @@ const EDGE_OWNERS: Record<string, Role[]> = {
   'scheduled>on_rescheduling': ['associate', 'expert'],
   'confirmed>on_rescheduling': ['associate', 'expert'],
   'on_rescheduling>scheduled': ['associate'],
+  'confirmed>research_ready': ['founder'],
+  'research_ready>on_rescheduling': ['associate', 'expert'],
+  'research_ready>ongoing': ['expert'],
+  'research_ready>finished': ['expert'],
   'confirmed>ongoing': ['expert'],
   'confirmed>finished': ['expert'],
   'ongoing>finished': ['expert'],
@@ -50,6 +61,7 @@ const EDGE_OWNERS: Record<string, Role[]> = {
   'on_scheduling>cancelled': ['associate'],
   'scheduled>cancelled': ['associate'],
   'confirmed>cancelled': ['associate'],
+  'research_ready>cancelled': ['associate'],
   'on_rescheduling>cancelled': ['associate'],
 };
 

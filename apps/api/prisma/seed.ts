@@ -19,7 +19,8 @@ function pathTo(target: CallStatus): CallStatus[] {
     const path = queue.shift()!;
     const last = path[path.length - 1]!;
     if (last === target) return path;
-    for (const t of TRANSITIONS.filter((t) => t.from === last)) {
+    // Seeded calls go the normal way, through the research step (never the Founder's shortcut).
+    for (const t of TRANSITIONS.filter((t) => t.from === last && !(t.from === 'confirmed' && (t.to === 'ongoing' || t.to === 'finished')))) {
       if (!path.includes(t.to)) queue.push([...path, t.to]);
     }
   }
@@ -63,7 +64,7 @@ async function main() {
   const atlas = await mkUser('atlas', 'manager', 3);
   const beacon = await mkUser('beacon', 'manager', 8);
   const pixel = await mkUser('pixel', 'associate', 2, { managerId: atlas.id });
-  const sprout = await mkUser('sprout', 'associate', 5, { managerId: atlas.id, sharePercent: 8 });
+  const sprout = await mkUser('sprout', 'associate', 5, { managerId: atlas.id, sharePercent: 40 });
   const mango = await mkUser('mango', 'associate', 9, { managerId: beacon.id });
   const comet = await mkUser('comet', 'associate', 14, { managerId: beacon.id });
   const ember = await mkUser('ember', 'expert', 4, { timeZone: 'Asia/Seoul', hourlyRate: 180 });
@@ -204,8 +205,10 @@ async function main() {
     details: string;
     contact: string;
     notes?: string;
-    /** Research link: only the Founder and the Expert see it. */
-    gptLink?: string;
+    /** Research data link: only the Founder and the Expert see it. */
+    researchLink?: string;
+    /** How to join the platform's meeting. */
+    meeting?: string;
     /** A special rate for this call only. */
     rateOverride?: number;
     /** USD that reached the bank; only for calls processed to bank. */
@@ -215,11 +218,14 @@ async function main() {
     messages?: Array<[typeof pixel, string]>;
   }
 
+  // The first monthly payment: the Founder paid everyone they owed then.
+  const firstPayday = at(-6, 12);
   const calls: SeedCall[] = [
     { status: 'on_scheduling', associate: pixel, expert: null, when: at(2, 10), duration: 60, platform: 0, profile: 0, details: 'Consumer electronics OEM evaluating second-source suppliers in Vietnam.', contact: 'Rachel (Northwind)' },
     { status: 'on_scheduling', associate: sprout, expert: ember, when: at(3, 20), duration: 30, platform: 2, profile: 2, details: 'HBM capacity outlook for 2027 and packaging bottlenecks.', contact: 'Min-seo (Hanbit)', notes: 'Client prefers Korean-speaking expert.' },
-    { status: 'scheduled', associate: pixel, expert: quill, when: at(1, 11), duration: 45, platform: 0, profile: 1, details: 'Real-time payments adoption among mid-size US banks.', contact: 'Rachel (Northwind)', gptLink: 'https://chatgpt.com/share/seed-payments-brief', messages: [[pixel, 'Client confirmed. Dial-in link is in the platform portal.'], [quill, 'Thanks — I will join 5 minutes early.']] },
-    { status: 'confirmed', associate: mango, expert: flint, when: at(1, 9), duration: 60, platform: 1, profile: 5, details: 'EU EV battery pack supplier landscape, focus on Poland and Hungary.', contact: 'Oliver (Meridian)' },
+    { status: 'scheduled', associate: pixel, expert: quill, when: at(1, 11), duration: 45, platform: 0, profile: 1, details: 'Real-time payments adoption among mid-size US banks.', contact: 'Rachel (Northwind)', researchLink: 'https://chatgpt.com/share/seed-payments-brief', meeting: 'Zoom https://zoom.example.com/j/81234567 · passcode 4411', messages: [[pixel, 'Client confirmed. Dial-in link is in the platform portal.'], [quill, 'Thanks — I will join 5 minutes early.']] },
+    { status: 'confirmed', associate: mango, expert: flint, when: at(1, 9), duration: 60, platform: 1, profile: 5, details: 'EU EV battery pack supplier landscape, focus on Poland and Hungary.', contact: 'Oliver (Meridian)', meeting: 'Teams link in the Meridian portal · dial-in +44 20 7946 0000, PIN 5521' },
+    { status: 'research_ready', associate: sprout, expert: flint, when: at(2, 15), duration: 45, platform: 0, profile: 3, details: 'Private label sourcing costs after the LATAM freight squeeze.', contact: 'Rachel (Northwind)', researchLink: 'https://chatgpt.com/share/seed-latam-freight', meeting: 'Zoom https://zoom.example.com/j/99887766 · passcode 7302' },
     { status: 'scheduled', associate: comet, expert: ember, when: at(0, 21), duration: 30, platform: 4, profile: 6, details: 'Seller advertising tools in Japanese marketplaces.', contact: 'Wei Ling (Harbor)' },
     { status: 'on_rescheduling', associate: sprout, expert: quill, when: at(4, 14), duration: 30, platform: 3, profile: 7, details: 'Hospital revenue cycle outsourcing trends.', contact: 'Jonas (Kestrel)', messages: [[sprout, 'Client asked to move this by a couple of days — working on a new slot.']] },
     { status: 'ongoing', associate: mango, expert: quill, when: at(0, DateTime.now().setZone(TEAM_TIME_ZONE).hour), duration: 60, platform: 1, profile: 9, details: 'Multi-cloud cost optimisation at large retailers.', contact: 'Oliver (Meridian)' },
@@ -245,9 +251,10 @@ async function main() {
         platformAssociateName: c.contact,
         notes: c.notes ?? null,
         realIncome: c.realIncome,
-        gptLink: c.gptLink,
+        researchLink: c.researchLink,
+        meetingDetails: c.meeting ?? null,
         rateOverride: c.rateOverride,
-        ninjaLink: ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'].includes(c.status)
+        ninjaLink: ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling'].includes(c.status)
           ? null
           : `https://vdo.ninja/?room=god-${Math.random().toString(36).slice(2, 10)}`,
         actualDurationMinutes: c.report?.[0],
@@ -259,10 +266,12 @@ async function main() {
           ? {
               managerSharePercent: DEFAULT_MANAGER_SHARE_PERCENT,
               associateSharePercent: c.associate.sharePercent ?? 0,
+              bankedAt: DateTime.fromJSDate(c.when).plus({ days: 2 }).toJSDate(),
               payeeManagerId: c.associate.managerId,
               // The Founder has paid the Expert and the Manager; the Manager still owes the Associate.
-              expertPaidAt: DateTime.fromJSDate(c.when).plus({ days: 3 }).toJSDate(),
-              managerPaidAt: DateTime.fromJSDate(c.when).plus({ days: 5 }).toJSDate(),
+              // Paid when the first payment cycle closed (below).
+              expertPaidAt: firstPayday,
+              managerPaidAt: firstPayday,
             }
           : {}),
         createdById: c.associate.id,
@@ -284,6 +293,26 @@ async function main() {
       await prisma.message.create({ data: { callId: created.id, senderId: sender.id, body, createdAt: stamp.toJSDate() } });
     }
   }
+
+  // --- The first payment cycle, closed by the Founder -------------------------------
+  // The paid call above brought in $942.50: ember was paid $180 (60 min at $180/h) and
+  // atlas 15% ($141.38), who still owes pixel half of it.
+  await prisma.payCycle.create({
+    data: {
+      label: 'Early September 2026',
+      startedAt: null,
+      closedAt: firstPayday,
+      closedById: founder.id,
+      income: 942.5,
+      paidExperts: 180,
+      paidManagers: 141.38,
+      paidAssociates: 0,
+      lines: [
+        { userId: ember.id, kind: 'expert', amount: 180, calls: 1 },
+        { userId: atlas.id, kind: 'manager', amount: 141.38, calls: 1 },
+      ],
+    },
+  });
 
   // --- Schedule blocks ----------------------------------------------------------
   const blocksFor = async (expert: typeof ember) => {

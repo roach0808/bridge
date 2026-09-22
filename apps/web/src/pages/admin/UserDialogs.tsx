@@ -200,14 +200,14 @@ function PayFields({
   if (role === 'associate') {
     return (
       <TextField
-        label="Share of each call"
+        label="Share of the Manager’s share"
         type="number"
         value={sharePercent}
         onChange={(e) => onShare(e.target.value)}
         error={Boolean(errors.sharePercent)}
         helperText={
           errors.sharePercent ??
-          'Percent of the real income, paid by their Manager out of the Manager’s share. Calls already paid keep the share they had.'
+          'Their portion of the Manager’s share of each call (50% of a 15% share is 7.5% of the income), paid by the Manager. Calls already paid keep the share they had.'
         }
         slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> }, htmlInput: { min: 0, max: 100, step: 1 } }}
       />
@@ -275,7 +275,8 @@ export function CreateUserDialog({
         ...(f.role === 'associate' && me.role === 'founder' ? { managerId: f.managerId } : {}),
         ...(f.role === 'expert' && f.timeZone ? { timeZone: f.timeZone } : {}),
         ...(me.role === 'founder' && f.role === 'expert' ? { hourlyRate: parseAmount(f.hourlyRate) } : {}),
-        ...(me.role === 'founder' && f.role === 'associate' ? { sharePercent: parseAmount(f.sharePercent) ?? DEFAULT_ASSOCIATE_SHARE_PERCENT } : {}),
+        // The Founder, or the Manager adding to their own team, sets an Associate's share.
+        ...(f.role === 'associate' ? { sharePercent: parseAmount(f.sharePercent) ?? DEFAULT_ASSOCIATE_SHARE_PERCENT } : {}),
       }),
     onSuccess: (user, f) => {
       void queryClient.invalidateQueries({ queryKey: qk.users.all });
@@ -320,7 +321,7 @@ export function CreateUserDialog({
     const errs = issuesToErrors(createUserSchema.safeParse(payload));
     if (needsManagerSelect && !form.managerId) errs.managerId = 'Choose a Manager';
     if (form.role === 'expert' && !form.timeZone) errs.timeZone = 'Choose the Expert’s time zone';
-    if (me.role === 'founder') Object.assign(errs, payErrors(form.role, form.hourlyRate, form.sharePercent));
+    if (me.role === 'founder' || form.role === 'associate') Object.assign(errs, payErrors(form.role, form.hourlyRate, form.sharePercent));
     setErrors(errs);
     setGeneral(null);
     if (Object.keys(errs).length === 0) mutation.mutate(form);
@@ -446,7 +447,7 @@ export function CreateUserDialog({
         </Box>
       )}
 
-      {me.role === 'founder' && (
+      {(me.role === 'founder' || form.role === 'associate') && (
         <PayFields
           role={form.role}
           hourlyRate={form.hourlyRate}

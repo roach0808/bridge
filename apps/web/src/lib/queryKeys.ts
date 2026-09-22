@@ -10,6 +10,9 @@ export const qk = {
     detail: (id: string) => ['calls', 'detail', id] as const,
     /** The Finance tab: calls that took place, with the viewer's totals. */
     finance: (params: object) => ['calls', 'finance', params] as const,
+    /** The Founder's open payment cycle, and the closed ones. */
+    cycle: ['calls', 'cycle'] as const,
+    cycles: ['calls', 'cycles'] as const,
     waiting: ['calls', 'waiting'] as const,
     messages: (id: string) => ['calls', 'messages', id] as const,
   },

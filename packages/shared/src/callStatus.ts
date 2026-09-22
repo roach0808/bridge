@@ -4,6 +4,8 @@ export const CALL_STATUSES = [
   'on_scheduling',
   'scheduled',
   'confirmed',
+  /** The Founder prepared the research data; the Expert may start. Hidden from Associates and Managers. */
+  'research_ready',
   'on_rescheduling',
   'ongoing',
   'finished',
@@ -25,6 +27,7 @@ export const STATUS_STAGE: Record<CallStatus, Stage> = {
   on_scheduling: 'scheduling',
   scheduled: 'scheduling',
   confirmed: 'scheduling',
+  research_ready: 'scheduling',
   on_rescheduling: 'scheduling',
   ongoing: 'execution',
   finished: 'execution',
@@ -38,6 +41,7 @@ export const STATUS_LABELS: Record<CallStatus, string> = {
   on_scheduling: 'On scheduling',
   scheduled: 'Scheduled',
   confirmed: 'Confirmed',
+  research_ready: 'Research data ready',
   on_rescheduling: 'On rescheduling',
   ongoing: 'Ongoing',
   finished: 'Finished',
@@ -52,6 +56,7 @@ export const SHORT_STATUS_LABELS: Record<CallStatus, string> = {
   on_scheduling: 'Scheduling',
   scheduled: 'Scheduled',
   confirmed: 'Confirmed',
+  research_ready: 'Research ready',
   on_rescheduling: 'Rescheduling',
   ongoing: 'Ongoing',
   finished: 'Done',
@@ -69,7 +74,7 @@ export const STAGE_LABELS: Record<Stage, string> = {
 };
 
 export const STAGE_STATUSES: Record<Stage, CallStatus[]> = {
-  scheduling: ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'],
+  scheduling: ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling'],
   execution: ['ongoing', 'finished'],
   invoicing: ['invoice_submit', 'invoice_approve', 'process_to_bank'],
   cancelled: ['cancelled'],
@@ -79,6 +84,7 @@ export const STAGE_STATUSES: Record<Stage, CallStatus[]> = {
 export const BLOCKING_STATUSES: readonly CallStatus[] = [
   'scheduled',
   'confirmed',
+  'research_ready',
   'on_rescheduling',
   'ongoing',
   'finished',
@@ -99,10 +105,11 @@ export const EXPERT_REQUIRED_STATUSES = BLOCKING_STATUSES;
  * Managers carry the scheduling steps for the Associates they oversee, as well as their own.
  */
 export const WAITING_STATUSES: Record<Role, readonly CallStatus[]> = {
-  founder: ['finished', 'invoice_submit', 'invoice_approve'],
+  // A confirmed call waits for the Founder's research data before the Expert can start.
+  founder: ['confirmed', 'finished', 'invoice_submit', 'invoice_approve'],
   manager: ['on_scheduling', 'on_rescheduling'],
   associate: ['on_scheduling', 'on_rescheduling'],
-  expert: ['scheduled', 'confirmed', 'ongoing'],
+  expert: ['scheduled', 'research_ready', 'ongoing'],
 };
 
 export const CALL_DURATIONS = [15, 30, 45, 60] as const;
@@ -114,21 +121,44 @@ export const TERMINAL_STATUSES: readonly CallStatus[] = ['process_to_bank', 'can
  * A call can still be called off while it has not started (§4.5). Cancelling is
  * final: the Expert's time is freed and the call earns nothing.
  */
-export const CANCELLABLE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling'];
+export const CANCELLABLE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling'];
 
 /**
  * The two halves of the Calls page (§9.1): calls still on their way (being
  * scheduled or running), and calls that took place, where the money is.
  */
-export const ACTIVE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling', 'ongoing'];
+export const ACTIVE_STATUSES: readonly CallStatus[] = ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling', 'ongoing'];
 export const FINANCE_STATUSES: readonly CallStatus[] = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
 
 /** The invoicing stage. Experts never see it: to them these calls are simply finished. */
 export const INVOICING_STATUSES: readonly CallStatus[] = STAGE_STATUSES.invoicing;
 
+/**
+ * Steps some roles never see, and what those roles see instead: Experts see
+ * invoiced calls as finished; Associates and Managers see a call whose research
+ * data is ready as simply confirmed.
+ */
+const SHOWN_AS: Record<Role, Partial<Record<CallStatus, CallStatus>>> = {
+  founder: {},
+  manager: { research_ready: 'confirmed' },
+  associate: { research_ready: 'confirmed' },
+  expert: { invoice_submit: 'finished', invoice_approve: 'finished', process_to_bank: 'finished' },
+};
+
+/** The statuses a role never sees (their history rows are left out). */
+export function hiddenStatusesFor(role: Role): CallStatus[] {
+  return Object.keys(SHOWN_AS[role]) as CallStatus[];
+}
+
 /** The status a role is shown for a call. */
 export function statusForRole(role: Role, status: CallStatus): CallStatus {
-  return role === 'expert' && INVOICING_STATUSES.includes(status) ? 'finished' : status;
+  return SHOWN_AS[role][status] ?? status;
+}
+
+/** The statuses of a stage a role sees. */
+export function stageStatusesForRole(role: Role, stage: Stage): CallStatus[] {
+  const hidden = hiddenStatusesFor(role);
+  return STAGE_STATUSES[stage].filter((s) => !hidden.includes(s));
 }
 
 /** The stages a role sees (Experts: scheduling and execution only). */
@@ -137,13 +167,14 @@ export function stagesForRole(role: Role): Stage[] {
 }
 
 /**
- * Turns a status filter from a role into the statuses to query: for Experts,
- * `finished` also matches invoiced calls and invoicing statuses match nothing.
+ * Turns a status filter from a role into the statuses to query: a status the
+ * role sees also matches the hidden ones shown as it (for Experts, `finished`
+ * matches invoiced calls), and a hidden status matches nothing.
  */
 export function statusFilterForRole(role: Role, statuses: CallStatus[]): CallStatus[] {
-  if (role !== 'expert') return statuses;
-  const visible = statuses.filter((s) => !INVOICING_STATUSES.includes(s));
-  return visible.includes('finished') ? [...visible, ...INVOICING_STATUSES] : visible;
+  const hidden = hiddenStatusesFor(role);
+  const visible = statuses.filter((s) => !hidden.includes(s));
+  return [...visible, ...hidden.filter((h) => visible.includes(statusForRole(role, h)))];
 }
 
 /**

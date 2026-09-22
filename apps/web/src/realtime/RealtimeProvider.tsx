@@ -100,6 +100,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (!knownInList) void queryClient.invalidateQueries({ queryKey: ['calls', 'list'] });
       // Totals and paid marks on the Finance tab move with every change.
       void queryClient.invalidateQueries({ queryKey: ['calls', 'finance'] });
+      void queryClient.invalidateQueries({ queryKey: qk.calls.cycle });
       void queryClient.invalidateQueries({ queryKey: qk.dashboard });
       void queryClient.invalidateQueries({ queryKey: qk.calendar.all });
     };

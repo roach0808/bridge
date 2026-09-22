@@ -1,46 +1,104 @@
 import CheckCircleRounded from '@mui/icons-material/CheckCircleRounded';
 import ScheduleRounded from '@mui/icons-material/ScheduleRounded';
-import { Box, Tooltip } from '@mui/material';
+import { Box, Tooltip, Typography } from '@mui/material';
 import { INVOICING_STATUSES, type CallDTO, type PayoutLine, type Role } from '@god/shared';
 import { formatDateTime, formatUsd } from '@/lib/time';
 
-export interface CallMoney {
-  label: string;
-  value: string;
-  hint: string;
-  color: string;
-}
-
 /**
- * What the call is worth, as soon as that means anything: the expected income
- * once it is finished (rate × real duration), and what really arrived once the
- * bank has paid. Experts never see the call's income, only their own pay.
+ * What a call brings in, once it has taken place: the expected income (the
+ * rate × the minutes it really took) and the real income once the bank has
+ * paid. Null for Experts and Associates, who never see it, and before the call
+ * took place.
  */
-export function callMoney(call: CallDTO, role: Role): CallMoney | null {
-  if (role === 'expert') return null;
-  if (call.status === 'cancelled') {
-    return { label: 'Income', value: 'None — cancelled', hint: 'A cancelled call earns nothing', color: 'text.secondary' };
-  }
-  const done = call.status === 'finished' || INVOICING_STATUSES.includes(call.status);
-  if (!done) return null;
-  if (call.realIncome !== null) {
-    return { label: 'Real income', value: formatUsd(call.realIncome), hint: 'What reached the bank', color: 'success.main' };
-  }
-  if (call.expectedPrice !== null) {
-    return {
-      label: 'Expected income',
-      value: formatUsd(call.expectedPrice),
-      hint: `Rate × the call’s real duration (${call.actualDurationMinutes ?? call.durationMinutes} min)`,
-      color: 'primary.main',
-    };
-  }
-  return { label: 'Expected income', value: 'No rate yet', hint: 'Set the Profile’s rate on this platform', color: 'warning.main' };
+export interface CallIncome {
+  rate: number | null;
+  minutes: number | null;
+  expected: number | null;
+  real: number | null;
+  cancelled: boolean;
 }
 
-/** A pill for the money of a call, used on its panel in lists and on its page. */
-export function MoneyPill({ money, size = 'medium' }: { money: CallMoney; size?: 'small' | 'medium' }) {
+export function callIncome(call: CallDTO, role: Role): CallIncome | null {
+  if (role === 'expert' || role === 'associate') return null;
+  const cancelled = call.status === 'cancelled';
+  if (!cancelled && call.status !== 'finished' && !INVOICING_STATUSES.includes(call.status)) return null;
+  return {
+    rate: call.rateOverride ?? call.platformRate,
+    minutes: call.actualDurationMinutes,
+    expected: call.expectedPrice,
+    real: call.realIncome,
+    cancelled,
+  };
+}
+
+/** "$1,000/h × 33 min = $550", or why there is no figure yet. */
+export function expectedFormula(income: CallIncome): string {
+  if (income.cancelled) return 'None — cancelled';
+  if (income.rate === null) return 'No rate yet';
+  const sum = `${formatUsd(income.rate)}/h × ${income.minutes ?? '—'} min`;
+  return income.expected === null ? sum : `${sum} = ${formatUsd(income.expected)}`;
+}
+
+/** The two income figures side by side, as a pill (header, lists) or as lines (details). */
+export function IncomeFigures({ income, variant = 'pill' }: { income: CallIncome; variant?: 'pill' | 'lines' | 'cell' }) {
+  if (income.cancelled) {
+    return (
+      <Typography variant="body2" color="text.secondary" component="span">
+        None — cancelled
+      </Typography>
+    );
+  }
+  const real = income.real === null ? 'waiting for bank' : formatUsd(income.real);
+  const gap = income.real !== null && income.expected !== null && income.real !== income.expected ? income.real - income.expected : null;
+
+  if (variant === 'lines') {
+    return (
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'auto 1fr', columnGap: 1.25, rowGap: 0.25, alignItems: 'baseline' }}>
+        <Typography variant="caption" color="text.secondary">
+          Expected
+        </Typography>
+        <Typography variant="body2" fontWeight={600} sx={{ color: income.rate === null ? 'warning.main' : 'primary.main', fontVariantNumeric: 'tabular-nums' }}>
+          {expectedFormula(income)}
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          Real
+        </Typography>
+        <Typography variant="body2" fontWeight={600} sx={{ color: income.real === null ? 'text.disabled' : 'success.main', fontVariantNumeric: 'tabular-nums' }}>
+          {real}
+          {gap !== null && (
+            <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.75 }}>
+              ({gap > 0 ? '+' : ''}
+              {formatUsd(gap)})
+            </Typography>
+          )}
+        </Typography>
+      </Box>
+    );
+  }
+
+  if (variant === 'cell') {
+    return (
+      <Tooltip title={`Expected: ${expectedFormula(income)}`}>
+        <Box sx={{ whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums' }}>
+          <Typography variant="body2" fontWeight={600} sx={{ color: income.rate === null ? 'warning.main' : 'primary.main' }}>
+            {income.expected === null ? (income.rate === null ? 'No rate' : '—') : formatUsd(income.expected)}
+            <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+              exp.
+            </Typography>
+          </Typography>
+          <Typography variant="body2" fontWeight={600} sx={{ color: income.real === null ? 'text.disabled' : 'success.main' }}>
+            {income.real === null ? '—' : formatUsd(income.real)}
+            <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+              real
+            </Typography>
+          </Typography>
+        </Box>
+      </Tooltip>
+    );
+  }
+
   return (
-    <Tooltip title={money.hint}>
+    <Tooltip title={`Expected: ${expectedFormula(income)} · Real: ${real}`}>
       <Box
         component="span"
         sx={{
@@ -51,23 +109,31 @@ export function MoneyPill({ money, size = 'medium' }: { money: CallMoney; size?:
           py: 0.25,
           borderRadius: 999,
           bgcolor: 'action.selected',
-          color: money.color,
           fontWeight: 700,
-          fontSize: size === 'small' ? '0.78rem' : '0.875rem',
+          fontSize: '0.8rem',
           whiteSpace: 'nowrap',
+          fontVariantNumeric: 'tabular-nums',
         }}
       >
-        <Box component="span" sx={{ fontSize: size === 'small' ? '0.68rem' : '0.75rem', fontWeight: 600, opacity: 0.85 }}>
-          {money.label}
+        <Box component="span" sx={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.8 }}>
+          Expected
         </Box>
-        {money.value}
+        <Box component="span" sx={{ color: income.rate === null ? 'warning.main' : 'primary.main' }}>
+          {income.expected === null ? (income.rate === null ? 'no rate' : '—') : formatUsd(income.expected)}
+        </Box>
+        <Box component="span" sx={{ fontSize: '0.7rem', fontWeight: 600, opacity: 0.8 }}>
+          · Real
+        </Box>
+        <Box component="span" sx={{ color: income.real === null ? 'text.disabled' : 'success.main' }}>
+          {income.real === null ? '—' : formatUsd(income.real)}
+        </Box>
       </Box>
     </Tooltip>
   );
 }
 
 /** Paid (green, with the date on hover) or not paid yet (quiet). */
-export function PaidMark({ line, zone, compact }: { line: PayoutLine; zone: string; compact?: boolean }) {
+export function PaidMark({ line, zone, compact }: { line: Pick<PayoutLine, 'paidAt'>; zone: string; compact?: boolean }) {
   const paid = Boolean(line.paidAt);
   return (
     <Tooltip title={paid ? `Paid ${formatDateTime(line.paidAt!, zone)}` : 'Not paid yet'}>

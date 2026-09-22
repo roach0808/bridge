@@ -182,6 +182,7 @@ interface FormState {
   platformAssociateName: string;
   projectDetails: string;
   notes: string;
+  meetingDetails: string;
   date: DateTime | null;
   time: DateTime | null;
   durationMinutes: number;
@@ -209,6 +210,7 @@ export default function NewCallPage() {
       platformAssociateName: '',
       projectDetails: '',
       notes: '',
+      meetingDetails: '',
       date: validStart,
       time: validStart,
       durationMinutes: (CALL_DURATIONS as readonly number[]).includes(duration) ? duration : 60,
@@ -249,6 +251,7 @@ export default function NewCallPage() {
         projectDetails: form.projectDetails,
         platformAssociateName: form.platformAssociateName,
         notes: form.notes || null,
+        meetingDetails: form.meetingDetails.trim() || null,
       }),
     onSuccess: (call) => {
       void queryClient.invalidateQueries({ queryKey: qk.calls.all });
@@ -445,6 +448,17 @@ export default function NewCallPage() {
                 onChange={(e) => set('projectDetails', e.target.value)}
                 error={Boolean(errors.projectDetails)}
                 helperText={errors.projectDetails ?? 'The project brief from the platform'}
+              />
+              <TextField
+                sx={{ gridColumn: '1 / -1' }}
+                label="Meeting details (optional)"
+                multiline
+                minRows={2}
+                placeholder="Meeting link, passcode, dial-in…"
+                helperText="Everyone on the call sees this, the Expert included. You can add it later."
+                value={form.meetingDetails}
+                onChange={(e) => set('meetingDetails', e.target.value)}
+                slotProps={{ htmlInput: { maxLength: 2000 } }}
               />
               <TextField
                 sx={{ gridColumn: '1 / -1' }}

@@ -59,7 +59,7 @@ usersRouter.get('/users/me/team', requireRole('manager'), async (req, res) => {
     select: userSelect,
     orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
   });
-  res.json(team.map((u) => toUserDTO(u)));
+  res.json(team.map((u) => toUserDTO(u, actor)));
 });
 
 usersRouter.get('/users', async (req, res) => {
@@ -77,7 +77,7 @@ usersRouter.get('/users', async (req, res) => {
     select: userSelect,
     orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
   });
-  res.json(users.map((u) => toUserDTO(u, actor.role === 'founder')));
+  res.json(users.map((u) => toUserDTO(u, actor)));
 });
 
 usersRouter.post('/users', async (req, res) => {
@@ -100,7 +100,7 @@ usersRouter.post('/users', async (req, res) => {
   if (input.timeZone && input.role !== 'expert') {
     throw badRequest('Only Experts have their own time zone', { issues: [{ path: 'timeZone', message: 'Experts only' }] });
   }
-  assertPaySettings(actor, input.role, input);
+  assertPaySettings(actor, { role: input.role, managerId }, input);
   const avatarId = input.avatarId ?? defaultAvatarFor(input.role);
   if (!isAvatarForAudience(avatarId, input.role)) {
     throw badRequest('Choose an avatar from the role’s set', { issues: [{ path: 'avatarId', message: 'Wrong avatar set' }] });
@@ -129,26 +129,31 @@ usersRouter.post('/users', async (req, res) => {
     },
     select: userSelect,
   });
-  res.status(201).json(toUserDTO(user, actor.role === 'founder'));
+  res.status(201).json(toUserDTO(user, actor));
 });
 
 usersRouter.get('/users/:id', async (req, res) => {
   const actor = actorOf(req);
   const user = await loadVisibleUser(actor, idParam(req));
-  res.json(toUserDTO(user, actor.role === 'founder'));
+  res.json(toUserDTO(user, actor));
 });
 
 /**
- * Pay is the Founder's to set (§3.1): an hourly rate for Experts, a share of
- * each call's real income for Associates.
+ * Pay (§3.1): the Founder sets an Expert's hourly rate; an Associate's portion
+ * of their Manager's share is set by the Founder or by that Manager.
  */
 function assertPaySettings(
   actor: Actor,
-  role: string,
+  target: { role: string; managerId: string | null },
   input: { hourlyRate?: number | null; sharePercent?: number | null; applyRateToUnpricedCalls?: boolean },
 ) {
-  const touches = input.hourlyRate !== undefined || input.sharePercent !== undefined || input.applyRateToUnpricedCalls;
-  if (touches && actor.role !== 'founder') throw forbidden('Only the Founder sets what people are paid');
+  const role = target.role;
+  if ((input.hourlyRate !== undefined || input.applyRateToUnpricedCalls) && actor.role !== 'founder') {
+    throw forbidden('Only the Founder sets an Expert’s rate');
+  }
+  if (input.sharePercent !== undefined && actor.role !== 'founder' && !(actor.role === 'manager' && target.managerId === actor.id)) {
+    throw forbidden('Only the Founder or the Associate’s own Manager sets their share');
+  }
   if (input.hourlyRate != null && role !== 'expert') {
     throw badRequest('Only Experts have an hourly rate', { issues: [{ path: 'hourlyRate', message: 'Experts only' }] });
   }
@@ -269,7 +274,7 @@ usersRouter.patch('/users/:id', async (req, res) => {
     if (target.role !== 'associate') throw badRequest('Only Associates have a Manager');
     await assertManager(input.managerId);
   }
-  assertPaySettings(actor, target.role, input);
+  assertPaySettings(actor, { role: target.role, managerId: target.managerId }, input);
   if (input.nickname) {
     const taken = await prisma.user.findFirst({
       where: { nickname: { equals: input.nickname, mode: 'insensitive' }, NOT: { id: target.id } },
@@ -304,5 +309,5 @@ usersRouter.patch('/users/:id', async (req, res) => {
     return user;
   });
   if (input.isActive === false) disconnectUser(target.id);
-  res.json(toUserDTO(updated, actor.role === 'founder'));
+  res.json(toUserDTO(updated, actor));
 });

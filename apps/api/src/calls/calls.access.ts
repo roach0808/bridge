@@ -1,7 +1,8 @@
 import {
+  ACTIVE_STATUSES,
   FINANCE_STATUSES,
-  INVOICING_STATUSES,
   STATUS_STAGE,
+  hiddenStatusesFor,
   allowedTransitions,
   type CallPermissions,
   type CallStatus,
@@ -39,9 +40,13 @@ export function visibleCallsWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.Cal
   }
 }
 
-/** Status-history rows a user may see: Experts don't see the invoicing steps. */
+/**
+ * Status-history rows a user may see: Experts don't see the invoicing steps, and
+ * Associates and Managers don't see the research step (§2.3).
+ */
 export function visibleHistoryWhere(actor: Pick<Actor, 'role'>): Prisma.CallStatusHistoryWhereInput {
-  return actor.role === 'expert' ? { toStatus: { notIn: [...INVOICING_STATUSES] } } : {};
+  const hidden = hiddenStatusesFor(actor.role);
+  return hidden.length ? { toStatus: { notIn: hidden } } : {};
 }
 
 export function canViewCall(actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape): boolean {
@@ -93,8 +98,11 @@ export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAcc
     // The Associate may swap the Expert for as long as they own the scheduling stage.
     reassignExpert: (supervises || (actor.role === 'associate' && call.associateId === actor.id)) && scheduling,
     editIncome: actor.role === 'founder',
-    editGptLink: actor.role === 'founder',
-    editRate: ownsScheduling,
+    editResearchLink: actor.role === 'founder',
+    // Associates never see a call's rate or income.
+    editRate: ownsScheduling && actor.role !== 'associate',
+    // The meeting details matter until the call has taken place; the Founder can always correct them.
+    editMeeting: ownsScheduling && (ACTIVE_STATUSES.includes(call.status) || actor.role === 'founder'),
     // The Expert's rate is fixed when the call finishes; the Founder may still correct it until the Expert is paid.
     editExpertRate: actor.role === 'founder' && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,
   };

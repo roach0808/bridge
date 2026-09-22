@@ -52,6 +52,8 @@ import type {
   FinanceCallsPage,
   FinanceCallsQuery,
   MarkPayoutsInput,
+  CurrentCycleDTO,
+  PayCycleDTO,
 } from '@god/shared';
 import { HttpClient, type ClientOptions, type Query } from './http';
 
@@ -196,7 +198,7 @@ export function createApiClient(options: ClientOptions) {
       setPhoto: (id: string, dataUrl: string) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/photo`, { body: { dataUrl } }),
       removePhoto: (id: string) => del<ProfileDTO>(`/profiles/${enc(id)}/photo`),
-      /** Founder: a Profile's registration status and/or rate (USD per hour) on one platform. */
+      /** A Profile's registration status on one platform (Founder, its Associate, their Manager); the rate (USD per hour) is the Founder's. */
       /** Founder: deactivate a Profile (Founders only see it afterwards) or bring it back. */
       setActive: (id: string, isActive: boolean) => patch<ProfileDTO>(`/profiles/${enc(id)}/active`, { isActive }),
       setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number | null }) =>
@@ -274,6 +276,12 @@ export function createApiClient(options: ClientOptions) {
       calls: (query?: FinanceCallsQuery) => get<FinanceCallsPage>('/finance/calls', query as Query),
       /** Marks one person's pay on several calls as paid (or not paid after all). */
       markPaid: (input: MarkPayoutsInput) => post<{ updated: number }>('/finance/payouts', input),
+      /** Founder: the open payment cycle and what closing it would pay. */
+      currentCycle: () => get<CurrentCycleDTO>('/finance/cycle'),
+      /** Founder: pays everyone owed and closes the month. */
+      closeCycle: (label: string) => post<PayCycleDTO>('/finance/cycles', { label }),
+      /** Closed months: all of them for the Founder, the caller's own payments for anyone else. */
+      cycles: () => get<PayCycleDTO[]>('/finance/cycles'),
     },
 
     stats: {

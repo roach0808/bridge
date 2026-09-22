@@ -20,6 +20,7 @@ import { fromDateOnly, idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import {
   canAssignProfile,
+  canEditProfilePlatforms,
   platformRefOrder,
   platformRefSelect,
   profileFounderCounts,
@@ -305,32 +306,28 @@ profilesRouter.delete('/profiles/:id', requireRole('founder'), async (req, res) 
   res.status(204).end();
 });
 
-/** Founder sets a profile's standing and rate on one platform. */
-profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder'), async (req, res) => {
+/**
+ * A Profile's standing on one platform: the Founder, the Associate looking after
+ * it and that Associate's Manager set it. The rate is the Founder's alone; a call
+ * cannot be invoiced without one (409 rate_required).
+ */
+profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder', 'manager', 'associate'), async (req, res) => {
   const actor = actorOf(req);
   const profile = await loadVisible(actor, idParam(req));
+  if (!canEditProfilePlatforms(actor, profile.associate)) {
+    throw forbidden('Only the Founder, or the Associate looking after this profile and their Manager, set its platforms');
+  }
   const platformId = idParam(req, 'platformId');
   const platform = platformId && (await prisma.platform.findUnique({ where: { id: platformId }, select: { id: true } }));
   if (!platform) throw notFound('Platform');
   const { status, rate } = parseBody(profilePlatformStatusSchema, req);
-  const existing = await prisma.profilePlatformStatus.findUnique({
-    where: { profileId_platformId: { profileId: profile.id, platformId: platform.id } },
-    select: { status: true, rate: true },
-  });
-  // A registered Profile must have a rate; it stays editable afterwards.
-  const nextStatus = status ?? existing?.status ?? 'not_registered';
-  const nextRate = rate !== undefined ? rate : (existing?.rate ?? null);
-  if (nextStatus === 'registered' && nextRate === null) {
-    throw badRequest('Set the hourly rate to mark this profile registered', {
-      issues: [{ path: 'rate', message: 'A rate is required once registered (you can change it later)' }],
-    });
-  }
+  if (rate !== undefined && actor.role !== 'founder') throw forbidden('Only the Founder sets a profile’s rate');
   await prisma.profilePlatformStatus.upsert({
     where: { profileId_platformId: { profileId: profile.id, platformId: platform.id } },
-    create: { profileId: profile.id, platformId: platform.id, status: nextStatus, rate: nextRate },
+    create: { profileId: profile.id, platformId: platform.id, status: status ?? 'not_registered', rate: rate ?? null },
     update: { status, rate },
   });
-  res.json(toProfileDTO(await loadVisible(actor, profile.id), await platformRefs(), actor));
+  res.json(toProfileDTO(await loadVisible(actor, profile.id), await platformsFor(actor), actor));
 });
 
 /**

@@ -86,7 +86,7 @@ callsRouter.get('/calls/:id/history', async (req, res) => {
     include: historyInclude,
     orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
   });
-  res.json(history.map(toHistoryDTO));
+  res.json(history.map((h) => toHistoryDTO(h, actor.role)));
 });
 
 // --- Messages ---------------------------------------------------------------

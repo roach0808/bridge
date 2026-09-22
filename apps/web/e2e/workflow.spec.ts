@@ -72,9 +72,19 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
   // 2. Expert finishes.
   const expert = await signIn(browser, 'quill@god.local');
   await expert.goto(url);
-  // The expert confirms the time first; only a confirmed call can be finished.
+  // The expert confirms the time first.
   await transition(expert, 'Confirm time');
   await expect(observed).toHaveAttribute('data-status', 'confirmed', { timeout: 5_000 });
+
+  // The Founder prepares the research data; the Manager never sees that step.
+  const founder = await signIn(browser, 'founder@god.local');
+  await founder.goto(url);
+  await transition(founder, 'Research data ready', async (dialog) => {
+    await dialog.getByLabel('Research data link').fill('https://chatgpt.com/share/e2e-brief');
+  });
+  await expect(expert.getByTestId('call-status')).toHaveAttribute('data-status', 'research_ready', { timeout: 5_000 });
+  await expect(observed).toHaveAttribute('data-status', 'confirmed');
+
   // Finishing asks only for the real duration (prefilled with the booking).
   await expert.getByRole('button', { name: 'Mark finished' }).click();
   await expert.getByRole('dialog').getByLabel('Actual duration (minutes)').fill('');
@@ -96,8 +106,7 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
     data: { status: 'registered', rate: 1000 },
   });
   expect(rateSet.ok()).toBeTruthy();
-  const founder = await signIn(browser, 'founder@god.local');
-  await founder.goto(url);
+  await founder.reload();
   await transition(founder, 'Mark invoice submitted');
   await expect(observed).toHaveAttribute('data-status', 'invoice_submit', { timeout: 5_000 });
   await transition(founder, 'Mark invoice approved');

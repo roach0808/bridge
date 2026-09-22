@@ -1,3 +1,4 @@
+import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded';
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
 import PaidOutlined from '@mui/icons-material/PaidOutlined';
 import {
@@ -7,6 +8,10 @@ import {
   Card,
   Checkbox,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
   IconButton,
   LinearProgress,
@@ -19,14 +24,24 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { PAYEE_LABELS, type CallDTO, type FinanceCallsQuery, type FinanceSummary, type Payee, type Role } from '@god/shared';
+import {
+  PAYEE_LABELS,
+  type CallDTO,
+  type CurrentCycleDTO,
+  type FinanceCallsQuery,
+  type FinanceSummary,
+  type PayCycleLine,
+  type Payee,
+  type Role,
+} from '@god/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { ConfirmDialog, EmptyState, ErrorState, LoadingRows } from '@/components/common';
@@ -36,9 +51,9 @@ import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
-import { durationLabel, formatUsd, whenAndLength, zoneAbbr } from '@/lib/time';
+import { durationLabel, formatDate, formatUsd, whenAndLength, zoneAbbr } from '@/lib/time';
 import { FilterChips, SearchField, StatTile, TableSurface, useDebouncedValue, useIsPhone } from '../admin/adminShared';
-import { PaidMark, callMoney, formatPercent } from './money';
+import { IncomeFigures, PaidMark, callIncome, formatPercent } from './money';
 
 type PaidFilter = 'all' | 'unpaid' | 'paid';
 
@@ -111,6 +126,7 @@ export function FinanceTab() {
 
   return (
     <Box>
+      {me.role === 'founder' && <CycleTiles />}
       {data && <SummaryTiles summary={data.summary} role={me.role} />}
 
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} alignItems={{ md: 'center' }} sx={{ mb: 2, '& .MuiOutlinedInput-root': { bgcolor: 'background.paper' } }}>
@@ -198,7 +214,7 @@ export function FinanceTab() {
                   )}
                   <TableCell sx={{ minWidth: 170 }}>Call</TableCell>
                   <TableCell>Status</TableCell>
-                  {me.role !== 'expert' && <TableCell>Income</TableCell>}
+                  {showsIncome(me.role) && <TableCell>Income</TableCell>}
                   {COLUMNS[me.role].map((c) => (
                     <TableCell key={c.key} sx={{ minWidth: c.width }}>
                       {c.label}
@@ -241,33 +257,18 @@ export function FinanceTab() {
 
 function SummaryTiles({ summary: s, role }: { summary: FinanceSummary; role: Role }) {
   const tiles: Array<{ label: string; value: ReactNode; footer?: ReactNode; color?: string }> = [];
-  const owed = (paid: number, unpaid: number, paidWord: string, unpaidWord: string) => (
+  const owed = (paid: number, unpaid: number, paidWord: string, unpaidWord: string, expected?: number) => (
     <Typography variant="body2" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-      {formatUsd(paid)} {paidWord} · <Box component="span" sx={{ color: unpaid > 0 ? 'warning.main' : 'text.secondary', fontWeight: 600 }}>{formatUsd(unpaid)} {unpaidWord}</Box>
+      {formatUsd(paid)} {paidWord} ·{' '}
+      <Box component="span" sx={{ color: unpaid > 0 ? 'warning.main' : 'text.secondary', fontWeight: 600 }}>
+        {formatUsd(unpaid)} {unpaidWord}
+      </Box>
+      {expected ? ` · ${formatUsd(expected)} expected once the bank pays` : ''}
     </Typography>
   );
 
-  if (s.income) {
-    tiles.push({
-      label: 'Income',
-      value: formatUsd(s.income.real),
-      color: '#3fb68b',
-      footer: (
-        <Typography variant="body2" color="text.secondary">
-          received · {formatUsd(s.income.expected)} expected still to come
-          {s.income.unpriced > 0 ? ` · ${s.income.unpriced} without a rate` : ''}
-        </Typography>
-      ),
-    });
-  }
   if (role === 'founder') {
-    const paidSoFar = (n: number) => (
-      <Typography variant="body2" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
-        {formatUsd(n)} paid so far
-      </Typography>
-    );
-    if (s.expert) tiles.push({ label: 'To pay Experts', value: formatUsd(s.expert.unpaid), color: '#e0913a', footer: paidSoFar(s.expert.paid) });
-    if (s.manager) tiles.push({ label: 'To pay Managers', value: formatUsd(s.manager.unpaid), color: '#e0913a', footer: paidSoFar(s.manager.paid) });
+    // The Founder's month (income, paid out, balance, what is owed) is the cycle panel above.
     if (s.associate)
       tiles.push({
         label: 'Associates’ part, with their Managers',
@@ -278,14 +279,42 @@ function SummaryTiles({ summary: s, role }: { summary: FinanceSummary; role: Rol
           </Typography>
         ),
       });
+    if (s.income && s.income.unpriced > 0)
+      tiles.push({ label: 'Calls without a rate', value: s.income.unpriced, color: '#e0913a', footer: <Typography variant="body2" color="text.secondary">no expected income until the Profile has a rate</Typography> });
   }
   if (role === 'manager') {
-    if (s.manager) tiles.push({ label: 'Your share', value: formatUsd(s.manager.paid + s.manager.unpaid), color: '#5b8def', footer: owed(s.manager.paid, s.manager.unpaid, 'received', 'owed to you') });
-    if (s.associate) tiles.push({ label: 'Your Associates’ part', value: formatUsd(s.associate.unpaid), color: '#e0913a', footer: owed(s.associate.paid, s.associate.unpaid, 'paid', 'to pay') });
-    if (s.keeps !== null) tiles.push({ label: 'Yours to keep', value: formatUsd(s.keeps), footer: <Typography variant="body2" color="text.secondary">after the Associates’ part</Typography> });
+    if (s.income)
+      tiles.push({
+        label: 'Income',
+        value: formatUsd(s.income.real),
+        color: '#3fb68b',
+        footer: (
+          <Typography variant="body2" color="text.secondary">
+            received · {formatUsd(s.income.expected)} expected still to come
+          </Typography>
+        ),
+      });
+    if (s.manager)
+      tiles.push({ label: 'Your share', value: formatUsd(s.manager.paid + s.manager.unpaid), color: '#5b8def', footer: owed(s.manager.paid, s.manager.unpaid, 'received', 'owed to you', s.manager.expected) });
+    if (s.associate)
+      tiles.push({ label: 'Your Associates’ part', value: formatUsd(s.associate.unpaid), color: '#e0913a', footer: owed(s.associate.paid, s.associate.unpaid, 'paid', 'to pay', s.associate.expected) });
+    if (s.keeps !== null) tiles.push({ label: 'Yours to keep', value: formatUsd(s.keeps), footer: <Typography variant="body2" color="text.secondary">after the Associates’ part, on calls paid to bank</Typography> });
   }
-  if (role === 'associate' && s.associate) {
-    tiles.push({ label: 'Your part', value: formatUsd(s.associate.paid + s.associate.unpaid), color: '#5b8def', footer: owed(s.associate.paid, s.associate.unpaid, 'paid', 'to come') });
+  if (role === 'associate') {
+    // An Associate sees their Manager's share of their calls, and their own part of it — never the income.
+    if (s.manager)
+      tiles.push({
+        label: 'Your Manager’s share of your calls',
+        value: formatUsd(s.manager.paid + s.manager.unpaid),
+        color: '#8d6cf0',
+        footer: (
+          <Typography variant="body2" color="text.secondary">
+            {s.manager.expected ? `${formatUsd(s.manager.expected)} more expected once the bank pays` : 'on calls paid to bank'}
+          </Typography>
+        ),
+      });
+    if (s.associate)
+      tiles.push({ label: 'Your part', value: formatUsd(s.associate.paid + s.associate.unpaid), color: '#5b8def', footer: owed(s.associate.paid, s.associate.unpaid, 'paid', 'to come', s.associate.expected) });
   }
   if (role === 'expert' && s.expert) {
     tiles.push({
@@ -301,6 +330,7 @@ function SummaryTiles({ summary: s, role }: { summary: FinanceSummary; role: Rol
     });
     tiles.push({ label: 'Not paid yet', value: formatUsd(s.expert.unpaid), color: '#e0913a', footer: owed(s.expert.paid, s.expert.unpaid, 'paid', 'to come') });
   }
+  if (!tiles.length) return null;
 
   return (
     <Grid container spacing={2} sx={{ mb: 2.5 }}>
@@ -315,18 +345,196 @@ function SummaryTiles({ summary: s, role }: { summary: FinanceSummary; role: Rol
 
 // ---------------------------------------------------------------------------
 
+/**
+ * The Founder's month: what came in, what went out and the balance since the
+ * last payment day, what is still owed, and the button that pays everyone and
+ * starts a new cycle.
+ */
+function CycleTiles() {
+  const { zone } = useAuth();
+  const [closing, setClosing] = useState(false);
+  const query = useQuery({ queryKey: qk.calls.cycle, queryFn: api.finance.currentCycle });
+  const cycle = query.data;
+  if (!cycle) return <LoadingRows rows={1} height={120} />;
+  const owedTo = (kind: Payee) => cycle.toPay.filter((l) => l.kind === kind);
+  const sum = (lines: PayCycleLine[]) => lines.reduce((t, l) => t + l.amount, 0);
+  const since = cycle.startedAt ? `since ${formatDate(cycle.startedAt, zone)}` : 'since the start';
+  const row = (label: string, value: ReactNode, strong?: boolean) => (
+    <Stack direction="row" justifyContent="space-between" alignItems="baseline" spacing={2}>
+      <Typography variant="body2" color="text.secondary">
+        {label}
+      </Typography>
+      <Typography variant={strong ? 'h6' : 'body2'} fontWeight={strong ? 700 : 600} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+        {value}
+      </Typography>
+    </Stack>
+  );
+
+  return (
+    <Box sx={{ mb: 2.5 }}>
+      <Grid container spacing={2}>
+        <Grid size={{ xs: 12, md: 5 }}>
+          <StatTile
+            label={`This payment cycle · ${since}`}
+            color="#3fb68b"
+            value={
+              <Stack spacing={0.5} sx={{ mt: 0.5 }}>
+                {row('Income received', formatUsd(cycle.income))}
+                {row('Paid out', formatUsd(-(cycle.paid.experts + cycle.paid.managers)))}
+                <Box sx={{ borderTop: 1, borderColor: 'divider', pt: 0.5 }}>{row('Current balance', formatUsd(cycle.balance), true)}</Box>
+              </Stack>
+            }
+            footer={
+              <Typography variant="body2" color="text.secondary">
+                {formatUsd(cycle.expectedPipeline)} more expected from calls not paid to bank yet
+              </Typography>
+            }
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3.5 }}>
+          <StatTile
+            label="To pay Experts"
+            color="#e0913a"
+            value={formatUsd(sum(owedTo('expert')))}
+            footer={
+              <Typography variant="body2" color="text.secondary">
+                {formatUsd(cycle.paid.experts)} paid this cycle
+                {cycle.unpricedExpertCalls ? ` · ${cycle.unpricedExpertCalls} call${cycle.unpricedExpertCalls === 1 ? '' : 's'} without a rate` : ''}
+              </Typography>
+            }
+          />
+        </Grid>
+        <Grid size={{ xs: 12, sm: 6, md: 3.5 }}>
+          <StatTile
+            label="To pay Managers"
+            color="#e0913a"
+            value={formatUsd(sum(owedTo('manager')))}
+            footer={
+              <Typography variant="body2" color="text.secondary">
+                {formatUsd(cycle.paid.managers)} paid this cycle
+              </Typography>
+            }
+          />
+        </Grid>
+      </Grid>
+      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems={{ sm: 'center' }} sx={{ mt: 1.5 }}>
+        <Button variant="contained" startIcon={<EventAvailableRounded />} onClick={() => setClosing(true)} sx={{ whiteSpace: 'nowrap', flexShrink: 0 }}>
+          Pay everyone &amp; close the month
+        </Button>
+        <Typography variant="body2" color="text.secondary">
+          On payment day: marks everything owed to Experts and Managers paid, keeps the month on record, and starts the next cycle at zero.
+        </Typography>
+      </Stack>
+      <CloseCycleDialog open={closing} cycle={cycle} onClose={() => setClosing(false)} />
+    </Box>
+  );
+}
+
+function CloseCycleDialog({ open, cycle, onClose }: { open: boolean; cycle: CurrentCycleDTO; onClose: () => void }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [label, setLabel] = useState(cycle.suggestedLabel);
+  useEffect(() => {
+    if (open) setLabel(cycle.suggestedLabel);
+  }, [open, cycle.suggestedLabel]);
+  const total = cycle.toPay.reduce((t, l) => t + l.amount, 0);
+  const close = useMutation({
+    mutationFn: () => api.finance.closeCycle(label.trim()),
+    onSuccess: (saved) => {
+      void queryClient.invalidateQueries({ queryKey: qk.calls.all });
+      toast.success(`${saved.label} closed — ${saved.lines.length} people on the record`);
+      onClose();
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  return (
+    <Dialog open={open} onClose={() => !close.isPending && onClose()} maxWidth="sm" fullWidth>
+      <DialogTitle>Pay everyone and close the month?</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Everything below is marked paid today and each person is told. The month keeps its income, what was paid and
+          the balance on record, and the next cycle starts from zero. Associates are still paid by their Managers.
+        </Typography>
+        <TextField label="Name of this cycle" fullWidth value={label} onChange={(e) => setLabel(e.target.value)} sx={{ mb: 2 }} slotProps={{ htmlInput: { maxLength: 60 } }} />
+        {cycle.toPay.length === 0 ? (
+          <Alert severity="info" sx={{ mb: 1 }}>
+            Nobody is owed anything right now. Closing still records the month.
+          </Alert>
+        ) : (
+          <TableSurface minWidth={360}>
+            <Table size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Person</TableCell>
+                  <TableCell>For</TableCell>
+                  <TableCell align="right">Amount</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {cycle.toPay.map((l) => (
+                  <TableRow key={`${l.kind}:${l.user.id}`}>
+                    <TableCell>
+                      <UserChip user={l.user} size={22} showRole={false} />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" color="text.secondary">
+                        {l.kind === 'expert' ? 'Expert pay' : 'Manager share'} · {l.calls} call{l.calls === 1 ? '' : 's'}
+                      </Typography>
+                    </TableCell>
+                    <TableCell align="right" sx={{ fontVariantNumeric: 'tabular-nums', fontWeight: 600 }}>
+                      {formatUsd(l.amount)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+                <TableRow>
+                  <TableCell colSpan={2} sx={{ fontWeight: 700 }}>
+                    Total
+                  </TableCell>
+                  <TableCell align="right" sx={{ fontWeight: 700, fontVariantNumeric: 'tabular-nums' }}>
+                    {formatUsd(total)}
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </TableSurface>
+        )}
+        {cycle.unpricedExpertCalls > 0 && (
+          <Alert severity="warning" sx={{ mt: 2 }}>
+            {cycle.unpricedExpertCalls} finished call{cycle.unpricedExpertCalls === 1 ? ' has' : 's have'} an Expert without a rate, so
+            {cycle.unpricedExpertCalls === 1 ? ' it stays' : ' they stay'} unpaid until one is set.
+          </Alert>
+        )}
+      </DialogContent>
+      <DialogActions sx={{ px: 3, pb: 2 }}>
+        <Button color="inherit" onClick={onClose} disabled={close.isPending}>
+          Not yet
+        </Button>
+        <Button variant="contained" disabled={close.isPending || !label.trim()} onClick={() => close.mutate()}>
+          {close.isPending ? <CircularProgress size={18} color="inherit" /> : `Pay ${formatUsd(total)} & close`}
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+
 const COLUMNS: Record<Role, Array<{ key: string; label: string; width?: number }>> = {
   founder: [
     { key: 'expert', label: 'Expert', width: 150 },
     // The Associate's part is paid out of the Manager's share, so it sits under it.
-    { key: 'manager', label: 'Manager (incl. Associate’s part)', width: 200 },
+    { key: 'manager', label: 'Manager (incl. Associate’s part)', width: 210 },
   ],
   manager: [
     { key: 'mine', label: 'Your share', width: 150 },
     { key: 'associate', label: 'Associate’s part', width: 170 },
     { key: 'keeps', label: 'You keep', width: 100 },
   ],
-  associate: [{ key: 'mine', label: 'Your part', width: 150 }],
+  associate: [
+    { key: 'managerShare', label: 'Manager’s share', width: 150 },
+    { key: 'mine', label: 'Your part', width: 150 },
+  ],
   expert: [
     { key: 'minutes', label: 'Duration', width: 90 },
     { key: 'rate', label: 'Rate', width: 90 },
@@ -334,25 +542,30 @@ const COLUMNS: Record<Role, Array<{ key: string; label: string; width?: number }
   ],
 };
 
-/** A payout that only exists once the bank has paid. */
-const AfterBank = () => (
-  <Tooltip title="Worked out from the real income once the call is paid to bank">
-    <Typography variant="caption" color="text.disabled">
-      After bank
-    </Typography>
-  </Tooltip>
-);
-
-function Amount({ value, percent, muted }: { value: number | null; percent?: number; muted?: boolean }) {
+/** The final amount, or what it should come to while the bank has not paid (marked "exp."). */
+function Amount({ line, percent, muted }: { line: { amount: number | null; expected: number | null }; percent?: number | null; muted?: boolean }) {
+  const expectedOnly = line.amount === null && line.expected !== null;
+  const value = line.amount ?? line.expected;
   return (
-    <Typography variant="body2" fontWeight={600} sx={{ fontVariantNumeric: 'tabular-nums', color: muted ? 'text.secondary' : 'text.primary' }}>
-      {value === null ? 'No rate' : formatUsd(value)}
-      {percent !== undefined && (
-        <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
-          {formatPercent(percent)}
-        </Typography>
-      )}
-    </Typography>
+    <Tooltip title={expectedOnly ? 'Expected: final once the bank has paid' : ''}>
+      <Typography
+        variant="body2"
+        fontWeight={600}
+        sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap', color: muted || expectedOnly ? 'text.secondary' : 'text.primary' }}
+      >
+        {value === null ? 'No rate' : formatUsd(value)}
+        {expectedOnly && (
+          <Typography component="span" variant="caption" sx={{ ml: 0.5 }}>
+            exp.
+          </Typography>
+        )}
+        {percent != null && (
+          <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>
+            {formatPercent(percent)}
+          </Typography>
+        )}
+      </Typography>
+    </Tooltip>
   );
 }
 
@@ -375,17 +588,24 @@ function FinanceRow({
   onToggle: () => void;
 }) {
   const navigate = useNavigate();
-  const money = callMoney(c, role);
+  const income = callIncome(c, role);
   const { expert, manager, associate } = c.payouts;
   const open = () => navigate(`/calls/${c.id}`);
+  const none = (
+    <Typography variant="caption" color="text.disabled">
+      None
+    </Typography>
+  );
+  const paidMark = (line: { amount: number | null; paidAt: string | null }, compact?: boolean) =>
+    line.amount !== null ? <PaidMark line={line} zone={zone} compact={compact} /> : null;
 
   const cells: Record<string, ReactNode> = {
     expert: expert ? (
       <Stack spacing={0.25}>
         <UserChip user={expert.user} size={20} showRole={false} />
         <Stack direction="row" spacing={1} alignItems="center">
-          <Amount value={expert.amount} />
-          {expert.amount !== null && <PaidMark line={expert} zone={zone} />}
+          <Amount line={expert} />
+          {paidMark(expert)}
         </Stack>
       </Stack>
     ) : (
@@ -395,65 +615,64 @@ function FinanceRow({
       <Stack spacing={0.25}>
         {manager.user ? <UserChip user={manager.user} size={20} showRole={false} /> : <Typography variant="caption" color="text.secondary">No Manager</Typography>}
         <Stack direction="row" spacing={1} alignItems="center">
-          <Amount value={manager.amount} percent={manager.percent} />
-          {manager.user && <PaidMark line={manager} zone={zone} />}
+          <Amount line={manager} percent={manager.percent} />
+          {manager.user && paidMark(manager)}
         </Stack>
         {associate && (
           <Stack direction="row" spacing={0.75} alignItems="center" sx={{ color: 'text.secondary' }}>
             <Typography variant="caption" noWrap>
-              {associate.user.nickname} {formatUsd(associate.amount)} ({formatPercent(associate.percent)})
+              {associate.user.nickname} {formatUsd(associate.amount ?? associate.expected)}
+              {associate.amount === null ? ' exp.' : ''} ({formatPercent(associate.percent)})
             </Typography>
-            <PaidMark line={associate} zone={zone} compact />
+            {paidMark(associate, true)}
           </Stack>
         )}
       </Stack>
     ) : (
-      <AfterBank />
+      '—'
     ),
     associate: associate ? (
       <Stack spacing={0.25}>
         <UserChip user={associate.user} size={20} showRole={false} />
         <Stack direction="row" spacing={1} alignItems="center">
-          <Amount value={associate.amount} percent={associate.percent} />
-          <PaidMark line={associate} zone={zone} />
+          <Amount line={associate} percent={associate.percent} />
+          {paidMark(associate)}
         </Stack>
       </Stack>
-    ) : c.status === 'process_to_bank' ? (
-      <Typography variant="caption" color="text.disabled">
-        None
-      </Typography>
     ) : (
-      <AfterBank />
+      none
     ),
     mine:
       role === 'manager' ? (
         manager ? (
           <Stack direction="row" spacing={1} alignItems="center">
-            <Amount value={manager.amount} percent={manager.percent} />
-            <PaidMark line={manager} zone={zone} />
+            <Amount line={manager} percent={manager.percent} />
+            {paidMark(manager)}
           </Stack>
         ) : (
-          <AfterBank />
+          '—'
         )
       ) : associate ? (
         <Stack direction="row" spacing={1} alignItems="center">
-          <Amount value={associate.amount} percent={associate.percent} />
-          <PaidMark line={associate} zone={zone} />
+          <Amount line={associate} percent={associate.percent} />
+          {paidMark(associate)}
         </Stack>
-      ) : c.status === 'process_to_bank' ? (
-        <Typography variant="caption" color="text.disabled">
-          None
-        </Typography>
       ) : (
-        <AfterBank />
+        none
       ),
-    keeps: manager?.keeps != null ? <Amount value={manager.keeps} muted /> : <AfterBank />,
+    managerShare: manager ? <Amount line={manager} /> : '—',
+    keeps:
+      manager?.keeps != null ? (
+        <Amount line={manager.settled ? { amount: manager.keeps, expected: null } : { amount: null, expected: manager.keeps }} muted />
+      ) : (
+        '—'
+      ),
     minutes: expert?.minutes != null ? durationLabel(expert.minutes) : '—',
     rate: expert?.rate != null ? `${formatUsd(expert.rate)}/h` : <Typography variant="caption" color="warning.main">Not set</Typography>,
     pay: expert ? (
       <Stack direction="row" spacing={1} alignItems="center">
-        <Amount value={expert.amount} />
-        {expert.amount !== null && <PaidMark line={expert} zone={zone} />}
+        <Amount line={expert} />
+        {paidMark(expert)}
       </Stack>
     ) : (
       '—'
@@ -482,14 +701,12 @@ function FinanceRow({
               <StatusChip status={c.status} />
             </Stack>
             <Stack spacing={1} sx={{ mt: 1.25 }}>
-              {money && (
-                <Stack direction="row" justifyContent="space-between" alignItems="baseline">
-                  <Typography variant="caption" color="text.secondary">
-                    {money.label}
+              {income && (
+                <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+                  <Typography variant="caption" color="text.secondary" sx={{ pt: 0.25 }}>
+                    Income
                   </Typography>
-                  <Typography variant="body2" fontWeight={650} sx={{ color: money.color }}>
-                    {money.value}
-                  </Typography>
+                  <IncomeFigures income={income} variant="cell" />
                 </Stack>
               )}
               {COLUMNS[role].map((col) => (
@@ -532,30 +749,16 @@ function FinanceRow({
       <TableCell>
         <StatusChip status={c.status} />
       </TableCell>
-      {role !== 'expert' && (
-        <TableCell>
-          {money ? (
-            <Tooltip title={money.hint}>
-              <Box>
-                <Typography variant="body2" fontWeight={650} sx={{ color: money.color, fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-                  {money.value}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
-                  {money.label === 'Real income' ? 'Real' : 'Expected'}
-                </Typography>
-              </Box>
-            </Tooltip>
-          ) : (
-            '—'
-          )}
-        </TableCell>
-      )}
+      {showsIncome(role) && <TableCell>{income ? <IncomeFigures income={income} variant="cell" /> : '—'}</TableCell>}
       {COLUMNS[role].map((col) => (
         <TableCell key={col.key}>{cells[col.key]}</TableCell>
       ))}
     </TableRow>
   );
 }
+
+/** Only the Founder and Managers see what calls bring in. */
+const showsIncome = (role: Role) => role === 'founder' || role === 'manager';
 
 // ---------------------------------------------------------------------------
 

@@ -35,11 +35,12 @@ import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import {
   ACTIVE_STATUSES,
   STAGE_LABELS,
-  STAGE_STATUSES,
   STATUS_LABELS,
+  stageStatusesForRole,
   stagesForRole,
   type CallDTO,
   type CallStatus,
+  type Role,
   type Stage,
   type UserRef,
 } from '@god/shared';
@@ -58,14 +59,16 @@ import { countdown, formatRange, inZone, relativeTime, soon, whenAndLength, zone
 import { CallCard } from './CallCard';
 import { CancelCallDialog } from './CancelCallDialog';
 import { FinanceTab } from './FinanceTab';
+import { PaymentHistory } from './PaymentHistory';
 
 /** The first tab: calls still on their way, and the ones called off. Once a call has taken place it moves to Finance. */
 const TAB_STATUSES: readonly CallStatus[] = [...ACTIVE_STATUSES, 'cancelled'];
-const tabStatuses = (stage: Stage) => STAGE_STATUSES[stage].filter((s) => TAB_STATUSES.includes(s));
-/** Booked calls the Expert prepares for with the deep search data. */
-const PREPARING: readonly CallStatus[] = ['scheduled', 'confirmed', 'on_rescheduling'];
+/** The statuses of a stage the viewer sees on this tab (Associates and Managers never see the research step). */
+const tabStatuses = (role: Role, stage: Stage) => stageStatusesForRole(role, stage).filter((s) => TAB_STATUSES.includes(s));
+/** Booked calls the Expert prepares for with the research data. */
+const PREPARING: readonly CallStatus[] = ['scheduled', 'confirmed', 'research_ready', 'on_rescheduling'];
 
-type CallsTab = 'calls' | 'finance';
+type CallsTab = 'calls' | 'finance' | 'records';
 
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value);
@@ -117,15 +120,22 @@ function UserFilter({
 export default function CallsListPage() {
   const me = useMe();
   const [params, setParams] = useSearchParams();
-  const tab: CallsTab = params.get('tab') === 'finance' ? 'finance' : 'calls';
+  const requested = params.get('tab');
+  const tab: CallsTab = requested === 'finance' || requested === 'records' ? requested : 'calls';
   // Each tab keeps its own filters, so switching starts clean.
-  const switchTab = (next: CallsTab) => setParams(next === 'finance' ? { tab: 'finance' } : {}, { replace: true });
+  const switchTab = (next: CallsTab) => setParams(next === 'calls' ? {} : { tab: next }, { replace: true });
 
   return (
     <>
       <PageHeader
         title="Calls"
-        subtitle={tab === 'finance' ? 'The calls that took place: who is paid what, and what is paid.' : 'Calls being scheduled and run.'}
+        subtitle={
+          tab === 'finance'
+            ? 'The calls that took place: who is paid what, and what is paid.'
+            : tab === 'records'
+              ? 'Every month that was paid out, kept as it was.'
+              : 'Calls being scheduled and run.'
+        }
         actions={
           me.role !== 'expert' && (
             <Button variant="contained" startIcon={<AddRounded />} component={RouterLink} to="/calls/new">
@@ -137,8 +147,9 @@ export default function CallsListPage() {
       <Tabs value={tab} onChange={(_, v: CallsTab) => switchTab(v)} sx={{ mb: 2.5, borderBottom: 1, borderColor: 'divider' }}>
         <Tab value="calls" label="In progress" />
         <Tab value="finance" label="Finance" />
+        <Tab value="records" label="Payment records" />
       </Tabs>
-      {tab === 'finance' ? <FinanceTab /> : <ActiveCallsTab />}
+      {tab === 'finance' ? <FinanceTab /> : tab === 'records' ? <PaymentHistory /> : <ActiveCallsTab />}
     </>
   );
 }
@@ -153,7 +164,7 @@ function ActiveCallsTab() {
   const [cancelling, setCancelling] = useState<CallDTO | null>(null);
 
   // Experts never see the invoicing stage, and nobody sees it here: those calls are under Finance.
-  const stages = stagesForRole(me.role).filter((stage) => tabStatuses(stage).length > 0);
+  const stages = stagesForRole(me.role).filter((stage) => tabStatuses(me.role, stage).length > 0);
   const statuses = params.getAll('status').filter((s): s is CallStatus => TAB_STATUSES.includes(s as CallStatus));
   const associateId = params.get('associateId');
   const expertId = params.get('expertId');
@@ -212,7 +223,7 @@ function ActiveCallsTab() {
   const experts = useMemo(() => (users ?? []).filter((u) => u.role === 'expert'), [users]);
 
   const activeFilters = statuses.length + (associateId ? 1 : 0) + (expertId ? 1 : 0) + (from ? 1 : 0) + (to ? 1 : 0) + (q ? 1 : 0);
-  // The deep search data is the Founder's to add and the Expert's to read.
+  // The research data is the Founder's to add and the Expert's to read.
   const showResearch = me.role === 'founder' || me.role === 'expert';
 
   return (
@@ -262,7 +273,7 @@ function ActiveCallsTab() {
                     {STAGE_LABELS[stage]}
                   </Typography>
                 </MenuItem>,
-                ...tabStatuses(stage).map((s) => (
+                ...tabStatuses(me.role, stage).map((s) => (
                   <MenuItem key={s} value={s} dense>
                     <Checkbox size="small" checked={statuses.includes(s)} sx={{ py: 0 }} />
                     <Box sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: STATUS_COLORS[s], mr: 1 }} />
@@ -292,7 +303,7 @@ function ActiveCallsTab() {
           </Stack>
           <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap alignItems="center" sx={{ rowGap: 1.5 }}>
             {stages.map((stage) => {
-              const own = tabStatuses(stage);
+              const own = tabStatuses(me.role, stage);
               const active = own.every((s) => statuses.includes(s)) && statuses.length === own.length;
               return (
                 <Chip
@@ -370,7 +381,7 @@ function ActiveCallsTab() {
                   <TableCell>Associate</TableCell>
                   <TableCell>Expert</TableCell>
                   <TableCell>Status</TableCell>
-                  {showResearch && <TableCell>Deep search</TableCell>}
+                  {showResearch && <TableCell>Research data</TableCell>}
                   <TableCell align="right">Updated</TableCell>
                   <TableCell padding="checkbox" />
                 </TableRow>
@@ -470,14 +481,14 @@ function ActiveCallsTab() {
   );
 }
 
-/** The deep search data the Expert prepares with: a link when it is there, a nudge while a booked call lacks it. */
+/** The research data the Expert prepares with: a link when it is there, a nudge while a booked call lacks it. */
 function ResearchLink({ call }: { call: CallDTO }) {
-  if (call.gptLink) {
+  if (call.researchLink) {
     return (
       <Button
         size="small"
         startIcon={<ManageSearchRounded />}
-        href={call.gptLink}
+        href={call.researchLink}
         target="_blank"
         rel="noopener noreferrer"
         sx={{ whiteSpace: 'nowrap' }}

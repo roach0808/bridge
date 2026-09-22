@@ -56,17 +56,23 @@ describe('valid moves record history with the right is_override', () => {
     await expectMoved(c, fx.founder, call.id, 'on_rescheduling', 'scheduled', true);
   });
 
-  it('expert confirms, starts and finishes their call (no override)', async () => {
+  it('expert confirms, the founder readies the research data, the expert starts and finishes (no overrides)', async () => {
     const c = await as(fx.e1);
     const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
     await expectMoved(c, fx.e1, call.id, 'scheduled', 'confirmed', false);
-    await expectMoved(c, fx.e1, call.id, 'confirmed', 'ongoing', false);
+    // The Expert cannot start before the research data is ready.
+    expectError(await transition(c, call.id, 'ongoing'), 403);
+    await prisma.call.update({ where: { id: call.id }, data: { researchLink: 'https://chatgpt.com/share/prep' } });
+    await expectMoved(await as(fx.founder), fx.founder, call.id, 'confirmed', 'research_ready', false);
+    await expectMoved(c, fx.e1, call.id, 'research_ready', 'ongoing', false);
     await expectMoved(c, fx.e1, call.id, 'ongoing', 'finished', false);
   });
 
-  it('expert may finish directly from confirmed', async () => {
-    const call = await makeCall(fx, { associate: fx.a1, status: 'confirmed' });
-    await expectMoved(await as(fx.e1), fx.e1, call.id, 'confirmed', 'finished', false);
+  it('expert may finish directly once the research data is ready; the founder may skip that step', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'research_ready' });
+    await expectMoved(await as(fx.e1), fx.e1, call.id, 'research_ready', 'finished', false);
+    const other = await makeCall(fx, { associate: fx.a1, status: 'confirmed', scheduledAt: '2027-02-02T09:00:00Z' });
+    await expectMoved(await as(fx.founder), fx.founder, other.id, 'confirmed', 'finished', true);
   });
 
   it('a scheduled call cannot start or finish before the expert confirms', async () => {
@@ -184,13 +190,13 @@ describe('starting and finishing need the Expert’s input', () => {
   const post = (client: Client, callId: string, body: Record<string, unknown>) => client.post(`/calls/${callId}/transition`, body);
 
   it('ongoing requires a valid Ninja link, which is stored on the call', async () => {
-    const call = await makeCall(fx, { associate: fx.a1, status: 'confirmed' });
+    const call = await makeCall(fx, { associate: fx.a1, status: 'research_ready' });
     const e1 = await as(fx.e1);
     const missing = await post(e1, call.id, { to: 'ongoing' });
     expectError(missing, 400, 'validation_error');
     expect(missing.body.error.details.issues).toContainEqual(expect.objectContaining({ path: 'ninjaLink' }));
     expectError(await post(e1, call.id, { to: 'ongoing', ninjaLink: 'not a link' }), 400, 'validation_error');
-    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('confirmed');
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('research_ready');
 
     const res = await post(e1, call.id, { to: 'ongoing', ninjaLink: 'https://vdo.ninja/?room=abc' });
     expect(res.status, res.text).toBe(200);

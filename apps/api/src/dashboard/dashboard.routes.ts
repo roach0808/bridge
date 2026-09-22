@@ -21,7 +21,7 @@ const emptyCounts = (): Record<CallStatus, number> =>
   Object.fromEntries(CALL_STATUSES.map((s) => [s, 0])) as Record<CallStatus, number>;
 
 const FINISHED: CallStatus[] = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'];
-const COMING: CallStatus[] = ['scheduled', 'confirmed', 'on_rescheduling'];
+const COMING: CallStatus[] = ['scheduled', 'confirmed', 'research_ready', 'on_rescheduling'];
 
 /** Today's booked calls in the viewer's zone (§9.3), plus anything ongoing right now. */
 async function todayFor(actor: Actor): Promise<DashboardSummary['today']> {
@@ -93,9 +93,13 @@ async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary[
       orderBy: { scheduledAt: 'asc' },
       take: 100,
     }),
-    // Preparing a call: the Expert reads the deep search data before it starts.
+    // Preparing a call: confirmed calls wait for the Founder to mark the research data ready,
+    // and booked ones should get their link before the Expert confirms.
     prisma.call.findMany({
-      where: { status: { in: ['scheduled', 'confirmed', 'on_rescheduling'] }, gptLink: null, scheduledAt: { gte: new Date() } },
+      where: {
+        scheduledAt: { gte: new Date() },
+        OR: [{ status: 'confirmed' }, { status: { in: ['scheduled', 'on_rescheduling'] }, researchLink: null }],
+      },
       include: callInclude,
       orderBy: { scheduledAt: 'asc' },
       take: 100,

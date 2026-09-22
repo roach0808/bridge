@@ -167,8 +167,17 @@ statsRouter.get('/stats/associates', async (req, res) => {
       emptyAssociateCell(),
     );
 
+  // Associates count their calls but never see what calls bring in.
+  if (actor.role === 'associate') {
+    for (const cell of [...totals, ...[...byAssociate.values()].flat()]) {
+      cell.potential = 0;
+      cell.unpriced = 0;
+    }
+  }
+
   const body: AssociateStats = {
     zone: TEAM_TIME_ZONE,
+    showsMoney: actor.role !== 'associate',
     periods: periods.map(toPeriodDTO),
     rows: associates
       .map((a) => {
@@ -268,7 +277,7 @@ function addToFinanceCell(cell: FinanceCell, c: PricedCall) {
   }
 }
 
-/** Whose calls someone sees money for: everyone's (Founder), every Associate's and their own (Manager), or their own. */
+/** Whose calls someone sees money for: everyone's (Founder), or every Associate's and their own (Manager). */
 async function financeScope(actor: Actor): Promise<string[] | undefined> {
   if (actor.role === 'founder') return undefined;
   if (actor.role === 'manager') {
@@ -280,8 +289,8 @@ async function financeScope(actor: Actor): Promise<string[] | undefined> {
 
 statsRouter.get('/stats/finance', async (req, res) => {
   const actor = actorOf(req);
-  // Experts never see money (§2.3).
-  if (actor.role === 'expert') throw forbidden();
+  // Experts and Associates never see what calls bring in (§2.3).
+  if (actor.role === 'expert' || actor.role === 'associate') throw forbidden();
   const { period, count } = parseQuery(statsQuerySchema, req);
   const periods = statsPeriods(period, count);
   const calls = await pricedCalls(periods[0]!.start.toJSDate(), periods.at(-1)!.end.toJSDate(), await financeScope(actor));

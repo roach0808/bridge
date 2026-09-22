@@ -3,7 +3,7 @@ import {
   ACTIVE_STATUSES,
   AVATAR_CATALOG,
   FINANCE_STATUSES,
-  associateShareWithin,
+  associateShareOf,
   shareOf,
   canChat,
   canGiveTask,
@@ -12,6 +12,8 @@ import {
   expectedPrice,
   transitionSchema,
   stagesForRole,
+  hiddenStatusesFor,
+  stageStatusesForRole,
   statusFilterForRole,
   statusForRole,
   type Role,
@@ -55,7 +57,7 @@ describe('call status constants', () => {
     expect([...TERMINAL_STATUSES].sort()).toEqual(['cancelled', 'process_to_bank']);
     expect(STATUS_STAGE.cancelled).toBe('cancelled');
     expect(TRACK_STAGES).toEqual(['scheduling', 'execution', 'invoicing']);
-    expect([...CANCELLABLE_STATUSES].sort()).toEqual(['confirmed', 'on_rescheduling', 'on_scheduling', 'scheduled']);
+    expect([...CANCELLABLE_STATUSES].sort()).toEqual(['confirmed', 'on_rescheduling', 'on_scheduling', 'research_ready', 'scheduled']);
   });
 
   it('stage mapping agrees with STAGE_STATUSES', () => {
@@ -254,6 +256,23 @@ describe('experts do not see invoicing', () => {
   });
 });
 
+describe('Associates and Managers do not see the research step', () => {
+  it('a call with its research data ready reads as confirmed to them only', () => {
+    expect(statusForRole('associate', 'research_ready')).toBe('confirmed');
+    expect(statusForRole('manager', 'research_ready')).toBe('confirmed');
+    expect(statusForRole('expert', 'research_ready')).toBe('research_ready');
+    expect(statusForRole('founder', 'research_ready')).toBe('research_ready');
+    expect(hiddenStatusesFor('manager')).toEqual(['research_ready']);
+  });
+  it('filters and stages', () => {
+    expect(statusFilterForRole('associate', ['confirmed']).sort()).toEqual(['confirmed', 'research_ready']);
+    expect(statusFilterForRole('manager', ['research_ready'])).toEqual([]);
+    expect(statusFilterForRole('expert', ['research_ready'])).toEqual(['research_ready']);
+    expect(stageStatusesForRole('associate', 'scheduling')).not.toContain('research_ready');
+    expect(stageStatusesForRole('expert', 'scheduling')).toContain('research_ready');
+  });
+});
+
 describe('payouts', () => {
   it('takes a share to the cent', () => {
     expect(shareOf(1000, 15)).toBe(150);
@@ -263,10 +282,12 @@ describe('payouts', () => {
     expect(shareOf(0, 15)).toBe(0);
   });
 
-  it('keeps the Associate’s part within the Manager’s share', () => {
-    expect(associateShareWithin(10, 15)).toBe(10);
-    expect(associateShareWithin(20, 15)).toBe(15);
-    expect(associateShareWithin(0, 15)).toBe(0);
+  it('takes the Associate’s part out of the Manager’s share', () => {
+    // 50% of a 15% share of $1,000.
+    expect(associateShareOf(1000, 15, 50)).toBe(75);
+    expect(associateShareOf(1000, 15, 100)).toBe(150);
+    expect(associateShareOf(999.99, 15, 33.33)).toBe(49.99);
+    expect(associateShareOf(1000, 15, 0)).toBe(0);
   });
 
   it('splits the Calls page between calls on their way and calls that took place', () => {

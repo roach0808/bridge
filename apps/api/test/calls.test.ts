@@ -35,7 +35,7 @@ describe('POST /calls', () => {
       scheduledAt: '2027-03-01T15:00:00.000Z',
       endsAt: '2027-03-01T15:45:00.000Z',
       allowedTransitions: ['scheduled', 'cancelled'],
-      permissions: { edit: true, reassignAssociate: false, reassignExpert: true, editIncome: false, editGptLink: false, editRate: true },
+      permissions: { edit: true, reassignAssociate: false, reassignExpert: true, editIncome: false, editResearchLink: false, editRate: false, editMeeting: true },
     });
     const history = await prisma.callStatusHistory.findMany({ where: { callId: res.body.id } });
     expect(history).toEqual([expect.objectContaining({ fromStatus: null, toStatus: 'on_scheduling', actorId: fx.a1.id, isOverride: false })]);
@@ -515,7 +515,9 @@ describe('database constraints', () => {
     const row = await prisma.call.findFirstOrThrow({ where: { status: 'process_to_bank' } });
     expect([row.managerSharePercent?.toNumber(), row.associateSharePercent?.toNumber(), row.payeeManagerId]).toEqual([15, 12, fx.m1.id]);
     await prisma.call.deleteMany();
-    await expect(insert({ status: 'process_to_bank', income: 500, share: 15, associateShare: 20 })).rejects.toThrow(/calls_shares_range/);
+    // The Associate's percent is a portion of the Manager's share: anything up to all of it.
+    expect(await insert({ status: 'process_to_bank', income: 500, share: 15, associateShare: 100, expert: fx.e2.id })).toBe(1);
+    await expect(insert({ status: 'process_to_bank', income: 500, share: 15, associateShare: 101, expert: fx.e3.id })).rejects.toThrow(/calls_shares_range/);
     await expect(insert({ status: 'process_to_bank', income: 500, share: 101 })).rejects.toThrow(/calls_shares_range/);
   });
 
@@ -540,33 +542,33 @@ describe('database constraints', () => {
   });
 });
 
-describe('GPT link', () => {
+describe('research data link', () => {
   it('the founder sets it; only the founder and the expert can read it', async () => {
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
     const f = await as(fx.founder);
     const link = 'https://chatgpt.com/share/abc123';
-    const saved = await f.patch(`/calls/${call.id}`, { gptLink: link });
+    const saved = await f.patch(`/calls/${call.id}`, { researchLink: link });
     expect(saved.status, saved.text).toBe(200);
-    expect(saved.body.gptLink).toBe(link);
+    expect(saved.body.researchLink).toBe(link);
 
-    expect((await (await as(fx.e1)).get(`/calls/${call.id}`)).body.gptLink).toBe(link);
+    expect((await (await as(fx.e1)).get(`/calls/${call.id}`)).body.researchLink).toBe(link);
     for (const who of ['a1', 'm1'] as const) {
       const res = await (await as(fx[who])).get(`/calls/${call.id}`);
-      expect(res.body.gptLink, who).toBeNull();
-      expect(res.body.permissions.editGptLink).toBe(false);
+      expect(res.body.researchLink, who).toBeNull();
+      expect(res.body.permissions.editResearchLink).toBe(false);
       expect(res.text).not.toContain('chatgpt.com');
     }
     // Nobody but the founder may write it, and it must be a link.
-    expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { gptLink: 'https://x.test' }), 403);
-    expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { gptLink: 'https://x.test' }), 403);
-    expectError(await f.patch(`/calls/${call.id}`, { gptLink: 'not a link' }), 400);
-    expect((await f.patch(`/calls/${call.id}`, { gptLink: null })).body.gptLink).toBeNull();
+    expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { researchLink: 'https://x.test' }), 403);
+    expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { researchLink: 'https://x.test' }), 403);
+    expectError(await f.patch(`/calls/${call.id}`, { researchLink: 'not a link' }), 400);
+    expect((await f.patch(`/calls/${call.id}`, { researchLink: null })).body.researchLink).toBeNull();
   });
 
   it('the expert is notified when the link is added, but not about money-only edits', async () => {
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
     const f = await as(fx.founder);
-    await f.patch(`/calls/${call.id}`, { gptLink: 'https://chatgpt.com/share/xyz' });
+    await f.patch(`/calls/${call.id}`, { researchLink: 'https://chatgpt.com/share/xyz' });
     expect(await prisma.notification.count({ where: { userId: fx.e1.id, type: 'call.updated' } })).toBe(1);
     await f.patch(`/calls/${call.id}`, { rateOverride: 1500 });
     expect(await prisma.notification.count({ where: { userId: fx.e1.id } })).toBe(1);
@@ -574,28 +576,59 @@ describe('GPT link', () => {
 });
 
 describe('call rate', () => {
-  it('shows the platform rate, takes a special rate for one call, and hides both from the expert', async () => {
+  it('shows the platform rate, takes a special rate for one call, and hides both from the expert and the associate', async () => {
     const f = await as(fx.founder);
     await f.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { status: 'registered', rate: 1100 });
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
 
-    const a1 = await as(fx.a1);
-    let res = await a1.get(`/calls/${call.id}`);
+    // The manager sees the rate and sets a special one for this project only.
+    const m1 = await as(fx.m1);
+    let res = await m1.get(`/calls/${call.id}`);
     expect(res.body).toMatchObject({ platformRate: 1100, rateOverride: null, permissions: { editRate: true } });
-
-    // The associate sets a special rate for this project only.
-    res = await a1.patch(`/calls/${call.id}`, { rateOverride: 1750.25 });
+    res = await m1.patch(`/calls/${call.id}`, { rateOverride: 1750.25 });
     expect(res.status, res.text).toBe(200);
     expect(res.body).toMatchObject({ platformRate: 1100, rateOverride: 1750.25 });
-    expect((await a1.patch(`/calls/${call.id}`, { rateOverride: null })).body.rateOverride).toBeNull();
-    expectError(await a1.patch(`/calls/${call.id}`, { rateOverride: -5 }), 400);
+    expect((await m1.patch(`/calls/${call.id}`, { rateOverride: null })).body.rateOverride).toBeNull();
+    expectError(await m1.patch(`/calls/${call.id}`, { rateOverride: -5 }), 400);
 
-    // The manager may too; the Expert sees nothing and cannot write it.
-    expect((await (await as(fx.m1)).patch(`/calls/${call.id}`, { rateOverride: 1200 })).status).toBe(200);
+    // The associate never sees what the call is worth, so cannot set it either.
+    const a1 = await as(fx.a1);
+    res = await a1.get(`/calls/${call.id}`);
+    expect(res.body).toMatchObject({ platformRate: null, rateOverride: null, expectedPrice: null, realIncome: null, permissions: { editRate: false } });
+    expect(res.text).not.toMatch(/1100/);
+    expectError(await a1.patch(`/calls/${call.id}`, { rateOverride: 1750 }), 403);
+
+    // The Expert sees nothing and cannot write it.
+    expect((await m1.patch(`/calls/${call.id}`, { rateOverride: 1200 })).status).toBe(200);
     const expertView = await (await as(fx.e1)).get(`/calls/${call.id}`);
     expect(expertView.body).toMatchObject({ platformRate: null, rateOverride: null, permissions: { editRate: false } });
     expect(expertView.text).not.toMatch(/1100|1200/);
     expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { rateOverride: 1 }), 403);
+  });
+});
+
+describe('meeting details', () => {
+  it('whoever runs the call, their manager or the founder adds them; everyone on the call reads them', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    const details = 'Zoom https://zoom.example.com/j/123 · passcode 9981';
+    const res = await (await as(fx.a1)).patch(`/calls/${call.id}`, { meetingDetails: details });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.meetingDetails).toBe(details);
+    for (const who of ['e1', 'm1', 'founder'] as const) {
+      expect((await (await as(fx[who])).get(`/calls/${call.id}`)).body.meetingDetails, who).toBe(details);
+    }
+    // The Expert is told, and cannot change them.
+    expect(await prisma.notification.count({ where: { userId: fx.e1.id, type: 'call.updated' } })).toBe(1);
+    expectError(await (await as(fx.e1)).patch(`/calls/${call.id}`, { meetingDetails: 'x' }), 403);
+    expect((await (await as(fx.m1)).patch(`/calls/${call.id}`, { meetingDetails: 'Teams, PIN 1' })).status).toBe(200);
+    expect((await (await as(fx.founder)).patch(`/calls/${call.id}`, { meetingDetails: '' })).body.meetingDetails).toBeNull();
+
+    // Given with the new call, and closed to the Associate once the call has taken place.
+    const created = await (await as(fx.a2)).post('/calls', body({ meetingDetails: 'Dial-in 555-0100', scheduledAt: '2027-03-02T15:00:00Z' }));
+    expect(created.body.meetingDetails).toBe('Dial-in 555-0100');
+    const done = await makeCall(fx, { associate: fx.a1, expert: fx.e2, status: 'finished', scheduledAt: '2027-02-03T09:00:00Z' });
+    expectError(await (await as(fx.a1)).patch(`/calls/${done.id}`, { meetingDetails: 'x' }), 403);
+    expect((await (await as(fx.founder)).patch(`/calls/${done.id}`, { meetingDetails: 'x' })).status).toBe(200);
   });
 });
 

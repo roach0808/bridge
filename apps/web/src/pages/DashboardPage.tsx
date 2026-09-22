@@ -220,7 +220,7 @@ function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['ta
                 <>
                   <Box sx={{ px: 1, py: 0.5, mt: 1, minHeight: 34, display: 'flex', alignItems: 'center' }}>
                     <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                      Add deep search data · {tasks.callsNeedingResearch.length}
+                      Prepare research data · {tasks.callsNeedingResearch.length}
                     </Typography>
                   </Box>
                   {tasks.callsNeedingResearch.slice(0, 8).map((c) => (

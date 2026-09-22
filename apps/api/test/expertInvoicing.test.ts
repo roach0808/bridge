@@ -37,9 +37,11 @@ describe('experts do not see invoicing', () => {
     expect((await e1.get(`/calls/${call.id}/history`)).body.every((h: { toStatus: string }) => !h.toStatus.startsWith('invoice'))).toBe(true);
     expect(JSON.stringify(detail)).not.toMatch(/invoice_(submit|approve)|process_to_bank|"(expectedPrice|realIncome)":\d|437\.25/);
 
-    // Everyone else still sees the real status and both payment figures.
+    // The founder and managers still see the real status and both payment figures; the Associate the status only.
+    const m1 = (await (await as(fx.m1)).get(`/calls/${call.id}`)).body;
+    expect(m1).toMatchObject({ status: 'process_to_bank', expectedPrice: 450, realIncome: 437.25 });
     const a1 = (await (await as(fx.a1)).get(`/calls/${call.id}`)).body;
-    expect(a1).toMatchObject({ status: 'process_to_bank', expectedPrice: 450, realIncome: 437.25 });
+    expect(a1).toMatchObject({ status: 'process_to_bank', expectedPrice: null, realIncome: null });
   });
 
   it('list, filters, calendar and dashboard counts', async () => {

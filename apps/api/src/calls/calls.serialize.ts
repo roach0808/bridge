@@ -1,5 +1,6 @@
 import {
   FINANCE_STATUSES,
+  associateShareOf,
   expectedPrice,
   shareOf,
   statusForRole,
@@ -41,14 +42,22 @@ export const callInclude = {
 
 export type CallRow = Prisma.CallGetPayload<{ include: typeof callInclude }>;
 
-/** Experts see invoiced calls as finished, without invoice figures. */
+const num = (d: { toString(): string } | null): number | null => (d === null ? null : Number(d));
+
+/**
+ * A call as one viewer may see it. Experts see invoiced calls as finished and
+ * Associates and Managers a call whose research data is ready as confirmed.
+ * Neither Experts nor Associates see what a call brings in, or its rate; the
+ * research data and Ninja links go to the Founder and the Expert only.
+ */
 export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallDTO {
-  // Experts see no money at all, and only the Founder and the Expert see the GPT and Ninja links.
-  const hideMoney = viewer.role === 'expert';
+  const hideMoney = viewer.role === 'expert' || viewer.role === 'associate';
+  const insider = viewer.role === 'founder' || viewer.role === 'expert';
   const { platformStatuses, managerSharePercent: _share, _count, ...profile } = call.profile;
-  const platformRate = platformStatuses.find((s) => s.platformId === call.platformId)?.rate ?? null;
+  const platformRate = num(platformStatuses.find((s) => s.platformId === call.platformId)?.rate ?? null);
   // A special rate on the call wins over the Profile's rate on the platform.
-  const rate = call.rateOverride ?? platformRate;
+  const rate = num(call.rateOverride) ?? platformRate;
+  const price = expectedPrice(rate, call.actualDurationMinutes);
   return {
     id: call.id,
     status: statusForRole(viewer.role, call.status as CallStatus),
@@ -63,19 +72,20 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
     notes: call.notes,
     projectDetails: call.projectDetails,
     platformAssociateName: call.platformAssociateName,
-    expectedPrice: hideMoney ? null : expectedPrice(rate === null ? null : Number(rate), call.actualDurationMinutes),
-    realIncome: hideMoney || call.realIncome === null ? null : Number(call.realIncome),
-    // The meeting itself: only the Expert on it and the Founder may join.
-    ninjaLink: viewer.role === 'founder' || viewer.role === 'expert' ? call.ninjaLink : null,
-    gptLink: viewer.role === 'founder' || viewer.role === 'expert' ? call.gptLink : null,
-    platformRate: hideMoney || platformRate === null ? null : Number(platformRate),
-    rateOverride: hideMoney || call.rateOverride === null ? null : Number(call.rateOverride),
+    meetingDetails: call.meetingDetails,
+    expectedPrice: hideMoney ? null : price,
+    realIncome: hideMoney ? null : num(call.realIncome),
+    // The meeting itself and the research behind it: only the Expert on it and the Founder.
+    ninjaLink: insider ? call.ninjaLink : null,
+    researchLink: insider ? call.researchLink : null,
+    platformRate: hideMoney ? null : platformRate,
+    rateOverride: hideMoney ? null : num(call.rateOverride),
     actualDurationMinutes: call.actualDurationMinutes,
     rating: call.rating,
     feedback: call.feedback,
     allowedTransitions: allowedTransitionsFor(viewer, call),
     permissions: callPermissions(viewer, call),
-    payouts: payoutsFor(call, viewer),
+    payouts: payoutsFor(call, viewer, price),
     bankReady: viewer.role === 'founder' ? _count.banks > 0 : null,
     createdBy: toUserRef(call.createdBy),
     createdAt: iso(call.createdAt),
@@ -83,65 +93,92 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
   };
 }
 
-const num = (d: { toString(): string } | null): number | null => (d === null ? null : Number(d));
+const round = (n: number) => Math.round(n * 100) / 100;
 
 /**
- * Who is paid what for the call, as far as the viewer may know (§3.1): the
- * Founder sees every line, each payee their own, and the Manager also the
- * Associate's part they pass on.
+ * Who is paid what for the call, as far as the viewer may know (§3.1). From
+ * the moment the call took place: the Expert's pay, and the Manager's and the
+ * Associate's shares as they should come out of the expected price. Once the
+ * bank has paid, the shares are settled on the call and worked out from the
+ * real income. The Founder sees every line; the Expert their own; the Manager
+ * paid for the call their share and the Associate's part; the Associate their
+ * part and their Manager's share (not its percent, which would give away the income).
  */
-export function payoutsFor(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallPayouts {
-  const status = call.status as CallStatus;
+export function payoutsFor(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>, price: number | null): CallPayouts {
+  const none: CallPayouts = { expert: null, manager: null, associate: null, canMark: [] };
+  if (!FINANCE_STATUSES.includes(call.status as CallStatus)) return none;
   const founder = viewer.role === 'founder';
-  const isPayee = call.payeeManagerId !== null && call.payeeManagerId === viewer.id;
-  const took = FINANCE_STATUSES.includes(status);
-  const banked = status === 'process_to_bank';
+  const banked = call.status === 'process_to_bank';
+  const settled = banked && call.managerSharePercent !== null;
+
+  // Before the bank pays, the shares follow today's settings; afterwards they are fixed on the call.
+  const runByAssociate = call.associate.role === 'associate';
+  const payee = settled
+    ? call.payeeManager
+    : runByAssociate
+      ? call.associate.manager
+      : call.associate;
+  const isPayee = payee !== null && payee.id === viewer.id;
+  const isCallAssociate = runByAssociate && call.associateId === viewer.id;
+  const managerPercent = settled ? Number(call.managerSharePercent) : Number(call.profile.managerSharePercent);
+  const associatePercent = !runByAssociate
+    ? 0
+    : settled
+      ? Number(call.associateSharePercent ?? 0)
+      : Number(call.associate.sharePercent ?? 0);
+
+  const income = banked ? num(call.realIncome) : null;
+  const managerExpected = price === null ? null : shareOf(price, managerPercent);
+  const managerAmount = income === null ? null : shareOf(income, managerPercent);
+  const associateExpected = price === null ? null : associateShareOf(price, managerPercent, associatePercent);
+  const associateAmount = income === null ? null : associateShareOf(income, managerPercent, associatePercent);
+  const managerBase = managerAmount ?? managerExpected;
+  const associateBase = associateAmount ?? associateExpected ?? 0;
 
   const expertRate = num(call.expertRate);
+  const expertPay = expectedPrice(expertRate, call.actualDurationMinutes);
   const expert =
-    took && call.expert && (founder || call.expertId === viewer.id)
+    call.expert && (founder || call.expertId === viewer.id)
       ? {
           user: toUserRef(call.expert),
           rate: expertRate,
           minutes: call.actualDurationMinutes,
-          amount: expectedPrice(expertRate, call.actualDurationMinutes),
+          amount: expertPay,
+          expected: expertPay,
           paidAt: isoOrNull(call.expertPaidAt),
         }
       : null;
-
-  const income = num(call.realIncome);
-  const managerPercent = num(call.managerSharePercent);
-  const associatePercent = num(call.associateSharePercent);
-  const managerAmount = banked && income !== null && managerPercent !== null ? shareOf(income, managerPercent) : null;
-  const associateAmount = banked && income !== null && associatePercent !== null ? shareOf(income, associatePercent) : null;
-
   const manager =
-    banked && managerPercent !== null && (founder || isPayee)
+    founder || isPayee || isCallAssociate
       ? {
-          user: call.payeeManager ? toUserRef(call.payeeManager) : null,
-          percent: managerPercent,
+          user: payee ? toUserRef(payee) : null,
+          percent: isCallAssociate && !founder ? null : managerPercent,
+          expected: managerExpected,
           amount: managerAmount,
-          keeps: managerAmount === null ? null : Math.round((managerAmount - (associateAmount ?? 0)) * 100) / 100,
+          keeps: managerBase === null ? null : round(managerBase - associateBase),
+          settled,
           paidAt: isoOrNull(call.managerPaidAt),
         }
       : null;
   const associate =
-    banked && associatePercent !== null && associatePercent > 0 && (founder || isPayee || call.associateId === viewer.id)
+    runByAssociate && associatePercent > 0 && (founder || isPayee || isCallAssociate)
       ? {
           user: toUserRef(call.associate),
           percent: associatePercent,
+          expected: associateExpected,
           amount: associateAmount,
           paidAt: isoOrNull(call.associatePaidAt),
         }
       : null;
 
   // The Founder pays the Expert and the Manager (and may settle anything); the Manager pays the Associate.
+  // Shares are paid once the bank has paid; the Expert once their pay is known.
   const canMark: Payee[] = [];
   if (founder) {
     if (expert && expert.amount !== null) canMark.push('expert');
-    if (manager?.user) canMark.push('manager');
-    if (associate) canMark.push('associate');
-  } else if (isPayee && associate) {
+    if (settled && manager?.user && managerAmount !== null) canMark.push('manager');
+    if (settled && associate) canMark.push('associate');
+  } else if (isPayee && settled && associate) {
     canMark.push('associate');
   }
   return { expert, manager, associate, canMark };

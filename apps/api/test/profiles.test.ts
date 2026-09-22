@@ -215,15 +215,12 @@ describe('platform statuses', () => {
     ]);
   });
 
-  it('a rate is required to mark a profile registered, and stays editable after', async () => {
+  it('a profile can be marked registered before it has a rate; the rate stays editable', async () => {
     const f = await as(fx.founder);
     const url = `/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`;
-    const refused = await f.put(url, { status: 'registered' });
-    expectError(refused, 400, 'validation_error');
-    expect(refused.body.error.details.issues[0].path).toBe('rate');
-    expect((await prisma.profilePlatformStatus.count())).toBe(0);
+    expect((await f.put(url, { status: 'registered' })).body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: null });
 
-    // With a rate it goes through, and the rate can be changed afterwards.
+    // The rate can be set and changed afterwards.
     expect((await f.put(url, { status: 'registered', rate: 1200 })).body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1200 });
     expect((await f.put(url, { rate: 1350 })).body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1350 });
     // Not registered needs no rate at all.
@@ -246,12 +243,11 @@ describe('platform statuses', () => {
     expect(res.body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: 1250.5 });
     res = await f.put(url(fx.platform2.id), { status: 'banned', rate: 0 });
     expect(res.body.platformStatuses[1]).toMatchObject({ status: 'banned', rate: 0 });
-    // A registered platform cannot have its rate cleared.
-    expectError(await f.put(url(fx.platform.id), { rate: null }), 400);
-
-    // Managers and associates see the rates; only the founder changes them.
+    // Managers see the rates, Associates never; only the founder changes them.
     expect((await (await as(fx.m1)).get(`/profiles/${fx.approvedProfile.id}`)).body.platformStatuses[0].rate).toBe(1250.5);
+    expect((await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`)).body.platformStatuses[0].rate).toBeNull();
     expectError(await (await as(fx.a1)).put(url(fx.platform.id), { rate: 1 }), 403);
+    expect((await f.put(url(fx.platform.id), { rate: null })).body.platformStatuses[0]).toMatchObject({ status: 'registered', rate: null });
 
     for (const bad of [{}, { rate: -1 }, { rate: 'abc' }, { rate: 12.345 }, { rate: 2_000_000 }]) {
       expectError(await f.put(url(fx.platform.id), bad), 400);

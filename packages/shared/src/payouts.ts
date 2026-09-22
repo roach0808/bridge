@@ -4,8 +4,9 @@
  * - the Expert: their hourly rate when the call finished × the real duration;
  * - the Manager: a share of the real income (the Profile's Manager share, 15%
  *   unless the Founder set another), once the bank has paid.
- * The Associate's own share is part of the Manager's share: the Manager passes
- * it on and keeps the rest (15% − 10% = 5% with the defaults).
+ * The Associate's percent is a portion of the Manager's share, which the
+ * Manager passes on: with 15% and 50%, the Associate gets 7.5% of the income
+ * and the Manager keeps 7.5%. Everyone is paid once a month (payment cycles).
  */
 export const PAYEES = ['expert', 'manager', 'associate'] as const;
 export type Payee = (typeof PAYEES)[number];
@@ -17,15 +18,15 @@ export const PAYEE_LABELS: Record<Payee, string> = {
 };
 
 export const DEFAULT_MANAGER_SHARE_PERCENT = 15;
-/** A new Associate's share until the Founder sets another. */
-export const DEFAULT_ASSOCIATE_SHARE_PERCENT = 10;
+/** A new Associate's portion of their Manager's share, until the Founder or the Manager sets another. */
+export const DEFAULT_ASSOCIATE_SHARE_PERCENT = 50;
 
 /** `percent` % of `amount`, rounded to cents. */
 export function shareOf(amount: number, percent: number): number {
   return Math.round(amount * percent) / 100;
 }
 
-/** The Associate's part never exceeds the Manager's share it is taken from. */
-export function associateShareWithin(associatePercent: number, managerPercent: number): number {
-  return Math.min(associatePercent, managerPercent);
+/** The Associate's part: their percent of the Manager's percent of `amount`, to the cent. */
+export function associateShareOf(amount: number, managerPercent: number, associatePercent: number): number {
+  return Math.round((amount * managerPercent * associatePercent) / 100) / 100;
 }

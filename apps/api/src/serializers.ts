@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { BLOCKING_STATUSES } from '@god/shared';
+import { BLOCKING_STATUSES, statusForRole } from '@god/shared';
 import type {
   MeDTO,
   MessageDTO,
@@ -46,24 +46,28 @@ export const userSelect = {
 export type UserRow = Prisma.UserGetPayload<{ select: typeof userSelect }>;
 
 /**
- * `pay`: include the Expert's hourly rate and the Associate's share. Only the
- * Founder, who sets them, and the person themselves see what they are paid.
+ * What someone is paid is shown to the Founder, who sets it, and to the person
+ * themselves; an Associate's share also to their own Manager, who sets it too.
  */
-export const toUserDTO = (u: UserRow, pay = false): UserDTO => ({
-  ...toUserRef(u),
-  managerId: u.managerId,
-  manager: u.manager ? toUserRef(u.manager) : null,
-  isActive: u.isActive,
-  timeZone: u.timeZone,
-  hourlyRate: pay && u.hourlyRate !== null ? Number(u.hourlyRate) : null,
-  sharePercent: pay && u.sharePercent !== null ? Number(u.sharePercent) : null,
-  createdAt: iso(u.createdAt),
-  updatedAt: iso(u.updatedAt),
-});
+export const toUserDTO = (u: UserRow, viewer: { id: string; role: Role }): UserDTO => {
+  const all = viewer.role === 'founder' || viewer.id === u.id;
+  const ownManager = viewer.role === 'manager' && u.managerId === viewer.id;
+  return {
+    ...toUserRef(u),
+    managerId: u.managerId,
+    manager: u.manager ? toUserRef(u.manager) : null,
+    isActive: u.isActive,
+    timeZone: u.timeZone,
+    hourlyRate: all && u.hourlyRate !== null ? Number(u.hourlyRate) : null,
+    sharePercent: (all || ownManager) && u.sharePercent !== null ? Number(u.sharePercent) : null,
+    createdAt: iso(u.createdAt),
+    updatedAt: iso(u.updatedAt),
+  };
+};
 
 export const meSelect = { ...userSelect, email: true } satisfies Prisma.UserSelect;
 export type MeRow = Prisma.UserGetPayload<{ select: typeof meSelect }>;
-export const toMeDTO = (u: MeRow): MeDTO => ({ ...toUserDTO(u, true), email: u.email });
+export const toMeDTO = (u: MeRow): MeDTO => ({ ...toUserDTO(u, { id: u.id, role: u.role as Role }), email: u.email });
 
 export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO => ({
   id: p.id,
@@ -118,8 +122,23 @@ export function canAssignProfile(
 }
 
 /**
+ * Who may set a Profile's status on the platforms: the Founder, the Associate
+ * looking after it, and the Manager of that Associate's team (§6.4).
+ */
+export function canEditProfilePlatforms(
+  viewer: { id: string; role: Role },
+  associate: { id: string; managerId: string | null } | null,
+): boolean {
+  if (viewer.role === 'founder') return true;
+  if (viewer.role === 'associate') return associate?.id === viewer.id;
+  if (viewer.role === 'manager') return associate !== null && (associate.id === viewer.id || associate.managerId === viewer.id);
+  return false;
+}
+
+/**
  * `platforms` lists every platform for viewers who may see platform statuses;
- * pass null for Experts, who only get the personal details.
+ * pass null for Experts, who only get the personal details. Rates are for the
+ * Founder and Managers: an Associate never sees what a Profile earns.
  */
 export const toProfileDTO = (
   p: ProfileRow & ProfileCounts,
@@ -152,7 +171,7 @@ export const toProfileDTO = (
         return {
           platform,
           status: row?.status ?? 'not_registered',
-          rate: row?.rate == null ? null : Number(row.rate),
+          rate: row?.rate == null || viewer.role === 'associate' ? null : Number(row.rate),
         };
       })
     : null,
@@ -160,6 +179,7 @@ export const toProfileDTO = (
   needsBank: p._count ? p._count.calls > 0 && p._count.banks === 0 : null,
   associate: platforms && p.associate ? toUserRef(p.associate) : null,
   canAssign: canAssignProfile(viewer, p.associate),
+  canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer, p.associate),
   managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,
   createdBy: toUserRef(p.createdBy),
   reviewedBy: p.reviewedBy ? toUserRef(p.reviewedBy) : null,
@@ -181,11 +201,12 @@ export const toMessageDTO = (m: MessageRow): MessageDTO => ({
 
 export const historyInclude = { actor: { select: userRefSelect } } satisfies Prisma.CallStatusHistoryInclude;
 export type HistoryRow = Prisma.CallStatusHistoryGetPayload<{ include: typeof historyInclude }>;
-export const toHistoryDTO = (h: HistoryRow): StatusHistoryDTO => ({
+/** A history row as the viewer's role sees its statuses (rows ending in a hidden step are left out upstream). */
+export const toHistoryDTO = (h: HistoryRow, role: Role): StatusHistoryDTO => ({
   id: h.id,
   callId: h.callId,
-  fromStatus: h.fromStatus,
-  toStatus: h.toStatus,
+  fromStatus: h.fromStatus === null ? null : statusForRole(role, h.fromStatus),
+  toStatus: statusForRole(role, h.toStatus),
   actor: toUserRef(h.actor),
   isOverride: h.isOverride,
   comment: h.comment,

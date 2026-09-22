@@ -3,6 +3,7 @@ import CancelRounded from '@mui/icons-material/CancelRounded';
 import EventAvailableRounded from '@mui/icons-material/EventAvailableRounded';
 import EventRepeatRounded from '@mui/icons-material/EventRepeatRounded';
 import HowToRegRounded from '@mui/icons-material/HowToRegRounded';
+import ManageSearchRounded from '@mui/icons-material/ManageSearchRounded';
 import PendingActionsRounded from '@mui/icons-material/PendingActionsRounded';
 import PlayCircleRounded from '@mui/icons-material/PlayCircleRounded';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
@@ -17,6 +18,7 @@ export const STATUS_ICONS: Record<CallStatus, ComponentType<SvgIconProps>> = {
   on_scheduling: PendingActionsRounded,
   scheduled: EventAvailableRounded,
   confirmed: HowToRegRounded,
+  research_ready: ManageSearchRounded,
   on_rescheduling: EventRepeatRounded,
   ongoing: PlayCircleRounded,
   finished: TaskAltRounded,
@@ -30,6 +32,7 @@ export const STATUS_COLORS: Record<CallStatus, string> = {
   on_scheduling: '#a1a1aa',
   scheduled: '#4a8cf0',
   confirmed: '#3b6fd8',
+  research_ready: '#2f5fb8',
   on_rescheduling: '#e0913a',
   ongoing: '#2fb37a',
   finished: '#8d6cf0',

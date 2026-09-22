@@ -12,18 +12,20 @@ import {
   CircularProgress,
   IconButton,
   Stack,
+  Tab,
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableRow,
+  Tabs,
   Tooltip,
   Typography,
 } from '@mui/material';
 import { type ProfileDTO, type ProfileStatus } from '@god/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { Fragment, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
 import { DeactivatedPill, PROFILE_STATUS_META, ProfileStatusChip } from '@/components/ProfileDetails';
 import { EmptyState, ErrorState, LoadingRows, PageHeader } from '@/components/common';
@@ -32,6 +34,7 @@ import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { FilterChips, Hint, SearchField, TableSurface, useDebouncedValue } from '../admin/adminShared';
 import { ProfileDialog } from '../admin/ProfileDialogs';
+import { PlatformStatusTable } from './PlatformStatusTable';
 import { AllPlatformStatuses, TopPlatformStatus, pendingItems } from './profileShared';
 
 type Filter = 'all' | 'mine' | ProfileStatus | 'needs_bank' | 'deactivated';
@@ -47,6 +50,9 @@ export default function ProfilesPage() {
   const [search, setSearch] = useState('');
   const q = useDebouncedValue(search.trim(), 300);
   const [filter, setFilter] = useState<Filter>('all');
+  // Two views of the same profiles: the list, and one table of every platform status.
+  const [params, setParams] = useSearchParams();
+  const view = params.get('view') === 'platforms' && !isExpert ? 'platforms' : 'profiles';
   const [adding, setAdding] = useState(false);
 
   const query = useQuery({
@@ -131,6 +137,17 @@ export default function ProfilesPage() {
         }
       />
 
+      {!isExpert && (
+        <Tabs
+          value={view}
+          onChange={(_, v: string) => setParams(v === 'platforms' ? { view: 'platforms' } : {}, { replace: true })}
+          sx={{ mb: 2.5, borderBottom: 1, borderColor: 'divider' }}
+        >
+          <Tab value="profiles" label="Profiles" />
+          <Tab value="platforms" label="Platform status" />
+        </Tabs>
+      )}
+
       {isFounder && counts.pending > 0 && filter !== 'pending' && (
         <Alert
           severity="info"
@@ -169,6 +186,8 @@ export default function ProfilesPage() {
         <LoadingRows rows={6} />
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
+      ) : view === 'platforms' ? (
+        <PlatformStatusTable profiles={visible} />
       ) : visible.length === 0 ? (
         <Card>
           {q ? (

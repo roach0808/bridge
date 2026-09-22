@@ -70,7 +70,7 @@ import { durationLabel, formatDateTime, formatUsd, inZone, relativeTime, soon, t
 import { useCallOwners } from './callOwners';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertAvailability';
 import { MessageThread } from './MessageThread';
-import { MoneyPill, PaidMark, callMoney, formatPercent } from './money';
+import { IncomeFigures, PaidMark, callIncome, formatPercent } from './money';
 import { StatusProgress } from './StatusProgress';
 
 
@@ -99,6 +99,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   // Starting needs the Ninja link; finishing needs how long the call really took;
   // paying needs what actually reached the bank.
   const [ninjaLink, setNinjaLink] = useState('');
+  // Marking the research data ready needs its link.
+  const [researchLink, setResearchLink] = useState('');
   const [actualMinutes, setActualMinutes] = useState('');
   const [income, setIncome] = useState('');
 
@@ -106,6 +108,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
     setTarget(to);
     setComment('');
     setNinjaLink(call.ninjaLink ?? '');
+    setResearchLink(call.researchLink ?? '');
     setActualMinutes(String(call.durationMinutes));
     // Start from the expected price; the bank usually pays a little less.
     setIncome(call.expectedPrice === null ? '' : String(call.expectedPrice));
@@ -135,6 +138,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const minutes = Number(actualMinutes);
   const minutesValid = Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_ACTUAL_DURATION_MINUTES;
   const linkValid = /^https?:\/\/\S+$/i.test(ninjaLink.trim());
+  const researchValid = /^https?:\/\/\S+$/i.test(researchLink.trim());
   const incomeValue = Number(income);
   const incomeValid = income.trim() !== '' && Number.isFinite(incomeValue) && incomeValue >= 0 && Math.round(incomeValue * 100) === incomeValue * 100;
   // An Expert asking to reschedule must say why, so the Associate knows what to arrange.
@@ -143,6 +147,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const ready =
     target === 'ongoing'
       ? linkValid
+      : target === 'research_ready'
+        ? researchValid
       : target === 'finished'
         ? minutesValid
         : target === 'process_to_bank'
@@ -157,6 +163,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
       to: target,
       comment: comment.trim() || undefined,
       ...(target === 'ongoing' ? { ninjaLink: ninjaLink.trim() } : {}),
+      ...(target === 'research_ready' ? { researchLink: researchLink.trim() } : {}),
       ...(target === 'finished' ? { actualDurationMinutes: minutes } : {}),
       ...(target === 'process_to_bank' ? { realIncome: incomeValue } : {}),
     });
@@ -201,7 +208,9 @@ function TransitionBar({ call }: { call: CallDTO }) {
                       : 'Needs rescheduling'
                     : to === 'confirmed'
                       ? 'Confirm time'
-                      : `Mark ${STATUS_LABELS[to].toLowerCase()}`}
+                      : to === 'research_ready'
+                        ? 'Research data ready'
+                        : `Mark ${STATUS_LABELS[to].toLowerCase()}`}
                   {override && (
                     <Box component="span" sx={{ ml: 0.75, fontSize: 11, fontWeight: 500, opacity: 0.7 }}>
                       override
@@ -235,6 +244,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
             <DialogTitle>
               {target === 'confirmed'
                 ? 'Confirm this call?'
+                : target === 'research_ready'
+                  ? 'Is the research data ready?'
                 : expertReschedule
                   ? 'Request rescheduling?'
                   : cancelling
@@ -254,22 +265,23 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   {call.durationMinutes} minutes and can take the call.
                 </Alert>
               )}
-              {(target === 'confirmed' || target === 'ongoing') && me.role === 'expert' && (
+              {target === 'research_ready' && (
+                <Alert severity="info" icon={<ManageSearchRounded />} sx={{ mb: 2 }}>
+                  The Expert is told and can start the call once it is ready. Associates and Managers do not see this step.
+                </Alert>
+              )}
+              {(target === 'ongoing' || target === 'finished') && me.role === 'expert' && call.researchLink && (
                 <Alert
-                  severity={call.gptLink ? 'success' : 'warning'}
+                  severity="success"
                   icon={<ManageSearchRounded />}
                   sx={{ mb: 2 }}
                   action={
-                    call.gptLink ? (
-                      <Button color="inherit" size="small" href={call.gptLink} target="_blank" rel="noopener noreferrer">
-                        Open
-                      </Button>
-                    ) : undefined
+                    <Button color="inherit" size="small" href={call.researchLink} target="_blank" rel="noopener noreferrer">
+                      Open
+                    </Button>
                   }
                 >
-                  {call.gptLink
-                    ? 'Prepare with the deep search data before the call.'
-                    : 'The deep search data for this call is not there yet; the Founder adds it before the call.'}
+                  Prepare with the research data before the call.
                 </Alert>
               )}
               {cancelling && (
@@ -313,6 +325,22 @@ function TransitionBar({ call }: { call: CallDTO }) {
                 </Alert>
               )}
               <Stack spacing={2}>
+                {target === 'research_ready' && (
+                  <TextField
+                    label="Research data link"
+                    required
+                    type="url"
+                    placeholder="https://chatgpt.com/share/…"
+                    value={researchLink}
+                    onChange={(e) => setResearchLink(e.target.value)}
+                    error={Boolean(errors.researchLink) || (researchLink !== '' && !researchValid)}
+                    helperText={
+                      errors.researchLink ??
+                      (researchLink !== '' && !researchValid ? 'Enter a full link starting with https://' : 'Only the Expert and the Founder can see it')
+                    }
+                    autoFocus
+                  />
+                )}
                 {target === 'ongoing' && (
                   <TextField
                     label="Ninja link"
@@ -370,7 +398,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
                     minRows={2}
                     value={comment}
                     onChange={(e) => setComment(e.target.value)}
-                    autoFocus={target !== 'ongoing'}
+                    autoFocus={target !== 'ongoing' && target !== 'research_ready'}
                   />
                 )}
               </Stack>
@@ -396,6 +424,100 @@ function TransitionBar({ call }: { call: CallDTO }) {
 }
 
 // ---------------------------------------------------------------------------
+
+/** Turns links in plain text into clickable ones. */
+function Linkified({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s]+)/g);
+  return (
+    <>
+      {parts.map((part, i) =>
+        /^https?:\/\//.test(part) ? (
+          <Link key={i} href={part} target="_blank" rel="noopener noreferrer" sx={{ wordBreak: 'break-all' }}>
+            {part}
+          </Link>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * How to join the platform's meeting (link, passcode…): added by whoever runs the
+ * call, their Manager or the Founder; read by everyone on the call, the Expert included.
+ */
+function MeetingDetails({ call }: { call: CallDTO }) {
+  const toast = useToast();
+  const update = useUpdateCall(call);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(call.meetingDetails ?? '');
+  useEffect(() => {
+    if (editing) setDraft(call.meetingDetails ?? '');
+  }, [editing, call.meetingDetails]);
+  const editable = call.permissions.editMeeting;
+
+  return (
+    <Field
+      label={
+        <Stack direction="row" spacing={0.5} alignItems="center" component="span">
+          <span>Meeting details</span>
+          {editable && !editing && (
+            <IconButton size="small" aria-label="Edit meeting details" onClick={() => setEditing(true)} sx={{ p: 0.25 }}>
+              <EditRounded sx={{ fontSize: 14 }} />
+            </IconButton>
+          )}
+        </Stack>
+      }
+    >
+      {editing ? (
+        <Stack spacing={1} sx={{ mt: 0.5 }}>
+          <TextField
+            multiline
+            minRows={2}
+            autoFocus
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={'Meeting link, passcode, dial-in…\ne.g. Zoom https://zoom.us/j/123 · passcode 4411'}
+            slotProps={{ htmlInput: { maxLength: 2000 } }}
+          />
+          <Stack direction="row" spacing={1}>
+            <Button
+              size="small"
+              variant="contained"
+              disabled={update.isPending || draft.trim() === (call.meetingDetails ?? '')}
+              onClick={() =>
+                update.mutate(
+                  { meetingDetails: draft.trim() || null },
+                  {
+                    onSuccess: () => {
+                      toast.success('Meeting details saved — everyone on the call can see them');
+                      setEditing(false);
+                    },
+                    onError: (e) => toast.error(errorMessage(e)),
+                  },
+                )
+              }
+            >
+              {update.isPending ? <CircularProgress size={16} color="inherit" /> : 'Save'}
+            </Button>
+            <Button size="small" color="inherit" onClick={() => setEditing(false)} disabled={update.isPending}>
+              Cancel
+            </Button>
+          </Stack>
+        </Stack>
+      ) : call.meetingDetails ? (
+        <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          <Linkified text={call.meetingDetails} />
+        </Typography>
+      ) : (
+        <Typography variant="body2" color={editable ? 'warning.main' : 'text.disabled'}>
+          {editable ? 'Not added yet — add the meeting link and passcode' : 'Not added yet'}
+        </Typography>
+      )}
+    </Field>
+  );
+}
 
 function SectionCard({ title, action, children }: { title: string; action?: ReactNode; children: ReactNode }) {
   return (
@@ -679,21 +801,21 @@ function RealIncomeEditor({ call }: { call: CallDTO }) {
 }
 
 /**
- * The deep search data the Expert prepares the call with (§9.1): the Founder
+ * The research data the Expert prepares the call with (§9.1): the Founder
  * adds the link while the call is being prepared, the Expert reads it.
  */
-function DeepSearchCard({ call }: { call: CallDTO }) {
+function ResearchDataCard({ call }: { call: CallDTO }) {
   const toast = useToast();
   const update = useUpdateCall(call);
-  const [link, setLink] = useState(call.gptLink ?? '');
-  useEffect(() => setLink(call.gptLink ?? ''), [call.gptLink]);
-  const editable = call.permissions.editGptLink;
+  const [link, setLink] = useState(call.researchLink ?? '');
+  useEffect(() => setLink(call.researchLink ?? ''), [call.researchLink]);
+  const editable = call.permissions.editResearchLink;
   const trimmed = link.trim();
   const valid = trimmed === '' || /^https?:\/\/\S+$/i.test(trimmed);
-  const dirty = trimmed !== (call.gptLink ?? '');
+  const dirty = trimmed !== (call.researchLink ?? '');
 
   return (
-    <SectionCard title="Deep search data">
+    <SectionCard title="Research data">
       <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.5 }}>
         What the Expert reads to prepare for the call. Only the Founder and the Expert can see this.
       </Typography>
@@ -705,7 +827,7 @@ function DeepSearchCard({ call }: { call: CallDTO }) {
             value={link}
             onChange={(e) => setLink(e.target.value)}
             error={!valid}
-            helperText={valid ? 'Paste the link to the deep search for this call' : 'Enter a full link starting with https://'}
+            helperText={valid ? 'Paste the link to the research data for this call' : 'Enter a full link starting with https://'}
             placeholder="https://chatgpt.com/share/…"
           />
           <Stack direction="row" spacing={1.5} alignItems="center">
@@ -714,23 +836,23 @@ function DeepSearchCard({ call }: { call: CallDTO }) {
               disabled={!dirty || !valid || update.isPending}
               onClick={() =>
                 update.mutate(
-                  { gptLink: trimmed || null },
+                  { researchLink: trimmed || null },
                   { onSuccess: () => toast.success('GPT link saved'), onError: (e) => toast.error(errorMessage(e)) },
                 )
               }
             >
               {update.isPending ? <CircularProgress size={18} /> : 'Save link'}
             </Button>
-            {call.gptLink && (
-              <Button size="small" color="inherit" href={call.gptLink} target="_blank" rel="noopener noreferrer" sx={{ color: 'text.secondary' }}>
+            {call.researchLink && (
+              <Button size="small" color="inherit" href={call.researchLink} target="_blank" rel="noopener noreferrer" sx={{ color: 'text.secondary' }}>
                 Open
               </Button>
             )}
           </Stack>
         </Stack>
-      ) : call.gptLink ? (
-        <Button variant="contained" startIcon={<ManageSearchRounded />} href={call.gptLink} target="_blank" rel="noopener noreferrer">
-          Open deep search data
+      ) : call.researchLink ? (
+        <Button variant="contained" startIcon={<ManageSearchRounded />} href={call.researchLink} target="_blank" rel="noopener noreferrer">
+          Open research data
         </Button>
       ) : (
         <Typography variant="body2" color="text.secondary">
@@ -853,6 +975,7 @@ function PayoutRow({
   who,
   detail,
   amount,
+  expected,
   paidAt,
   zone,
   extra,
@@ -861,7 +984,10 @@ function PayoutRow({
   payee: Payee;
   who: UserRef | null;
   detail: string;
+  /** The final amount (for a share, once the bank has paid). */
   amount: number | null;
+  /** What it should come to, shown until the final amount is known (and beside it when they differ). */
+  expected?: number | null;
   paidAt: string | null;
   zone: string;
   extra?: ReactNode;
@@ -899,10 +1025,26 @@ function PayoutRow({
         {extra}
       </Box>
       <Stack alignItems="flex-end" spacing={0.25}>
-        <Typography variant="body1" fontWeight={650} sx={{ fontVariantNumeric: 'tabular-nums' }}>
-          {amount === null ? '—' : formatUsd(amount)}
-        </Typography>
-        {amount !== null && <PaidMark line={{ amount, paidAt }} zone={zone} />}
+        {amount === null && expected != null ? (
+          <Tooltip title="Expected from the rate and the real duration; final once the bank has paid">
+            <Typography variant="body1" fontWeight={650} color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+              {formatUsd(expected)}
+              <Typography component="span" variant="caption" sx={{ ml: 0.5 }}>
+                expected
+              </Typography>
+            </Typography>
+          </Tooltip>
+        ) : (
+          <Typography variant="body1" fontWeight={650} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {amount === null ? '—' : formatUsd(amount)}
+          </Typography>
+        )}
+        {amount !== null && expected != null && expected !== amount && (
+          <Typography variant="caption" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            expected {formatUsd(expected)}
+          </Typography>
+        )}
+        {amount !== null && <PaidMark line={{ paidAt }} zone={zone} />}
       </Stack>
       {canMark ? (
         <Button
@@ -968,9 +1110,8 @@ function ExpertRateEditor({ call }: { call: CallDTO }) {
 function PayoutsCard({ call, zone }: { call: CallDTO; zone: string }) {
   const me = useMe();
   const { expert, manager, associate } = call.payouts;
-  const took = ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'].includes(call.status);
-  const waitingForBank = took && call.status !== 'process_to_bank' && (me.role === 'manager' || me.role === 'associate');
-  if (!expert && !manager && !associate && !waitingForBank) return null;
+  if (!expert && !manager && !associate) return null;
+  const pending = manager && !manager.settled ? ' — expected until the bank pays' : '';
 
   return (
     <SectionCard title={me.role === 'expert' ? 'Your pay' : 'Payouts'} action={<PaidOutlined sx={{ fontSize: 20, color: 'text.secondary' }} />}>
@@ -997,11 +1138,16 @@ function PayoutsCard({ call, zone }: { call: CallDTO; zone: string }) {
             payee="manager"
             who={manager.user}
             amount={manager.amount}
+            expected={manager.expected}
             paidAt={manager.paidAt}
             zone={zone}
-            detail={`${formatPercent(manager.percent)} of the real income${
-              associate && manager.keeps !== null ? ` — ${formatUsd(manager.keeps)} to keep after the Associate’s part` : ''
-            }`}
+            detail={
+              manager.percent === null
+                ? `Your Manager’s share of this call${pending}`
+                : `${formatPercent(manager.percent)} of the income${pending}${
+                    associate && manager.keeps !== null ? ` · ${formatUsd(manager.keeps)} stays with the Manager after the Associate’s part` : ''
+                  }`
+            }
           />
         )}
         {associate && (
@@ -1010,15 +1156,11 @@ function PayoutsCard({ call, zone }: { call: CallDTO; zone: string }) {
             payee="associate"
             who={associate.user}
             amount={associate.amount}
+            expected={associate.expected}
             paidAt={associate.paidAt}
             zone={zone}
-            detail={`${formatPercent(associate.percent)} of the real income, paid by the Manager out of their share`}
+            detail={`${formatPercent(associate.percent)} of the Manager’s share, paid by the Manager${pending}`}
           />
-        )}
-        {waitingForBank && (
-          <Typography variant="body2" color="text.secondary" sx={{ py: 1.25 }}>
-            {me.role === 'manager' ? 'Your share' : 'Your part'} is worked out from the real income once this call is paid to bank.
-          </Typography>
         )}
       </Stack>
     </SectionCard>
@@ -1178,8 +1320,8 @@ export default function CallDetailPage() {
 
   const expertZone = call.expert?.timeZone ?? null;
   const perms = call.permissions;
-  const money = callMoney(call, me.role);
-  const preparing = ['on_scheduling', 'scheduled', 'confirmed', 'on_rescheduling', 'ongoing'].includes(call.status);
+  const income = callIncome(call, me.role);
+  const preparing = ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling', 'ongoing'].includes(call.status);
 
   return (
     <>
@@ -1236,12 +1378,12 @@ export default function CallDetailPage() {
                       {whenLabel(call.scheduledAt, zone)} · {durationLabel(call.durationMinutes)}
                     </Typography>
                   </Tooltip>
-                  {money && (
+                  {income && (
                     <>
                       <Typography variant="body2" color="text.disabled">
                         ·
                       </Typography>
-                      <MoneyPill money={money} />
+                      <IncomeFigures income={income} />
                     </>
                   )}
                 </Stack>
@@ -1264,8 +1406,8 @@ export default function CallDetailPage() {
 
       <Box sx={{ display: 'grid', gap: 2.5, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 1.4fr) minmax(360px, 1fr)' }, alignItems: 'start' }}>
         <Stack spacing={2.5} sx={{ minWidth: 0 }}>
-          {/* While the call is being prepared, the deep search data comes first. */}
-          {(me.role === 'founder' || me.role === 'expert') && preparing && <DeepSearchCard call={call} />}
+          {/* While the call is being prepared, the research data comes first. */}
+          {(me.role === 'founder' || me.role === 'expert') && preparing && <ResearchDataCard call={call} />}
           <SectionCard
             title="Details"
             action={
@@ -1283,14 +1425,12 @@ export default function CallDetailPage() {
                 </Tooltip>
               </Field>
               <Field label="Platform">{call.platform.name}</Field>
-              {money && (
-                <Field label={money.label}>
-                  <Tooltip title={money.hint}>
-                    <Typography variant="body2" fontWeight={650} sx={{ color: money.color }}>
-                      {money.value}
-                    </Typography>
-                  </Tooltip>
-                </Field>
+              {income && (
+                <Box sx={{ gridColumn: '1 / -1' }}>
+                  <Field label="Income">
+                    <IncomeFigures income={income} variant="lines" />
+                  </Field>
+                </Box>
               )}
               <Field label="Duration">
                 {durationLabel(call.durationMinutes)} · ends {timeOfDay(call.endsAt, zone)}
@@ -1301,6 +1441,9 @@ export default function CallDetailPage() {
                 </Field>
               )}
               <Field label="Platform associate">{call.platformAssociateName}</Field>
+              <Box sx={{ gridColumn: '1 / -1' }}>
+                <MeetingDetails call={call} />
+              </Box>
               <Box sx={{ gridColumn: '1 / -1' }}>
                 <Field label="Project details">
                   <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap' }}>
@@ -1359,8 +1502,9 @@ export default function CallDetailPage() {
           </SectionCard>
 
           <PayoutsCard call={call} zone={zone} />
-          {me.role !== 'expert' && <RateCard call={call} />}
-          {(me.role === 'founder' || me.role === 'expert') && !preparing && <DeepSearchCard call={call} />}
+          {/* Associates never see what a call is worth. */}
+          {me.role !== 'expert' && me.role !== 'associate' && <RateCard call={call} />}
+          {(me.role === 'founder' || me.role === 'expert') && !preparing && <ResearchDataCard call={call} />}
 
 
           {FEATURES.messages && (

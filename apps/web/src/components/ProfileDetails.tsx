@@ -115,20 +115,19 @@ function useSetPlatform(profileId: string, platformId: string) {
   });
 }
 
-/** Founder-only inline editor for one profile × platform status. */
+/**
+ * Inline editor for one profile × platform status: the Founder, the Associate
+ * looking after the Profile and their Manager (`profile.canEditPlatforms`).
+ */
 export function PlatformStatusSelect({
   profile,
   platformId,
   status,
-  rate,
 }: {
   profile: Pick<ProfileDTO, 'id' | 'name'>;
   platformId: string;
   status: PlatformRegistration;
-  /** Needed to mark the Profile registered. */
-  rate?: number | null;
 }) {
-  const toast = useToast();
   const mutation = useSetPlatform(profile.id, platformId);
   const value = mutation.isPending && mutation.variables?.status ? mutation.variables.status : status;
   return (
@@ -138,14 +137,7 @@ export function PlatformStatusSelect({
       disableUnderline
       value={value}
       disabled={mutation.isPending}
-      onChange={(e) => {
-        const next = e.target.value as PlatformRegistration;
-        if (next === 'registered' && rate == null) {
-          toast.error('Set the hourly rate first — you can change it later');
-          return;
-        }
-        mutation.mutate({ status: next });
-      }}
+      onChange={(e) => mutation.mutate({ status: e.target.value as PlatformRegistration })}
       renderValue={(v) => <PlatformStatusChip status={v} />}
       inputProps={{ 'aria-label': `${profile.name} platform status` }}
       sx={{ '& .MuiSelect-select': { py: 0.25, display: 'flex', alignItems: 'center' } }}
@@ -164,13 +156,10 @@ export function PlatformRateField({
   profile,
   platformId,
   rate,
-  registered,
 }: {
   profile: Pick<ProfileDTO, 'id' | 'name'>;
   platformId: string;
   rate: number | null;
-  /** A registered Profile must keep a rate, so the field cannot be cleared. */
-  registered?: boolean;
 }) {
   const mutation = useSetPlatform(profile.id, platformId);
   const text = (r: number | null) => (r === null ? '' : String(r));
@@ -178,7 +167,7 @@ export function PlatformRateField({
   useEffect(() => setDraft(text(rate)), [rate]);
   const empty = draft.trim() === '';
   const value = Number(draft);
-  const valid = empty ? !registered : Number.isFinite(value) && value >= 0 && value <= MAX_PLATFORM_RATE;
+  const valid = empty || (Number.isFinite(value) && value >= 0 && value <= MAX_PLATFORM_RATE);
 
   const save = () => {
     if (!valid) return setDraft(text(rate));
@@ -272,12 +261,11 @@ function TextBlock({ label, text }: { label: string; text: string | null }) {
 function PlatformRow({
   profile,
   entry: { platform, status, rate },
-  editable,
 }: {
   profile: ProfileDTO;
   entry: NonNullable<ProfileDTO['platformStatuses']>[number];
-  editable: boolean;
 }) {
+  const role = useMe().role;
   const [open, setOpen] = useState(false);
   return (
     <Box>
@@ -312,21 +300,24 @@ function PlatformRow({
       {open && (
         <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center', pl: 3.5, pr: 0.5, pb: 1.25 }}>
           <Field label="Status">
-            {editable ? (
-              <PlatformStatusSelect profile={profile} platformId={platform.id} status={status} rate={rate} />
+            {profile.canEditPlatforms ? (
+              <PlatformStatusSelect profile={profile} platformId={platform.id} status={status} />
             ) : (
               <PlatformStatusChip status={status} />
             )}
           </Field>
-          <Field label="Rate">
-            {editable ? (
-              <PlatformRateField profile={profile} platformId={platform.id} rate={rate} registered={status === 'registered'} />
-            ) : (
-              <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.primary'}>
-                {rate === null ? 'No rate' : formatRate(rate)}
-              </Typography>
-            )}
-          </Field>
+          {/* The rate is the Founder's to set; Associates never see what a Profile earns. */}
+          {role !== 'associate' && (
+            <Field label="Rate">
+              {role === 'founder' ? (
+                <PlatformRateField profile={profile} platformId={platform.id} rate={rate} />
+              ) : (
+                <Typography variant="body2" color={rate === null ? 'text.disabled' : 'text.primary'}>
+                  {rate === null ? 'No rate' : formatRate(rate)}
+                </Typography>
+              )}
+            </Field>
+          )}
         </Box>
       )}
     </Box>
@@ -408,7 +399,8 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
               Expert network platforms
             </Typography>
             <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
-              Green: registered · red: not registered. Click a platform for its status{isFounder ? ' and rate' : ''}.
+              Green: registered · red: not registered. Click a platform for its status
+              {p.canEditPlatforms ? ', which you can change' : ''}.
             </Typography>
             {p.platformStatuses.length === 0 ? (
               <Typography variant="body2" color="text.secondary">
@@ -417,7 +409,7 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
             ) : (
               <Stack divider={<Divider flexItem />}>
                 {p.platformStatuses.map((s) => (
-                  <PlatformRow key={s.platform.id} profile={p} entry={s} editable={isFounder} />
+                  <PlatformRow key={s.platform.id} profile={p} entry={s} />
                 ))}
               </Stack>
             )}

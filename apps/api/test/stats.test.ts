@@ -95,6 +95,14 @@ describe('statistics by associate', () => {
     expect((await (await as(fx.m1)).get('/stats/associates')).body.total).toMatchObject({ calls: 2, potential: 1200 });
   });
 
+  it('an associate counts their calls without seeing the money', async () => {
+    await setRate(fx.approvedProfile.id, fx.platform.id, 600);
+    await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: '2026-09-17T14:00:00Z' });
+    const res = await (await as(fx.a1)).get('/stats/associates');
+    expect(res.body).toMatchObject({ showsMoney: false, total: { calls: 1, potential: 0, unpriced: 0 } });
+    expect((await (await as(fx.m1)).get('/stats/associates')).body.showsMoney).toBe(true);
+  });
+
   it('a deactivated associate shows only while they have calls in the range', async () => {
     await prisma.user.update({ where: { id: fx.a4.id }, data: { isActive: false } });
     const founder = await as(fx.founder);
@@ -166,10 +174,9 @@ describe('financial statistics', () => {
     expect(res.body.byPlatform).toEqual([{ platform: fx.platform, cell: res.body.total }]);
     expect(res.body.byProfile[0]).toMatchObject({ profile: { id: fx.approvedProfile.id, isActive: true }, cell: { real: 570 } });
 
-    // Managers see every Associate's money, Associates their own, Experts none.
+    // Managers see every Associate's money; Associates and Experts see none.
     expect((await (await as(fx.m1)).get('/stats/finance', { period: 'week', count: 2 })).body.total).toMatchObject({ real: 570 });
-    expect((await (await as(fx.a1)).get('/stats/finance', { period: 'week', count: 2 })).body.total).toMatchObject({ real: 570 });
-    expect((await (await as(fx.a3)).get('/stats/finance', { period: 'week', count: 2 })).body.total).toMatchObject({ real: 0, calls: 0 });
+    expectError(await (await as(fx.a1)).get('/stats/finance'), 403);
     expectError(await (await as(fx.e1)).get('/stats/finance'), 403);
   });
 });

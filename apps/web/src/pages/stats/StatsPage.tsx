@@ -50,9 +50,9 @@ export default function StatsPage() {
   const isFounder = me.role === 'founder';
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab') as TabKey | null;
-  // Experts never reach this page; everyone else sees money for the calls they can see.
-  const tab: TabKey =
-    (requested === 'profiles' && isFounder) || (requested === 'finance' && me.role !== 'expert') ? requested : 'associates';
+  // Experts never reach this page; Associates count their calls but never see what calls bring in.
+  const seesMoney = me.role === 'founder' || me.role === 'manager';
+  const tab: TabKey = (requested === 'profiles' && isFounder) || (requested === 'finance' && seesMoney) ? requested : 'associates';
   const period = (PERIODS.find((p) => p.value === params.get('period')) ?? PERIODS[0])!;
   const set = (key: string, value: string) => setParams((p) => ({ ...Object.fromEntries(p), [key]: value }), { replace: true });
 
@@ -65,14 +65,14 @@ export default function StatsPage() {
             ? 'Calls and money by Associate and by Profile, and expected against real income.'
             : me.role === 'manager'
               ? 'Scheduled calls, potential money and income across every Associate.'
-              : 'Your scheduled calls, and what they are expected to bring in against what reached the bank.'
+              : 'Your scheduled and finished calls.'
         }
       />
 
       <Tabs value={tab} onChange={(_, v: TabKey) => set('tab', v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }} variant="scrollable" allowScrollButtonsMobile>
         <Tab value="associates" label="By associate" />
         {isFounder && <Tab value="profiles" label="By profile" />}
-        <Tab value="finance" label="Finance" />
+        {seesMoney && <Tab value="finance" label="Finance" />}
       </Tabs>
 
       {tab !== 'profiles' && (
@@ -126,7 +126,7 @@ const periodTooltip = (p: { start: string; end: string }) =>
 
 // --- By associate --------------------------------------------------------------------
 
-function AssociateCell({ cell, strong }: { cell: AssociateStatsCell; strong?: boolean }) {
+function AssociateCell({ cell, strong, money = true }: { cell: AssociateStatsCell; strong?: boolean; money?: boolean }) {
   if (cell.calls === 0) {
     return (
       <Typography variant="body2" color="text.disabled">
@@ -139,14 +139,16 @@ function AssociateCell({ cell, strong }: { cell: AssociateStatsCell; strong?: bo
       title={`${cell.calls} call${cell.calls === 1 ? '' : 's'}, ${cell.finishedCalls} finished${cell.unpriced ? `, ${cell.unpriced} without a rate` : ''}`}
     >
       <Box sx={NUM}>
-        <Typography variant="body2" fontWeight={strong ? 650 : 550}>
-          {formatUsd(cell.potential)}
-          {cell.unpriced > 0 && (
-            <Box component="span" sx={{ color: GAP_COLOR }}>
-              {' *'}
-            </Box>
-          )}
-        </Typography>
+        {money && (
+          <Typography variant="body2" fontWeight={strong ? 650 : 550}>
+            {formatUsd(cell.potential)}
+            {cell.unpriced > 0 && (
+              <Box component="span" sx={{ color: GAP_COLOR }}>
+                {' *'}
+              </Box>
+            )}
+          </Typography>
+        )}
         <Typography variant="caption" color="text.secondary">
           {cell.calls} call{cell.calls === 1 ? '' : 's'}
         </Typography>
@@ -163,7 +165,7 @@ function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
   });
   if (query.isLoading) return <Loading />;
   if (query.isError || !query.data) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  const { periods, rows, totals, total } = query.data;
+  const { periods, rows, totals, total, showsMoney } = query.data;
   const current = totals.at(-1)!;
   const previous = totals.at(-2);
   const unpriced = total.unpriced;
@@ -176,23 +178,33 @@ function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
         <Grid size={{ xs: 6, md: 3 }}>
           <StatTile label={`${period.current}: calls`} value={current.calls} footer={previous && <Trend now={current.calls} before={previous.calls} />} />
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile
-            label={`${period.current}: potential`}
-            color={EXPECTED_COLOR}
-            value={formatUsd(current.potential)}
-            footer={previous && <Trend now={current.potential} before={previous.potential} money />}
-          />
-        </Grid>
+        {showsMoney && (
+          <Grid size={{ xs: 6, md: 3 }}>
+            <StatTile
+              label={`${period.current}: potential`}
+              color={EXPECTED_COLOR}
+              value={formatUsd(current.potential)}
+              footer={previous && <Trend now={current.potential} before={previous.potential} money />}
+            />
+          </Grid>
+        )}
         <Grid size={{ xs: 6, md: 3 }}>
           <StatTile label={`Last ${periods.length} periods: calls`} value={total.calls} footer={<Muted>{total.finishedCalls} finished</Muted>} />
         </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label={`Last ${periods.length} periods: potential`} color={EXPECTED_COLOR} value={formatUsd(total.potential)} />
-        </Grid>
+        {showsMoney && (
+          <Grid size={{ xs: 6, md: 3 }}>
+            <StatTile label={`Last ${periods.length} periods: potential`} color={EXPECTED_COLOR} value={formatUsd(total.potential)} />
+          </Grid>
+        )}
       </Grid>
 
-      <SectionTitle hint="Calls by their scheduled time. Potential money is rate × duration: the real duration once finished, the booked one before.">
+      <SectionTitle
+        hint={
+          showsMoney
+            ? 'Calls by their scheduled time. Potential money is rate × duration: the real duration once finished, the booked one before.'
+            : 'Calls by their scheduled time.'
+        }
+      >
         {me.role === 'associate' ? 'Your calls' : me.role === 'manager' ? 'You and your team' : 'Associates and Managers'}
       </SectionTitle>
 
@@ -226,11 +238,11 @@ function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
                     </Stack>
                   </TableCell>
                   <TableCell align="right">
-                    <AssociateCell cell={r.total} strong />
+                    <AssociateCell cell={r.total} strong money={showsMoney} />
                   </TableCell>
                   {order.map((i) => (
                     <TableCell key={i} align="right">
-                      <AssociateCell cell={r.periods[i]!} />
+                      <AssociateCell cell={r.periods[i]!} money={showsMoney} />
                     </TableCell>
                   ))}
                 </TableRow>
@@ -241,11 +253,11 @@ function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
                 <TableRow>
                   <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1, fontWeight: 650, color: 'text.primary' }}>All</TableCell>
                   <TableCell align="right">
-                    <AssociateCell cell={total} strong />
+                    <AssociateCell cell={total} strong money={showsMoney} />
                   </TableCell>
                   {order.map((i) => (
                     <TableCell key={i} align="right">
-                      <AssociateCell cell={totals[i]!} strong />
+                      <AssociateCell cell={totals[i]!} strong money={showsMoney} />
                     </TableCell>
                   ))}
                 </TableRow>

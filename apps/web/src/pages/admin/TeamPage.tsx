@@ -1,3 +1,4 @@
+import EditRounded from '@mui/icons-material/EditRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import PersonAddAlt1Rounded from '@mui/icons-material/PersonAddAlt1Rounded';
 import {
@@ -5,13 +6,22 @@ import {
   Button,
   Card,
   CardContent,
+  CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   Grid,
+  IconButton,
+  InputAdornment,
   Skeleton,
   Stack,
+  TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
 import {
+  DEFAULT_ASSOCIATE_SHARE_PERCENT,
   TRACK_STAGES,
   STAGE_LABELS,
   STAGE_STATUSES,
@@ -20,12 +30,13 @@ import {
   type Stage,
   type UserDTO,
 } from '@god/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { ConfirmDialog, EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
+import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { formatDate } from '@/lib/time';
 import { useAuth } from '@/auth/AuthProvider';
@@ -238,6 +249,7 @@ export default function TeamPage() {
                         {m.isActive ? 'Active' : 'Deactivated'}
                       </Box>
                     </Stack>
+                    <TeamShare member={m} />
                     <Box sx={{ mt: 2.25 }}>
                       {dashboard.isLoading ? (
                         <Skeleton variant="rounded" height={52} />
@@ -294,5 +306,77 @@ export default function TeamPage() {
         onClose={() => setConfirmOpen(false)}
       />
     </Box>
+  );
+}
+
+/**
+ * The Associate's portion of their Manager's share of each call (§3.1): the
+ * Manager sets it for their own team, and pays it out of their share.
+ */
+function TeamShare({ member }: { member: UserDTO }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const share = member.sharePercent;
+  const n = Number(draft);
+  const valid = draft.trim() !== '' && Number.isFinite(n) && n >= 0 && n <= 100;
+  const save = useMutation({
+    mutationFn: () => api.users.update(member.id, { sharePercent: Math.round(n * 100) / 100 }),
+    onSuccess: (saved) => {
+      void queryClient.invalidateQueries({ queryKey: qk.users.all });
+      toast.success(`${saved.nickname} now gets ${saved.sharePercent}% of your share`);
+      setOpen(false);
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  return (
+    <>
+      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 1.5 }}>
+        <Typography variant="body2" color="text.secondary">
+          Gets <strong>{share ?? 0}%</strong> of your share of each call
+        </Typography>
+        <Tooltip title="Change their share">
+          <IconButton
+            size="small"
+            aria-label={`Change ${member.nickname}’s share`}
+            onClick={() => {
+              setDraft(String(share ?? DEFAULT_ASSOCIATE_SHARE_PERCENT));
+              setOpen(true);
+            }}
+          >
+            <EditRounded sx={{ fontSize: 16, color: 'text.secondary' }} />
+          </IconButton>
+        </Tooltip>
+      </Stack>
+      <Dialog open={open} onClose={() => !save.isPending && setOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>{member.nickname}’s share</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Their portion of your share of each call, which you pay them. With a 15% share, 50% gives them 7.5% of the call’s
+            income. Calls already paid to bank keep the share they had.
+          </Typography>
+          <TextField
+            autoFocus
+            fullWidth
+            type="number"
+            label="Share of your share"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            error={draft !== '' && !valid}
+            helperText={draft !== '' && !valid ? 'Enter a share from 0 to 100' : undefined}
+            slotProps={{ input: { endAdornment: <InputAdornment position="end">%</InputAdornment> }, htmlInput: { min: 0, max: 100, step: 5 } }}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button color="inherit" onClick={() => setOpen(false)} disabled={save.isPending}>
+            Cancel
+          </Button>
+          <Button variant="contained" disabled={!valid || save.isPending} onClick={() => save.mutate()}>
+            {save.isPending ? <CircularProgress size={18} color="inherit" /> : 'Save'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+    </>
   );
 }

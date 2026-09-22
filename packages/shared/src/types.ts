@@ -134,6 +134,8 @@ export interface ProfileDTO {
   associate: UserRef | null;
   /** The viewer may hand the Profile to another Associate (the Founder; a Manager within their team). */
   canAssign: boolean;
+  /** The viewer may change the Profile's status on the platforms (the Founder; its Associate; their Manager). */
+  canEditPlatforms: boolean;
   /** The Manager's percent of this Profile's real income. Founder and Managers only. */
   managerSharePercent: number | null;
   createdBy: UserRef;
@@ -160,15 +162,17 @@ export interface CallDTO {
   notes: string | null;
   projectDetails: string;
   platformAssociateName: string;
-  /** Rate x actual duration (USD). Null until both are known, and always null for Experts. */
+  /** How to join the platform's meeting (link, passcode…), added by whoever runs the call. Everyone on the call reads it. */
+  meetingDetails: string | null;
+  /** Rate x actual duration (USD). Null until both are known, and always null for Experts and Associates. */
   expectedPrice: number | null;
-  /** What reached the bank (USD), entered when processed to bank. Null for Experts. */
+  /** What reached the bank (USD), entered when processed to bank. Null for Experts and Associates. */
   realIncome: number | null;
-  /** Added by the Expert when the call starts. */
+  /** Added by the Expert when the call starts. Only the Founder and the Expert receive it. */
   ninjaLink: string | null;
-  /** The deep search data for preparing the call. Only the Founder (who sets it) and the Expert receive it. */
-  gptLink: string | null;
-  /** The Profile's rate on the call's platform, and this call's override. Null for Experts. */
+  /** The research data for preparing the call. Only the Founder (who sets it) and the Expert receive it. */
+  researchLink: string | null;
+  /** The Profile's rate on the call's platform, and this call's override. Null for Experts and Associates. */
   platformRate: number | null;
   rateOverride: number | null;
   /** Entered by the Expert when finishing. */
@@ -189,25 +193,33 @@ export interface CallDTO {
 
 /** One person's pay for a call, and whether it was paid. */
 export interface PayoutLine {
-  /** USD. Null while it cannot be worked out yet (no rate). */
+  /** What they are paid (USD): for a share, from the real income once the bank has paid. Null until known. */
   amount: number | null;
+  /** What it should come to (USD): for a share, from the expected price. Null without a rate. */
+  expected: number | null;
   paidAt: string | null;
 }
 
 /**
- * Who is paid what for a call (§3.1). Each line is null until it means
- * something, and for viewers who may not see it:
- * - `expert` once the call finished: the Founder and the Expert;
- * - `manager` once paid to bank: the Founder and the Manager being paid;
- * - `associate` once paid to bank, when the Associate has a share: the Founder,
- *   the Manager who pays it and the Associate.
+ * Who is paid what for a call (§3.1), once it took place. Each line is null for
+ * viewers who may not see it:
+ * - `expert`: the Founder and the Expert;
+ * - `manager`: the Founder, the Manager paid for it and the call's Associate
+ *   (who sees the amounts, not the percent);
+ * - `associate`, when an Associate ran the call: the Founder, their Manager and
+ *   the Associate.
+ * The shares show what they should come to (`expected`) from the call on, and
+ * what they are (`amount`) once the bank has paid.
  */
 export interface CallPayouts {
   /** The Expert's rate when the call finished × the real duration. */
   expert: (PayoutLine & { user: UserRef; rate: number | null; minutes: number | null }) | null;
-  /** The Manager's share of the real income, including the Associate's part. `keeps` is what stays with the Manager. */
-  manager: (PayoutLine & { user: UserRef | null; percent: number; keeps: number | null }) | null;
-  /** The Associate's part of the Manager's share, paid by the Manager. */
+  /**
+   * The Manager's share of the income, including the Associate's part; `keeps` is what stays with the Manager.
+   * `settled` once paid to bank: the percent and the Manager are then fixed. `percent` is null for the Associate.
+   */
+  manager: (PayoutLine & { user: UserRef | null; percent: number | null; keeps: number | null; settled: boolean }) | null;
+  /** The Associate's part: `percent` of the Manager's share, paid by the Manager. */
   associate: (PayoutLine & { user: UserRef; percent: number }) | null;
   /** The lines the viewer may mark paid or unpaid. */
   canMark: Payee[];
@@ -221,9 +233,11 @@ export interface CallPermissions {
   /** Founder only: correct the real income of a paid call. */
   editIncome: boolean;
   /** Founder only. */
-  editGptLink: boolean;
-  /** The call's Associate, their Manager, or the Founder. */
+  editResearchLink: boolean;
+  /** The call's Manager or the Founder (Associates never see rates). */
   editRate: boolean;
+  /** Whoever runs the call, their Manager, or the Founder, until it took place (the Founder always). */
+  editMeeting: boolean;
   /** Founder only: the Expert's rate for this call, until the Expert is paid. */
   editExpertRate: boolean;
 }
@@ -459,7 +473,7 @@ export interface DashboardSummary {
   /** Founder only. */
   tasks?: {
     invoicesToSubmit: CallDTO[];
-    /** Booked calls coming up without deep search data to prepare with. */
+    /** Booked calls coming up that still need their research data (confirmed ones wait for "Research data ready"). */
     callsNeedingResearch: CallDTO[];
     profilesNeedingBank: ProfileNeedingBank[];
     profilesNeedingRate: ProfileNeedingRate[];
@@ -563,6 +577,8 @@ export interface AssociateStatsRow {
 /** Founders see every Associate, Managers their team, Associates themselves. */
 export interface AssociateStats {
   zone: string;
+  /** False for Associates, who do not see what calls bring in: `potential` is then 0. */
+  showsMoney: boolean;
   periods: StatsPeriod[];
   rows: AssociateStatsRow[];
   totals: AssociateStatsCell[];
@@ -617,20 +633,64 @@ export interface FinanceStats {
 /**
  * Totals for the finance tab of the Calls page, over every call that matches
  * the dates and search (the paid filter aside). Each part is null for viewers
- * it does not concern.
+ * it does not concern. `expected` covers calls not paid to bank yet.
  */
 export interface FinanceSummary {
   calls: number;
-  /** Expected income of the calls not paid to bank yet, and real income of those that were. */
+  /** Expected income of the calls not paid to bank yet, and real income of those that were. Not for Associates. */
   income: { expected: number; real: number; unpriced: number } | null;
   /** Founder: owed to Experts. Expert: their own pay (and the minutes behind it). */
   expert: { paid: number; unpaid: number; unpriced: number; minutes: number } | null;
-  /** Founder: owed to Managers. Manager: their own shares. */
-  manager: { paid: number; unpaid: number } | null;
+  /** Founder: owed to Managers. Manager: their own shares. Associate: their Manager's shares on their calls. */
+  manager: { paid: number; unpaid: number; expected: number } | null;
   /** Founder and Manager: owed to Associates. Associate: their own part. */
-  associate: { paid: number; unpaid: number } | null;
+  associate: { paid: number; unpaid: number; expected: number } | null;
   /** Manager: what stays with them once the Associates have their part. */
   keeps: number | null;
+}
+
+/** What one person was paid (or is owed) in a payment cycle. */
+export interface PayCycleLine {
+  user: UserRef;
+  /** Paid by the Founder: Experts and Managers. Associates are paid by their Manager. */
+  kind: Payee;
+  amount: number;
+  calls: number;
+}
+
+/**
+ * A monthly payment cycle the Founder closed (§6.5a): what came in and went out
+ * between `startedAt` and `closedAt`, kept as it was. Non-founders get only
+ * their own lines and no totals.
+ */
+export interface PayCycleDTO {
+  id: string;
+  label: string;
+  startedAt: string | null;
+  closedAt: string;
+  closedBy: UserRef;
+  totals: { income: number; paidExperts: number; paidManagers: number; paidAssociates: number; balance: number } | null;
+  lines: PayCycleLine[];
+}
+
+/** Founder: the cycle still open, and what closing it now would pay. */
+export interface CurrentCycleDTO {
+  /** The end of the last closed cycle; null before the first one. */
+  startedAt: string | null;
+  /** Real income of calls paid to bank in this cycle. */
+  income: number;
+  /** Paid out in this cycle so far. */
+  paid: { experts: number; managers: number; associates: number };
+  /** Income − what the Founder paid out (Experts and Managers). */
+  balance: number;
+  /** Expected income of calls that took place but have not reached the bank. */
+  expectedPipeline: number;
+  /** Everyone the Founder still owes, as closing the cycle would pay them. */
+  toPay: PayCycleLine[];
+  /** Finished calls whose Expert has no rate yet: they cannot be paid until one is set. */
+  unpricedExpertCalls: number;
+  /** Suggested name for the cycle, e.g. "September 2026". */
+  suggestedLabel: string;
 }
 
 export interface FinanceCallsPage extends Paginated<CallDTO> {

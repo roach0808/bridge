@@ -6,7 +6,7 @@ import { useMe } from '@/auth/AuthProvider';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { StatusChip } from '@/components/StatusChip';
 import { countdown, whenAndLength } from '@/lib/time';
-import { MoneyPill, callMoney } from './money';
+import { IncomeFigures, callIncome } from './money';
 
 /**
  * Compact call summary used by the dashboard and mobile lists. Once the call has
@@ -24,7 +24,7 @@ export function CallCard({
   onCancel?: (call: CallDTO) => void;
 }) {
   const me = useMe();
-  const money = callMoney(call, me.role);
+  const income = callIncome(call, me.role);
   const cancellable = onCancel && call.allowedTransitions.includes('cancelled');
   return (
     <Card>
@@ -46,9 +46,9 @@ export function CallCard({
             <Typography variant="body2" sx={{ mt: 1, fontVariantNumeric: 'tabular-nums' }}>
               {countdown(call.scheduledAt)} · {whenAndLength(call.scheduledAt, zone, call.durationMinutes)}
             </Typography>
-            {money && (
+            {income && (
               <Box sx={{ mt: 1 }}>
-                <MoneyPill money={money} size="small" />
+                <IncomeFigures income={income} />
               </Box>
             )}
             {showExpert && (
