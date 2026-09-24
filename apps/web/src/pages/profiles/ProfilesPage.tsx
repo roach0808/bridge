@@ -53,6 +53,8 @@ export default function ProfilesPage() {
   // Two views of the same profiles: the list, and one table of every platform status.
   const [params, setParams] = useSearchParams();
   const view = params.get('view') === 'platforms' && !isExpert ? 'platforms' : 'profiles';
+  // The platform table is one grid of everybody: no status filter, no review banner.
+  const platformsView = view === 'platforms';
   const [adding, setAdding] = useState(false);
 
   const query = useQuery({
@@ -121,6 +123,9 @@ export default function ProfilesPage() {
       count: query.data ? counts[f] : undefined,
     }));
 
+  // The platform table shows every Profile the search left, in name order.
+  const everyone = useMemo(() => [...(query.data ?? [])].sort((a, b) => a.name.localeCompare(b.name)), [query.data]);
+
   const searching = search.trim() !== q || (query.isFetching && !query.isLoading);
 
   return (
@@ -148,7 +153,7 @@ export default function ProfilesPage() {
         </Tabs>
       )}
 
-      {isFounder && counts.pending > 0 && filter !== 'pending' && (
+      {isFounder && !platformsView && counts.pending > 0 && filter !== 'pending' && (
         <Alert
           severity="info"
           variant="outlined"
@@ -165,7 +170,7 @@ export default function ProfilesPage() {
       )}
 
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" sx={{ mb: 2.5 }}>
-        <FilterChips ariaLabel="Filter by status" options={filterOptions} value={filter} onChange={setFilter} />
+        {platformsView ? <Box /> : <FilterChips ariaLabel="Filter by status" options={filterOptions} value={filter} onChange={setFilter} />}
         <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: { md: '0 1 340px' } }}>
           <SearchField value={search} onChange={setSearch} placeholder="Search name or experience" sx={{ maxWidth: 'none' }} />
           <Box sx={{ width: 20, display: 'grid', placeItems: 'center' }}>{searching && <CircularProgress size={16} />}</Box>
@@ -186,8 +191,8 @@ export default function ProfilesPage() {
         <LoadingRows rows={6} />
       ) : query.isError ? (
         <ErrorState error={query.error} onRetry={() => void query.refetch()} />
-      ) : view === 'platforms' ? (
-        <PlatformStatusTable profiles={visible} />
+      ) : platformsView ? (
+        <PlatformStatusTable profiles={everyone} />
       ) : visible.length === 0 ? (
         <Card>
           {q ? (

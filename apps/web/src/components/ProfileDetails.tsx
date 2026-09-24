@@ -123,10 +123,13 @@ export function PlatformStatusSelect({
   profile,
   platformId,
   status,
+  compact,
 }: {
   profile: Pick<ProfileDTO, 'id' | 'name'>;
   platformId: string;
   status: PlatformRegistration;
+  /** In a table of many platforms, the dot alone; the words are in the menu. */
+  compact?: boolean;
 }) {
   const mutation = useSetPlatform(profile.id, platformId);
   const value = mutation.isPending && mutation.variables?.status ? mutation.variables.status : status;
@@ -138,9 +141,19 @@ export function PlatformStatusSelect({
       value={value}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate({ status: e.target.value as PlatformRegistration })}
-      renderValue={(v) => <PlatformStatusChip status={v} />}
+      renderValue={(v) => (compact ? <PlatformDot status={v} /> : <PlatformStatusChip status={v} />)}
       inputProps={{ 'aria-label': `${profile.name} platform status` }}
-      sx={{ '& .MuiSelect-select': { py: 0.25, display: 'flex', alignItems: 'center' } }}
+      sx={{
+        '& .MuiSelect-select': {
+          py: 0.25,
+          display: 'flex',
+          alignItems: 'center',
+          // Compact: the dot sits in the middle of its narrow column, with no
+          // room given to the arrow.
+          ...(compact ? { justifyContent: 'center', pr: '0 !important' } : {}),
+        },
+        ...(compact ? { '& .MuiSelect-icon': { display: 'none' } } : {}),
+      }}
     >
       {PLATFORM_REGISTRATIONS.map((s) => (
         <MenuItem key={s} value={s}>

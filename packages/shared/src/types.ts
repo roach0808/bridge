@@ -132,6 +132,11 @@ export interface ProfileDTO {
   needsBank: boolean | null;
   /** The Associate (or Manager) who looks after this Profile. Null for Experts. */
   associate: UserRef | null;
+  /**
+   * The Manager the Profile sits under: the Associate's Manager, or the Manager
+   * themselves when one looks after it. Null for Experts, and while nobody does.
+   */
+  manager: UserRef | null;
   /** The viewer may hand the Profile to another Associate (the Founder; a Manager within their team). */
   canAssign: boolean;
   /** The viewer may change the Profile's status on the platforms (the Founder; its Associate; their Manager). */

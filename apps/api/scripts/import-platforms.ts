@@ -1,10 +1,11 @@
 /**
  * The expert networks the company works with, as one list, put into `platforms`.
  *
- * A network already in the database — under an older spelling, or with a
- * placeholder address from the demo data — is corrected in place, so the calls
- * and profile registrations pointing at it are kept. The rest are added. Run it
- * again after editing the list and it will only make up the difference.
+ * A network already in the database is left exactly as it is — its name, its
+ * address, its country and above all its priority are the Founder's to set on
+ * the Platforms page, and running this again must never undo that. Only the
+ * networks that are missing are added. So: add a network to the list here, run
+ * it, and only that one appears.
  *
  * It prints a plan and changes nothing unless APPLY=1 is set:
  *   pnpm --filter @god/api platforms:import              # plan only
@@ -13,7 +14,8 @@
  *
  * `XX` is a country we could not confirm, and an `example.com/needs-verification`
  * address is a network whose website we could not confirm: both are meant to be
- * corrected on the Platforms page, and the plan lists them every run.
+ * corrected on the Platforms page, and the plan names the ones still carrying
+ * either, wherever they came from.
  */
 import { PrismaClient } from '@prisma/client';
 
@@ -24,151 +26,127 @@ const prisma = new PrismaClient();
 const placeholder = (name: string) =>
   `https://example.com/needs-verification/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
 
-/** `XX` marks a country we could not confirm, rather than guessing one. */
 interface Network {
   name: string;
+  /** Null where the network's website could not be confirmed. */
   url: string | null;
+  /** `XX` where the home country could not be confirmed, rather than a guess. */
   country: string;
+  /** 1 the ones we work with most, 4 the consultant marketplaces. */
+  priority: 1 | 2 | 3 | 4;
+  /** Names this network has also gone by, so it is recognised rather than added twice. */
+  also?: string[];
 }
 
-/** In the order given: the position in this list becomes the platform's priority. */
 const NETWORKS: Network[] = [
-  { name: 'GLG', url: 'https://glg.com/', country: 'US' },
-  { name: 'AlphaSights', url: 'https://www.alphasights.com/', country: 'GB' },
-  { name: 'Guidepoint', url: 'https://www.guidepoint.com/', country: 'US' },
-  { name: 'Third Bridge', url: 'https://www.thirdbridge.com/', country: 'GB' },
-  { name: 'AlphaSense / Tegus', url: 'https://www.alpha-sense.com/', country: 'US' },
-  { name: 'Capvision', url: 'https://www.capvision.com/', country: 'CN' },
-  { name: 'Dialectica', url: 'https://dialecticanet.com/', country: 'GR' },
-  { name: 'VISASQ / Coleman Research', url: 'https://www.colemanrg.com/', country: 'JP' },
-  { name: 'Atheneum', url: 'https://www.atheneum.ai/', country: 'DE' },
-  { name: 'Arbolus', url: 'https://www.arbolus.com/', country: 'GB' },
-  { name: 'proSapient', url: 'https://www.prosapient.com/', country: 'GB' },
-  { name: 'NewtonX', url: 'https://www.newtonx.com/', country: 'US' },
-  { name: 'Lynk', url: 'https://lynk.global/', country: 'HK' },
-  { name: 'Techspert', url: 'https://techspert.com/', country: 'GB' },
-  { name: 'Infollion', url: 'https://www.infollion.com/', country: 'IN' },
-  { name: 'Arches Global', url: 'https://arches-global.com/', country: 'JP' },
-  { name: 'Office Hours', url: 'https://officehours.com/', country: 'US' },
-  { name: 'Focal Fact', url: 'https://focalfact.com/', country: 'XX' },
-  { name: 'Silverlight Research', url: 'https://www.silverlightresearch.com/', country: 'GB' },
-  { name: 'Maven Research', url: 'https://www.maven.co/', country: 'US' },
-  { name: 'Primary Insight', url: 'https://www.primaryinsight.com/', country: 'US' },
-  { name: 'Knowledge Ridge', url: 'https://www.knowledgeridge.com/', country: 'XX' },
-  { name: 'Right Angle Global', url: 'https://rightangleglobal.com/', country: 'XX' },
-  { name: 'Nextyn', url: 'https://www.nextyn.com/', country: 'IN' },
-  { name: 'Gaoyi Consulting', url: null, country: 'CN' },
-  { name: 'Ridgetop Research', url: 'https://www.ridgetopresearch.com/', country: 'US' },
-  { name: 'True North Insights', url: null, country: 'XX' },
-  { name: 'In Practise', url: 'https://inpractise.com/', country: 'GB' },
-  { name: 'OnFrontiers', url: 'https://onfrontiers.com/', country: 'US' },
-  { name: 'Enquire', url: 'https://www.enquire.ai/', country: 'US' },
-  { name: 'Six Degrees Intelligence', url: null, country: 'XX' },
-  { name: 'Sealed Network', url: 'https://sealed.network/', country: 'XX' },
-  { name: 'Meritco Services', url: null, country: 'XX' },
-  { name: 'Rise Up Consulting', url: null, country: 'XX' },
-  { name: 'Zintro', url: 'https://www.zintro.com/', country: 'US' },
-  { name: 'ProPanel Insights Group Ltd', url: null, country: 'XX' },
-  { name: 'High5', url: null, country: 'XX' },
-  { name: 'Gadoci', url: null, country: 'XX' },
-  { name: 'Prolific', url: 'https://www.prolific.com/', country: 'GB' },
-  { name: 'Inex One', url: 'https://inex.one/', country: 'SE' },
-  { name: 'Business Talent Group', url: 'https://businesstalentgroup.com/', country: 'US' },
-  { name: 'Catalant', url: 'https://catalant.com/', country: 'US' },
-  { name: 'Graphite', url: 'https://graphite.work/', country: 'US' },
-  { name: 'Umbrex', url: 'https://umbrex.com/', country: 'US' },
-  { name: 'A.Team', url: 'https://www.a.team/', country: 'US' },
-  { name: 'Expert360', url: 'https://expert360.com/', country: 'AU' },
-  { name: 'Consultport', url: 'https://consultport.com/', country: 'DE' },
+  // 1 — the networks most of the work comes through.
+  { name: 'GLG', url: 'https://glg.com/', country: 'US', priority: 1 },
+  { name: 'AlphaSights', url: 'https://www.alphasights.com/', country: 'GB', priority: 1, also: ['Alphasights'] },
+  { name: 'Guidepoint', url: 'https://www.guidepoint.com/', country: 'US', priority: 1 },
+  { name: 'Third Bridge', url: 'https://www.thirdbridge.com/', country: 'GB', priority: 1, also: ['Thirdbridge'] },
+  { name: 'AlphaSense / Tegus', url: 'https://www.alpha-sense.com/', country: 'US', priority: 1 },
+  { name: 'Dialectica', url: 'https://dialecticanet.com/', country: 'GR', priority: 1 },
+  { name: 'VISASQ / Coleman Research', url: 'https://www.colemanrg.com/', country: 'JP', priority: 1, also: ['Coleman'] },
+  { name: 'proSapient', url: 'https://www.prosapient.com/', country: 'GB', priority: 1 },
+  { name: 'Inex One', url: 'https://inex.one/', country: 'SE', priority: 1 },
+
+  // 2
+  { name: 'Atheneum', url: 'https://www.atheneum.ai/', country: 'DE', priority: 2 },
+  { name: 'NewtonX', url: 'https://www.newtonx.com/', country: 'US', priority: 2 },
+  { name: 'Lynk', url: 'https://lynk.global/', country: 'HK', priority: 2 },
+  { name: 'Infollion', url: 'https://www.infollion.com/', country: 'IN', priority: 2 },
+  { name: 'Arches', url: 'https://arches-global.com/', country: 'JP', priority: 2, also: ['Arches Global'] },
+  { name: 'Focal Fact', url: 'https://focalfact.com/', country: 'XX', priority: 2 },
+  { name: 'Nextyn', url: 'https://www.nextyn.com/', country: 'IN', priority: 2 },
+  { name: 'Gaoyi Consulting', url: null, country: 'CN', priority: 2 },
+  { name: 'Ridgetop Research', url: 'https://www.ridgetopresearch.com/', country: 'US', priority: 2 },
+  { name: 'Six Degrees Intelligence', url: null, country: 'XX', priority: 2 },
+
+  // 3
+  { name: 'Capvision', url: 'https://www.capvision.com/', country: 'CN', priority: 3 },
+  { name: 'Arbolus', url: 'https://www.arbolus.com/', country: 'GB', priority: 3 },
+  { name: 'Techspert', url: 'https://techspert.com/', country: 'GB', priority: 3 },
+  { name: 'Office Hours', url: 'https://officehours.com/', country: 'US', priority: 3 },
+  { name: 'Knowledge Ridge', url: 'https://www.knowledgeridge.com/', country: 'XX', priority: 3 },
+  { name: 'Right Angle Global', url: 'https://rightangleglobal.com/', country: 'XX', priority: 3 },
+  { name: 'True North Insights', url: null, country: 'XX', priority: 3 },
+  { name: 'In Practise', url: 'https://inpractise.com/', country: 'GB', priority: 3 },
+  { name: 'OnFrontiers', url: 'https://onfrontiers.com/', country: 'US', priority: 3 },
+  { name: 'Enquire', url: 'https://www.enquire.ai/', country: 'US', priority: 3 },
+  { name: 'Meritco Services', url: null, country: 'XX', priority: 3 },
+  { name: 'Zintro', url: 'https://www.zintro.com/', country: 'US', priority: 3 },
+  { name: 'Gadoci', url: null, country: 'XX', priority: 3 },
+  { name: 'Prolific', url: 'https://www.prolific.com/', country: 'GB', priority: 3 },
+  { name: 'Expert360', url: 'https://expert360.com/', country: 'AU', priority: 3 },
+
+  // 4 — the consultant marketplaces, and the smallest panels.
+  { name: 'Silverlight Research', url: 'https://www.silverlightresearch.com/', country: 'GB', priority: 4 },
+  { name: 'Maven Research', url: 'https://www.maven.co/', country: 'US', priority: 4 },
+  { name: 'Primary Insight', url: 'https://www.primaryinsight.com/', country: 'US', priority: 4 },
+  { name: 'Sealed Network', url: 'https://sealed.network/', country: 'XX', priority: 4 },
+  { name: 'Rise Up Consulting', url: null, country: 'XX', priority: 4 },
+  { name: 'ProPanel Insights Group Ltd', url: null, country: 'XX', priority: 4 },
+  { name: 'High5', url: null, country: 'XX', priority: 4 },
+  { name: 'Business Talent Group', url: 'https://businesstalentgroup.com/', country: 'US', priority: 4 },
+  { name: 'Catalant', url: 'https://catalant.com/', country: 'US', priority: 4 },
+  { name: 'Graphite', url: 'https://graphite.work/', country: 'US', priority: 4 },
+  { name: 'Umbrex', url: 'https://umbrex.com/', country: 'US', priority: 4 },
+  { name: 'A.Team', url: 'https://www.a.team/', country: 'US', priority: 4 },
+  { name: 'Consultport', url: 'https://consultport.com/', country: 'DE', priority: 4 },
 ];
 
-/**
- * Rows already in the database, under the name they have now. Matching by name
- * alone would add a second GLG beside "Alphasights", so the pairs are spelled out.
- */
-const ALREADY_THERE: Record<string, string> = {
-  GLG: 'GLG',
-  Alphasights: 'AlphaSights',
-  Guidepoint: 'Guidepoint',
-  Thirdbridge: 'Third Bridge',
-  Dialectica: 'Dialectica',
-  Coleman: 'VISASQ / Coleman Research',
-};
+/** "Third Bridge", "thirdbridge" and "Third  Bridge" are the same network. */
+const key = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '');
 
 async function main() {
   const existing = await prisma.platform.findMany({
     select: { id: true, name: true, url: true, priority: true, country: true, _count: { select: { calls: true, profileStatuses: true } } },
-    orderBy: { name: 'asc' },
+    orderBy: [{ priority: 'asc' }, { name: 'asc' }],
   });
-  const byName = new Map(existing.map((p) => [p.name, p]));
-  const claimed = new Set<string>();
+  const byKey = new Map(existing.map((p) => [key(p.name), p]));
+  const found = (n: Network) => [n.name, ...(n.also ?? [])].map(key).map((k) => byKey.get(k)).find(Boolean);
 
-  const updates: Array<{ id: string; from: (typeof existing)[number]; to: Network; priority: number }> = [];
-  const inserts: Array<{ to: Network; priority: number }> = [];
-
-  for (const [i, network] of NETWORKS.entries()) {
-    const priority = i + 1;
-    // Its old name if it has one, otherwise its new name.
-    const oldName = Object.keys(ALREADY_THERE).find((k) => ALREADY_THERE[k] === network.name);
-    const row = (oldName && byName.get(oldName)) || byName.get(network.name);
-    if (row) {
-      claimed.add(row.name);
-      updates.push({ id: row.id, from: row, to: network, priority });
-    } else {
-      inserts.push({ to: network, priority });
-    }
-  }
-
-  const untouched = existing.filter((p) => !claimed.has(p.name));
+  const there = NETWORKS.filter((n) => found(n));
+  const missing = NETWORKS.filter((n) => !found(n));
   const urlOf = (n: Network) => n.url ?? placeholder(n.name);
 
-  console.log(`In the database now: ${existing.length} platform(s)\n`);
-  console.log(`Correcting ${updates.length}:`);
-  for (const u of updates) {
-    const changes = [
-      u.from.name !== u.to.name ? `name "${u.from.name}" → "${u.to.name}"` : null,
-      u.from.url !== urlOf(u.to) ? `url ${u.from.url} → ${urlOf(u.to)}` : null,
-      u.from.priority !== u.priority ? `priority ${u.from.priority} → ${u.priority}` : null,
-      u.from.country !== u.to.country ? `country ${u.from.country} → ${u.to.country}` : null,
-    ].filter(Boolean);
-    console.log(`  ${u.to.name.padEnd(28)} ${changes.join(' · ') || 'no change'}`);
-    if (u.from._count.calls || u.from._count.profileStatuses) {
-      console.log(`    (in use: ${u.from._count.calls} call(s), ${u.from._count.profileStatuses} profile registration(s) — kept)`);
-    }
+  console.log(`In the database now: ${existing.length} platform(s); on the list: ${NETWORKS.length}\n`);
+  console.log(`Already there, left untouched: ${there.length}`);
+  for (const n of there) {
+    const row = found(n)!;
+    const renamed = row.name !== n.name ? `  (on the list as "${n.name}")` : '';
+    console.log(`  ${String(row.priority)}  ${row.name.padEnd(28)}${renamed}`);
   }
 
-  console.log(`\nAdding ${inserts.length}:`);
-  for (const a of inserts) {
-    const mark = [a.to.url ? null : 'URL to verify', a.to.country === 'XX' ? 'country to verify' : null].filter(Boolean).join(', ');
-    console.log(`  ${String(a.priority).padStart(3)}  ${a.to.name.padEnd(28)} ${a.to.country}  ${urlOf(a.to)}${mark ? `   ← ${mark}` : ''}`);
+  console.log(`\nAdding ${missing.length}:`);
+  for (const n of missing) {
+    const mark = [n.url ? null : 'URL to verify', n.country === 'XX' ? 'country to verify' : null].filter(Boolean).join(', ');
+    console.log(`  ${n.priority}  ${n.name.padEnd(28)} ${n.country}  ${urlOf(n)}${mark ? `   ← ${mark}` : ''}`);
   }
 
-  if (untouched.length) {
-    console.log(`\nLeft alone (not in the list): ${untouched.map((p) => p.name).join(', ')}`);
-  }
-  const toVerify = NETWORKS.filter((n) => !n.url || n.country === 'XX');
-  console.log(`\nTo check afterwards: ${toVerify.length} of ${NETWORKS.length} — ${toVerify.map((n) => n.name).join(', ')}`);
+  const extra = existing.filter((p) => !NETWORKS.some((n) => found(n)?.id === p.id));
+  if (extra.length) console.log(`\nIn the database but not on the list, left alone: ${extra.map((p) => p.name).join(', ')}`);
 
+  // Whatever the row says now, not what the list once said: a website corrected
+  // on the Platforms page drops off this straight away.
+  const unconfirmed = existing.filter((p) => p.country === 'XX' || p.url.includes('needs-verification'));
+  console.log(
+    `\nStill to confirm in the database: ${unconfirmed.length}${unconfirmed.length ? ` — ${unconfirmed.map((p) => p.name).join(', ')}` : ''}`,
+  );
+
+  if (!missing.length) {
+    console.log('\nEvery network on the list is already there. Nothing to do.');
+    return;
+  }
   if (!APPLY) {
-    console.log('\nPlan only. Re-run with APPLY=1 to make these changes.');
+    console.log('\nPlan only. Re-run with APPLY=1 to add them.');
     return;
   }
 
-  await prisma.$transaction(async (tx) => {
-    for (const u of updates) {
-      await tx.platform.update({
-        where: { id: u.id },
-        data: { name: u.to.name, url: urlOf(u.to), priority: u.priority, country: u.to.country },
-      });
-    }
-    for (const a of inserts) {
-      await tx.platform.create({
-        data: { name: a.to.name, url: urlOf(a.to), priority: a.priority, country: a.to.country },
-      });
-    }
-  });
-  const total = await prisma.platform.count();
-  console.log(`\nDone. ${updates.length} corrected, ${inserts.length} added — ${total} platforms in all.`);
+  await prisma.$transaction(
+    missing.map((n) => prisma.platform.create({ data: { name: n.name, url: urlOf(n), priority: n.priority, country: n.country } })),
+  );
+  console.log(`\nDone. ${missing.length} added — ${await prisma.platform.count()} platforms in all.`);
 }
 
 main()

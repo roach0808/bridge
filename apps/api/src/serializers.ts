@@ -81,7 +81,7 @@ export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO
 
 export const profileInclude = {
   createdBy: { select: userRefSelect },
-  associate: { select: { ...userRefSelect, managerId: true } },
+  associate: { select: { ...userRefSelect, managerId: true, manager: { select: userRefSelect } } },
   reviewedBy: { select: userRefSelect },
   platformStatuses: { select: { platformId: true, status: true, rate: true } },
 } satisfies Prisma.ProfileInclude;
@@ -91,6 +91,17 @@ export type PlatformRef = Prisma.PlatformGetPayload<{ select: typeof platformRef
 export const platformRefOrder = [{ priority: 'asc' }, { name: 'asc' }] satisfies Prisma.PlatformOrderByWithRelationInput[];
 
 export type ProfileRow = Prisma.ProfileGetPayload<{ include: typeof profileInclude }>;
+
+/**
+ * The Manager a Profile sits under. A Manager who looks after a Profile himself
+ * is its Manager; otherwise it is the Associate's own Manager, and a Profile
+ * nobody looks after has none.
+ */
+const managerOf = (associate: ProfileRow['associate']): UserRef | null =>
+  !associate ? null
+  : associate.role === 'manager' ? toUserRef(associate)
+  : associate.manager ? toUserRef(associate.manager)
+  : null;
 
 /** Relation counts only the Founder receives (bank data is Founder-only). */
 export const profileFounderCounts = {
@@ -178,6 +189,7 @@ export const toProfileDTO = (
   bankCount: p._count ? p._count.banks : null,
   needsBank: p._count ? p._count.calls > 0 && p._count.banks === 0 : null,
   associate: platforms && p.associate ? toUserRef(p.associate) : null,
+  manager: platforms ? managerOf(p.associate) : null,
   canAssign: canAssignProfile(viewer, p.associate),
   canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer, p.associate),
   managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,

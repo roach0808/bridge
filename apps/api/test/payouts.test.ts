@@ -404,6 +404,34 @@ describe('the research step is the Founder’s, hidden from Associates and Manag
   });
 });
 
+describe('the Manager a Profile sits under', () => {
+  it('follows the Associate, and is the Manager themselves when one looks after it', async () => {
+    const profile = `/profiles/${fx.approvedProfile.id}`;
+    // Nobody looking after it yet: no Manager either.
+    expect((await c.founder.get(profile)).body).toMatchObject({ associate: null, manager: null });
+
+    await c.founder.put(`${profile}/associate`, { associateId: fx.a1.id });
+    let body = (await c.founder.get(profile)).body;
+    expect(body.associate).toMatchObject({ id: fx.a1.id });
+    expect(body.manager).toMatchObject({ id: fx.m1.id, nickname: 'ManagerOne', role: 'manager' });
+
+    // Handed to the other team, the Profile moves under that team's Manager.
+    await c.founder.put(`${profile}/associate`, { associateId: fx.a3.id });
+    expect((await c.founder.get(profile)).body.manager).toMatchObject({ id: fx.m2.id });
+
+    // A Manager running a Profile themselves is its Manager.
+    await c.founder.put(`${profile}/associate`, { associateId: fx.m2.id });
+    body = (await c.founder.get(profile)).body;
+    expect(body.associate).toMatchObject({ id: fx.m2.id, role: 'manager' });
+    expect(body.manager).toMatchObject({ id: fx.m2.id });
+
+    // The Expert on a call with this Profile reads its personal details, but
+    // never who looks after it.
+    await makeCall(fx, { associate: fx.m2, expert: fx.e1, status: 'scheduled', scheduledAt: nextSlot() });
+    expect((await c.e1.get(profile)).body).toMatchObject({ associate: null, manager: null });
+  });
+});
+
 describe('platform statuses', () => {
   it('the Founder, the Associate looking after the Profile and their Manager set them; only the Founder sets rates', async () => {
     await c.founder.put(`/profiles/${fx.approvedProfile.id}/associate`, { associateId: fx.a1.id });
