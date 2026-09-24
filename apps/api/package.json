@@ -12,7 +12,8 @@
     "prisma": "prisma",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx --env-file-if-exists=.env prisma/seed.ts",
-    "db:reset": "prisma migrate reset --force --skip-seed && pnpm db:seed"
+    "db:reset": "prisma migrate reset --force --skip-seed && pnpm db:seed",
+    "platforms:import": "tsx --env-file-if-exists=.env scripts/import-platforms.ts"
   },
   "prisma": {
     "seed": "tsx --env-file-if-exists=.env prisma/seed.ts"

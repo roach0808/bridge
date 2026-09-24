@@ -1713,6 +1713,16 @@ Seoul (ember), London (flint) and New York (quill), and each has repeating
 availability starting from the current week, plus some time off, so the
 calendar has something to show.
 
+The seed's Platforms are made up, for a demo database. The **real expert
+networks** the company works with are a separate list, kept in
+`apps/api/scripts/import-platforms.ts` and applied with `pnpm --filter @god/api
+platforms:import` (a plan by default; `APPLY=1` writes). It corrects a network
+already in the database in place — keeping the calls and registrations pointing
+at it — and adds the rest, so it can be run again after the list changes. A
+network whose country or website could not be confirmed is stored as `XX` and
+as an `example.com/needs-verification/…` address, and the plan lists those every
+run, to be corrected on the Platforms page.
+
 ### 12.4 Testing
 
 - Unit (`packages/shared`, 1466 tests): `canTransition` against every (role,
