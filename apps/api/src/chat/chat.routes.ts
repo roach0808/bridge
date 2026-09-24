@@ -19,6 +19,7 @@ import {
   type ChatMessageDTO,
   type ChatMessagePage,
   type ConversationDTO,
+  type ObservedChatDTO,
   type Role,
   type ServerToClientEvents,
   type TodoDTO,
@@ -28,10 +29,12 @@ import {
   type TodoPanel,
   type TodoRemovedEvent,
   type TodoSummary,
+  type UserRef,
 } from '@god/shared';
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { actorOf, requireAuth, type Actor } from '../auth/middleware';
+import { requireOwner } from '../auth/owner';
 import { prisma, type Db } from '../db';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
@@ -317,6 +320,75 @@ async function messagesAfter(conversationId: string, after: { createdAt: Date; i
     newerCursor: page.length ? encodeCursor(page.at(-1)!) : null,
     hasNewer: rows.length > limit,
   };
+}
+
+// --- Everyone's chats, for the owner ------------------------------------------
+
+/**
+ * The owner of the system (§6.11a) reads every chat, and only reads: they are
+ * not in these conversations, so there is nothing to send, no task to give and
+ * no read receipt to leave. Opening one leaves no "Seen" behind, which is the
+ * point — looking on must not look like taking part. Each read is recorded in
+ * the audit trail.
+ */
+chatRouter.get('/chat/observed', async (req, res) => {
+  const actor = actorOf(req);
+  await requireOwner(actor.id);
+  const rows = await prisma.conversation.findMany({
+    where: { lastMessageAt: { not: null } },
+    include: conversationInclude,
+    orderBy: [{ lastMessageAt: 'desc' }, { id: 'asc' }],
+    take: 500,
+  });
+  res.json(await toObservedChatDTOs(rows));
+});
+
+chatRouter.get('/chat/observed/:id/messages', async (req, res) => {
+  const actor = actorOf(req);
+  await requireOwner(actor.id);
+  const id = idParam(req);
+  const exists = id ? await prisma.conversation.findUnique({ where: { id }, select: { id: true } }) : null;
+  if (!exists) throw notFound('Conversation');
+  const { cursor, after, limit } = parseQuery(chatMessagesQuerySchema, req);
+  const body: ChatMessagePage =
+    after ? await messagesAfter(exists.id, decodeCursor(after), limit)
+    : await messagesBefore(exists.id, cursor ? decodeCursor(cursor) : null, limit);
+  res.json(body);
+});
+
+/** The chats as an onlooker sees them: two people, the last thing said, how much there is. */
+async function toObservedChatDTOs(rows: ConversationRow[]): Promise<ObservedChatDTO[]> {
+  if (!rows.length) return [];
+  const ids = rows.map((r) => r.id);
+  const [lastMessages, counts] = await Promise.all([
+    prisma.$queryRaw<
+      Array<{ id: string; conversation_id: string; sender_id: string; body: string; kind: ChatMessageDTO['kind']; image_id: string | null; deleted_at: Date | null; created_at: Date }>
+    >`
+      SELECT DISTINCT ON (conversation_id) id, conversation_id, sender_id, body, kind, image_id, deleted_at, created_at
+      FROM chat_messages WHERE conversation_id = ANY(${ids}::uuid[])
+      ORDER BY conversation_id, created_at DESC, id DESC`,
+    prisma.chatMessage.groupBy({ by: ['conversationId'], where: { conversationId: { in: ids } }, _count: { _all: true } }),
+  ]);
+  return rows.map((c) => {
+    const last = lastMessages.find((m) => m.conversation_id === c.id);
+    return {
+      id: c.id,
+      people: [toUserRef(c.userA), toUserRef(c.userB)] as [UserRef, UserRef],
+      lastMessage: last
+        ? {
+            id: last.id,
+            body: last.body,
+            kind: last.kind,
+            senderId: last.sender_id,
+            hasImage: last.image_id !== null,
+            deleted: last.deleted_at !== null,
+            createdAt: iso(last.created_at),
+          }
+        : null,
+      messageCount: counts.find((m) => m.conversationId === c.id)?._count._all ?? 0,
+      createdAt: iso(c.createdAt),
+    };
+  });
 }
 
 chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {

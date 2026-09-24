@@ -47,6 +47,8 @@ export const qk = {
     conversation: (id: string) => ['chat', 'conversation', id] as const,
     messages: (id: string) => ['chat', 'messages', id] as const,
     contacts: ['chat', 'contacts'] as const,
+    observed: ['chat', 'observed'] as const,
+    observedMessages: (id: string) => ['chat', 'observed', id] as const,
   },
   todos: {
     all: ['todos'] as const,

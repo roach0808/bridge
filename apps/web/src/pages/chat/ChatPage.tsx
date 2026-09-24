@@ -13,6 +13,7 @@ import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
+import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined';
 import {
   Box,
   Button,
@@ -161,6 +162,7 @@ function PresenceText({ userId }: { userId: string }) {
 
 function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpen: (id: string) => void }) {
   const me = useMe();
+  const navigate = useNavigate();
   const { zone } = useAuth();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -200,11 +202,21 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
         <Typography variant="subtitle1" component="h2">
           Chats
         </Typography>
-        <Tooltip title="New chat">
-          <IconButton color="primary" onClick={() => setPicking(true)} aria-label="New chat">
-            <AddCommentRounded fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        <Stack direction="row" spacing={0.5} alignItems="center">
+          {/* The owner of the system can read everyone's chats (§6.11a). */}
+          {me.isOwner && (
+            <Tooltip title="Read everyone’s chats">
+              <IconButton onClick={() => navigate('/chat/all')} aria-label="Everyone’s chats">
+                <VisibilityOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
+          <Tooltip title="New chat">
+            <IconButton color="primary" onClick={() => setPicking(true)} aria-label="New chat">
+              <AddCommentRounded fontSize="small" />
+            </IconButton>
+          </Tooltip>
+        </Stack>
       </Stack>
       <Box sx={{ px: 2, pb: 1.25 }}>
         <SearchField value={search} onChange={setSearch} placeholder="Search chats" sx={{ maxWidth: 'none' }} />

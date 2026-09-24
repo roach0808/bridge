@@ -4,6 +4,7 @@ import type {
   ChatMessageDTO,
   ChatMessagePage,
   ConversationDTO,
+  ObservedChatDTO,
   DbDumpDTO,
   TodoDTO,
   TodoStatus,
@@ -250,6 +251,11 @@ export function createApiClient(options: ClientOptions) {
       clearHistory: (id: string) => del<void>(`/chat/conversations/${enc(id)}/history`),
       makeTodo: (messageId: string) => post<TodoDTO>(`/chat/messages/${enc(messageId)}/todo`),
       removeTodo: (messageId: string) => del<void>(`/chat/messages/${enc(messageId)}/todo`),
+      /** Owner only: every chat in the system, to read and nothing else. */
+      observed: () => get<ObservedChatDTO[]>('/chat/observed'),
+      /** Owner only: a page of one chat between two other people. */
+      observedMessages: (id: string, query: { cursor?: string | null; after?: string | null; limit?: number } = {}) =>
+        get<ChatMessagePage>(`/chat/observed/${enc(id)}/messages`, query),
     },
 
     todos: {

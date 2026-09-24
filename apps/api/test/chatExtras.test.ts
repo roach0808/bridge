@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, expectError, prisma, seedFixtures, type Client, type FixtureUser, type Fixtures } from './helpers';
+import { as, Client, expectError, login, passwordHash, prisma, seedFixtures, type FixtureUser, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -141,5 +141,72 @@ describe('erasing a chat history', () => {
 
     expect((await send(ca, id, { body: 'Fresh start' })).status).toBe(201);
     expectError(await (await as(fx.m1)).delete(`/chat/conversations/${id}/history`), 404);
+  });
+});
+
+describe('the owner reads everyone’s chats (§6.11a)', () => {
+  it('lists every chat and its messages, for the owner alone', async () => {
+    // The fixture Founder is the owner (OWNER_EMAIL); a second Founder is not.
+    const other = await prisma.user.create({
+      data: { nickname: 'FounderTwo', role: 'founder', email: 'foundertwo@fixtures.test', passwordHash: await passwordHash(), avatarId: 'founder-02' },
+    });
+    const notTheOwner = new Client(await login(other.email!), other.email);
+    const owner = await as(fx.founder);
+
+    const { ca, cb, id } = await chat(fx.m1, fx.a1);
+    await send(ca, id, { body: 'Can you take the Tuesday call?' });
+    await send(cb, id, { body: 'Yes, I will arrange it' });
+
+    const list = (await owner.get('/chat/observed')).body;
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ id, messageCount: 2, lastMessage: { body: 'Yes, I will arrange it' } });
+    expect(list[0].people.map((p: { nickname: string }) => p.nickname).sort()).toEqual(['AssocOne', 'ManagerOne']);
+
+    const thread = (await owner.get(`/chat/observed/${id}/messages`)).body;
+    expect(thread.items.map((m: { body: string }) => m.body)).toEqual(['Can you take the Tuesday call?', 'Yes, I will arrange it']);
+
+    // Every other Founder, and everyone else, is refused.
+    for (const who of [notTheOwner, await as(fx.m1), await as(fx.a1), await as(fx.e1)]) {
+      expectError(await who.get('/chat/observed'), 403);
+      expectError(await who.get(`/chat/observed/${id}/messages`), 403);
+    }
+  });
+
+  it('leaves no trace in the chat: nothing is marked seen and nothing can be sent', async () => {
+    const owner = await as(fx.founder);
+    const { ca, cb, id } = await chat(fx.m1, fx.a1);
+    await send(ca, id, { body: 'Just between us' });
+
+    const before = await prisma.conversation.findUniqueOrThrow({ where: { id } });
+    expect((await owner.get(`/chat/observed/${id}/messages`)).status).toBe(200);
+    const after = await prisma.conversation.findUniqueOrThrow({ where: { id } });
+    expect(after.userALastReadAt).toEqual(before.userALastReadAt);
+    expect(after.userBLastReadAt).toEqual(before.userBLastReadAt);
+    // The Associate is still shown one unread message, as if nobody had looked.
+    expect((await cb.get('/chat/conversations')).body[0].unreadCount).toBe(1);
+
+    // The chat itself stays closed to the owner: they are not in it.
+    expectError(await owner.get(`/chat/conversations/${id}`), 404);
+    expectError(await owner.post(`/chat/conversations/${id}/messages`, { body: 'hello' }), 404);
+    expectError(await owner.delete(`/chat/conversations/${id}/history`), 404);
+  });
+
+  it('is written to the audit trail', async () => {
+    const owner = await as(fx.founder);
+    const { ca, id } = await chat(fx.m1, fx.a1);
+    await send(ca, id, { body: 'hello' });
+    await prisma.auditLog.deleteMany();
+    expect((await owner.get(`/chat/observed/${id}/messages`)).status).toBe(200);
+
+    for (let i = 0; i < 60; i++) {
+      const rows = await prisma.auditLog.findMany({ where: { action: 'chat.observed.thread' } });
+      if (rows.length) {
+        expect(rows[0]).toMatchObject({ userId: fx.founder.id, statusCode: 200, method: 'GET' });
+        expect(rows[0]!.summary).toMatch(/read a chat between two other people/);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    throw new Error('the owner reading a chat was not recorded');
   });
 });

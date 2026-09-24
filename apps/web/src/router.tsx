@@ -44,6 +44,7 @@ const ProfileDetailPage = lazyPage(() => import('@/pages/profiles/ProfileDetailP
 const PlatformsPage = lazyPage(() => import('@/pages/admin/PlatformsPage'));
 const TeamPage = lazyPage(() => import('@/pages/admin/TeamPage'));
 const UsersPage = lazyPage(() => import('@/pages/admin/UsersPage'));
+const AllChatsPage = lazyPage(() => import('@/pages/chat/AllChatsPage'));
 const AuditPage = lazyPage(() => import('@/pages/admin/AuditPage'));
 const InvoicingPage = lazyPage(() => import('@/pages/admin/InvoicingPage'));
 const StatsPage = lazyPage(() => import('@/pages/stats/StatsPage'));
@@ -113,6 +114,9 @@ export const router = createBrowserRouter([
           { path: 'calls/:id', element: <Page><CallDetailPage /></Page> },
           { path: 'calendar', element: <Page><CalendarPage /></Page> },
           { path: 'chat', element: <Page><ChatPage /></Page> },
+          // Static before dynamic: /chat/all is the owner's view, not a chat id.
+          { path: 'chat/all', element: <Page roles={['founder']}><AllChatsPage /></Page> },
+          { path: 'chat/all/:conversationId', element: <Page roles={['founder']}><AllChatsPage /></Page> },
           { path: 'chat/:conversationId', element: <Page><ChatPage /></Page> },
           { path: 'todos', element: <Page><TodosPage /></Page> },
           { path: 'stats', element: <Page roles={['founder', 'manager', 'associate']}><StatsPage /></Page> },

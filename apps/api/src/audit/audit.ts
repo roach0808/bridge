@@ -70,7 +70,15 @@ function shape(path: string): string {
  * Reads worth recording: money, personal data and anything that dumps data out.
  * Reading the trail itself is not one of them — it only filled the trail with itself.
  */
-const SENSITIVE_READS = [/^users\/:id\/sign-in$/, /^stats\/profiles$/, /^profiles\/:id\/banks$/, /^db-dumps/, /^users\/:id\/sessions$/];
+const SENSITIVE_READS = [
+  /^users\/:id\/sign-in$/,
+  /^stats\/profiles$/,
+  /^profiles\/:id\/banks$/,
+  /^db-dumps/,
+  /^users\/:id\/sessions$/,
+  // Reading other people's chats is the most sensitive read there is.
+  /^chat\/observed/,
+];
 
 const MUTATIONS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
@@ -106,6 +114,8 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^chat\/conversations\/:id\/history$/, 'chat.history', true],
   [/^chat\/messages\/:id\/reactions$/, 'chat.reaction', true],
   [/^chat\/messages\/:id$/, 'chat.message'],
+  [/^chat\/observed\/:id\/messages$/, 'chat.observed.thread', true],
+  [/^chat\/observed$/, 'chat.observed.list', true],
   [/^todos\/:id\/done$/, 'todo.done', true],
   [/^todos\/:id\/confirm$/, 'todo.confirm', true],
   [/^todos\/:id\/reopen$/, 'todo.reopen', true],
@@ -152,6 +162,8 @@ const SUMMARIES: Record<string, string> = {
   'profile.update': 'changed a profile',
   'profile.delete': 'deleted a profile',
   'bank.read': 'looked at bank details',
+  'chat.observed.list': 'listed everyone’s chats',
+  'chat.observed.thread': 'read a chat between two other people',
   'bank.create': 'added bank details',
   'bank.update': 'changed bank details',
   'bank.delete': 'removed bank details',
