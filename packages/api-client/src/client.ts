@@ -49,6 +49,7 @@ import type {
   ProfileStatsRow,
   StatsPeriodKind,
   TodoPanel,
+  TodoQuadrant,
   FinanceCallsPage,
   FinanceCallsQuery,
   MarkPayoutsInput,
@@ -258,17 +259,19 @@ export function createApiClient(options: ClientOptions) {
       board: (query?: { status?: TodoStatus | 'active' | 'all' }) => get<TodoPanel[]>('/todos/board', query),
       /** People the caller may give a task to. */
       assignees: () => get<UserRef[]>('/todos/assignees'),
-      create: (input: { assigneeId: string; title: string; details?: string | null }) => post<TodoDTO>('/todos', input),
+      create: (input: { assigneeId: string; title: string; details?: string | null } & Partial<TodoQuadrant>) =>
+        post<TodoDTO>('/todos', input),
       remove: (id: string) => del<void>(`/todos/${enc(id)}`),
       done: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/done`, note ? { note } : {}),
       /** The giver confirms a done task: it becomes completed. */
       confirm: (id: string) => post<TodoDTO>(`/todos/${enc(id)}/confirm`),
       /** The giver sends a done or completed task back to the taker. */
       reopen: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/reopen`, note ? { note } : {}),
-      /** The new top-to-bottom order of one person's panel, after a drag. */
-      reorder: (input: { assigneeId: string; ids: string[] }) => post<void>('/todos/reorder', input),
-      /** The giver hands an open task to someone else (dragged onto their panel). */
-      move: (id: string, assigneeId: string) => post<TodoDTO>(`/todos/${enc(id)}/move`, { assigneeId }),
+      /** The new top-to-bottom order of one quadrant of one person's board, after a drag. */
+      reorder: (input: { assigneeId: string; ids: string[] } & Partial<TodoQuadrant>) => post<void>('/todos/reorder', input),
+      /** The giver hands an open task to someone else, into a quadrant of their board. */
+      move: (id: string, assigneeId: string, quadrant?: Partial<TodoQuadrant>) =>
+        post<TodoDTO>(`/todos/${enc(id)}/move`, { assigneeId, ...quadrant }),
     },
 
     finance: {

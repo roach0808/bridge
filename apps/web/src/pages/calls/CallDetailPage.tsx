@@ -101,6 +101,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const [ninjaLink, setNinjaLink] = useState('');
   // Marking the research data ready needs its link.
   const [researchLink, setResearchLink] = useState('');
+  // Scheduling needs a way into the meeting; nobody can join a call without one.
+  const [meetingDetails, setMeetingDetails] = useState('');
   const [actualMinutes, setActualMinutes] = useState('');
   const [income, setIncome] = useState('');
 
@@ -109,6 +111,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
     setComment('');
     setNinjaLink(call.ninjaLink ?? '');
     setResearchLink(call.researchLink ?? '');
+    setMeetingDetails(call.meetingDetails ?? '');
     setActualMinutes(String(call.durationMinutes));
     // Start from the expected price; the bank usually pays a little less.
     setIncome(call.expectedPrice === null ? '' : String(call.expectedPrice));
@@ -147,6 +150,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const ready =
     target === 'ongoing'
       ? linkValid
+      : target === 'scheduled'
+        ? meetingDetails.trim() !== ''
       : target === 'research_ready'
         ? researchValid
       : target === 'finished'
@@ -164,6 +169,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
       comment: comment.trim() || undefined,
       ...(target === 'ongoing' ? { ninjaLink: ninjaLink.trim() } : {}),
       ...(target === 'research_ready' ? { researchLink: researchLink.trim() } : {}),
+      ...(target === 'scheduled' ? { meetingDetails: meetingDetails.trim() } : {}),
       ...(target === 'finished' ? { actualDurationMinutes: minutes } : {}),
       ...(target === 'process_to_bank' ? { realIncome: incomeValue } : {}),
     });
@@ -325,6 +331,20 @@ function TransitionBar({ call }: { call: CallDTO }) {
                 </Alert>
               )}
               <Stack spacing={2}>
+                {target === 'scheduled' && (
+                  <TextField
+                    label="Meeting details"
+                    required
+                    multiline
+                    minRows={2}
+                    placeholder={'https://zoom.us/j/…\nPasscode: 1234'}
+                    value={meetingDetails}
+                    onChange={(e) => setMeetingDetails(e.target.value)}
+                    error={Boolean(errors.meetingDetails)}
+                    helperText={errors.meetingDetails ?? 'The link and passcode everyone joins with. A call cannot be scheduled without them.'}
+                    autoFocus
+                  />
+                )}
                 {target === 'research_ready' && (
                   <TextField
                     label="Research data link"

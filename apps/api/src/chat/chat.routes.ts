@@ -7,6 +7,8 @@ import {
   chatReactionSchema,
   createTodoSchema,
   chatMessagesQuerySchema,
+  DEFAULT_TODO_IMPORTANCE,
+  DEFAULT_TODO_URGENCY,
   listTodosQuerySchema,
   moveTodoSchema,
   reorderTodosSchema,
@@ -20,7 +22,9 @@ import {
   type Role,
   type ServerToClientEvents,
   type TodoDTO,
+  type TodoImportance,
   type TodoStatus,
+  type TodoUrgency,
   type TodoPanel,
   type TodoRemovedEvent,
   type TodoSummary,
@@ -73,6 +77,8 @@ type TodoRow = Prisma.TodoGetPayload<{ include: typeof todoInclude }>;
 const toTodoSummary = (t: Prisma.TodoGetPayload<{ include: typeof todoSummaryInclude }>): TodoSummary => ({
   id: t.id,
   status: t.status,
+  urgency: t.urgency,
+  importance: t.importance,
   assignee: toUserRef(t.assignee),
   createdBy: toUserRef(t.createdBy),
   doneAt: isoOrNull(t.doneAt),
@@ -498,9 +504,20 @@ chatRouter.post('/chat/messages/:id/reactions', async (req, res) => {
 const clip = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
 const todoText = (t: { title: string | null; message: { body: string } | null }) => t.message?.body ?? t.title ?? '';
 
-/** A new task goes to the top of the panel, above everything already there. */
-async function topPosition(tx: Db, assigneeId: string): Promise<number> {
-  const top = await tx.todo.aggregate({ where: { assigneeId }, _min: { position: true } });
+/**
+ * The board is four quadrants — need action or can wait, strategic or not — and
+ * a task lives in one of them. A task nobody placed starts where work starts:
+ * needing action, and strategic.
+ */
+type Quadrant = { urgency: TodoUrgency; importance: TodoImportance };
+const quadrantOf = (input: Partial<Quadrant>): Quadrant => ({
+  urgency: input.urgency ?? DEFAULT_TODO_URGENCY,
+  importance: input.importance ?? DEFAULT_TODO_IMPORTANCE,
+});
+
+/** A new task goes to the top of its quadrant, above everything already there. */
+async function topPosition(tx: Db, assigneeId: string, quadrant: Quadrant): Promise<number> {
+  const top = await tx.todo.aggregate({ where: { assigneeId, ...quadrant }, _min: { position: true } });
   return (top._min.position ?? 0) - TODO_POSITION_STEP;
 }
 
@@ -544,7 +561,8 @@ chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
         conversationId: m.conversationId,
         assigneeId: assignee.id,
         createdById: actor.id,
-        position: await topPosition(tx, assignee.id),
+        // A task handed over in chat lands where a new task lands.
+        position: await topPosition(tx, assignee.id, quadrantOf({})),
       },
       include: todoInclude,
     });
@@ -612,13 +630,15 @@ chatRouter.post('/todos', async (req, res) => {
   if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
 
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
+    const quadrant = quadrantOf(input);
     const todo = await tx.todo.create({
       data: {
         title: input.title,
         details: input.details ?? null,
         assigneeId: assignee.id,
         createdById: actor.id,
-        position: await topPosition(tx, assignee.id),
+        ...quadrant,
+        position: await topPosition(tx, assignee.id, quadrant),
       },
       include: todoInclude,
     });
@@ -650,14 +670,35 @@ chatRouter.delete('/todos/:id', async (req, res) => {
 chatRouter.post('/todos/:id/move', async (req, res) => {
   const actor = actorOf(req);
   const existing = await loadTodo(actor, idParam(req));
-  const { assigneeId } = parseBody(moveTodoSchema, req);
+  const { assigneeId, ...where } = parseBody(moveTodoSchema, req);
+  // Dropped on a quadrant, the task goes there. On the person's own board it
+  // otherwise stays put; handed to someone else it lands where a new task lands,
+  // so a task given to you always turns up in the same corner.
+  const quadrant: Quadrant =
+    existing.assigneeId === assigneeId ?
+      { urgency: where.urgency ?? existing.urgency, importance: where.importance ?? existing.importance }
+    : quadrantOf(where);
+  // Staying with the same person: a drop on another quadrant of their own board.
+  if (existing.assigneeId === assigneeId) {
+    const moved =
+      existing.urgency === quadrant.urgency && existing.importance === quadrant.importance ?
+        await prisma.todo.findUniqueOrThrow({ where: { id: existing.id }, include: todoInclude })
+      : await prisma.$transaction(async (tx) =>
+          tx.todo.update({
+            where: { id: existing.id },
+            data: { ...quadrant, position: await topPosition(tx, assigneeId, quadrant) },
+            include: todoInclude,
+          }),
+        );
+    const dto = toTodoDTO(moved);
+    emitTodo(moved, dto);
+    for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId });
+    res.json(dto);
+    return;
+  }
   if (existing.createdById !== actor.id) throw forbidden('Only the person who gave the task can hand it to someone else');
   if (existing.conversationId) throw conflict('This task came from a chat, so it stays with the person in that chat');
   if (existing.status !== 'open') throw conflict('Only open tasks can be handed on');
-  if (existing.assigneeId === assigneeId) {
-    res.json(toTodoDTO(await prisma.todo.findUniqueOrThrow({ where: { id: existing.id }, include: todoInclude })));
-    return;
-  }
   const assignee = await prisma.user.findUnique({
     where: { id: assigneeId },
     select: { id: true, role: true, managerId: true, isActive: true },
@@ -670,7 +711,7 @@ chatRouter.post('/todos/:id/move', async (req, res) => {
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
     const todo = await tx.todo.update({
       where: { id: existing.id },
-      data: { assigneeId: assignee.id, position: await topPosition(tx, assignee.id) },
+      data: { assigneeId: assignee.id, ...quadrant, position: await topPosition(tx, assignee.id, quadrant) },
       include: todoInclude,
     });
     const deliver = await notify(tx, assignee.id === actor.id ? [] : [assignee.id], 'todo.assigned', {
@@ -698,7 +739,9 @@ chatRouter.post('/todos/:id/move', async (req, res) => {
  */
 chatRouter.post('/todos/reorder', async (req, res) => {
   const actor = actorOf(req);
-  const { assigneeId, ids } = parseBody(reorderTodosSchema, req);
+  const { assigneeId, ids, ...into } = parseBody(reorderTodosSchema, req);
+  // The quadrant these tasks now belong to; left out, each keeps the one it has.
+  const quadrant = into.urgency && into.importance ? { urgency: into.urgency, importance: into.importance } : null;
   const assignee = await prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true, role: true } });
   if (!assignee) throw notFound('Person');
   if (assigneeId !== actor.id && !canGiveTask(actor, asTaker(assignee))) {
@@ -709,10 +752,13 @@ chatRouter.post('/todos/reorder', async (req, res) => {
   if (rows.length !== unique.length) throw conflict('These tasks just changed; refresh and try again');
 
   await prisma.$transaction(async (tx) => {
+    // Tasks dragged in from another quadrant arrive first, so the ordering below
+    // sees the quadrant as it will be.
+    if (quadrant) await tx.todo.updateMany({ where: { id: { in: unique } }, data: quadrant });
     // The caller sends the order they can see; anything the filter hides keeps its
     // own order below it, so the numbers stay sound whatever was on screen.
     const all = await tx.todo.findMany({
-      where: { assigneeId },
+      where: { assigneeId, ...(quadrant ?? {}) },
       orderBy: [{ position: 'asc' }, { createdAt: 'desc' }],
       select: { id: true },
     });

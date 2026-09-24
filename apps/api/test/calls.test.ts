@@ -75,8 +75,9 @@ describe('POST /calls', () => {
     expect(call.permissions).toMatchObject({ edit: true, reassignAssociate: true, reassignExpert: true });
     expect(call.allowedTransitions).toEqual(['scheduled', 'cancelled']);
 
-    const moved = await m1.post(`/calls/${call.id}/transition`, { to: 'scheduled' });
+    const moved = await m1.post(`/calls/${call.id}/transition`, { to: 'scheduled', meetingDetails: 'https://meet.google.com/abc-defg-hij' });
     expect(moved.status, moved.text).toBe(200);
+    expect(moved.body.meetingDetails).toBe('https://meet.google.com/abc-defg-hij');
     const history = await prisma.callStatusHistory.findFirstOrThrow({ where: { callId: call.id, toStatus: 'scheduled' } });
     expect(history.isOverride).toBe(false);
 

@@ -416,6 +416,14 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     if (to === 'scheduled' && !current.expertId) {
       throw conflict('Assign an Expert before scheduling the call', ERROR_CODES.expertRequired);
     }
+    // Nobody can join a call they have no way into, so the meeting details are
+    // settled before it is scheduled, not after (§4.2).
+    const meetingDetails = input.meetingDetails?.trim() || current.meetingDetails;
+    if (to === 'scheduled' && !meetingDetails) {
+      throw badRequest('Add the meeting details before scheduling the call', {
+        issues: [{ path: 'meetingDetails', message: 'Add the meeting link, and the passcode if there is one' }],
+      });
+    }
     // The research data is ready only once the Expert has something to read.
     const researchLink = input.researchLink ?? current.researchLink;
     if (to === 'research_ready' && !researchLink) {
@@ -441,6 +449,7 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     // The schema already requires these for `ongoing` / `finished`.
     const data: Prisma.CallUpdateInput = { status: to };
     if (to === 'research_ready') data.researchLink = researchLink;
+    if (to === 'scheduled') data.meetingDetails = meetingDetails;
     if (to === 'ongoing') data.ninjaLink = input.ninjaLink;
     if (to === 'finished') {
       data.actualDurationMinutes = input.actualDurationMinutes;

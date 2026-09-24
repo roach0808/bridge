@@ -475,8 +475,13 @@ describe('tasks can be handed to someone else', () => {
     expect(res.body.assignee.id).toBe(fx.a1.id);
     expect(await prisma.notification.count({ where: { userId: fx.a1.id, type: 'todo.assigned' } })).toBe(1);
 
+    // The taker places it on their own board, but cannot hand it on to anyone else.
+    const placed = await c.a1.post(`/todos/${id}/move`, { assigneeId: fx.a1.id, urgency: 'can_wait', importance: 'non_strategic' });
+    expect(placed.status, placed.text).toBe(200);
+    expect(placed.body).toMatchObject({ urgency: 'can_wait', importance: 'non_strategic' });
+    expectError(await c.a1.post(`/todos/${id}/move`, { assigneeId: fx.a2.id }), 403);
+
     // Only the giver hands it on, only to people they may give tasks to, only while open.
-    expectError(await c.a1.post(`/todos/${id}/move`, { assigneeId: fx.a1.id }), 403);
     const mine = (await c.m1.post('/todos', { assigneeId: fx.a1.id, title: 'Tidy the notes' })).body.id as string;
     expectError(await c.m1.post(`/todos/${mine}/move`, { assigneeId: fx.e1.id }), 403);
     await c.a1.post(`/todos/${id}/done`, {});

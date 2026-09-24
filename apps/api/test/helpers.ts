@@ -3,6 +3,7 @@ import argon2 from 'argon2';
 import request, { type Response } from 'supertest';
 import { expect } from 'vitest';
 import { createApp } from '../src/app';
+import { resetDeviceCache } from '../src/auth/devices';
 import { prisma } from '../src/db';
 
 export { prisma };
@@ -25,6 +26,8 @@ export async function resetDb() {
   if (!rows.length) return;
   const list = rows.map((r) => `"public"."${r.tablename}"`).join(', ');
   await prisma.$executeRawUnsafe(`TRUNCATE TABLE ${list} RESTART IDENTITY CASCADE`);
+  // The device names are cached in memory; the rows behind them have just gone.
+  resetDeviceCache();
 }
 
 // ---------------------------------------------------------------------------
@@ -137,6 +140,8 @@ export interface MakeCallOptions {
   createdBy?: FixtureUser;
   projectDetails?: string;
   notes?: string | null;
+  /** How to join. A call cannot be scheduled without it, so it is set by default. */
+  meetingDetails?: string | null;
   /** Defaults to 1000 for a call already processed to bank (the database requires one). */
   realIncome?: number | null;
 }
@@ -153,6 +158,7 @@ export async function makeCall(fx: Fixtures, opts: MakeCallOptions) {
       scheduledAt: new Date(opts.scheduledAt ?? '2027-02-01T09:00:00Z'),
       durationMinutes: opts.durationMinutes ?? 60,
       projectDetails: opts.projectDetails ?? 'Market sizing for industrial pumps',
+      meetingDetails: opts.meetingDetails === undefined ? 'https://zoom.us/j/9876543210 — passcode 4242' : opts.meetingDetails,
       platformAssociateName: 'Jordan at GLG',
       notes: opts.notes ?? null,
       realIncome: opts.realIncome !== undefined ? opts.realIncome : opts.status === 'process_to_bank' ? 1000 : null,

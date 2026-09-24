@@ -42,7 +42,42 @@ export function supervisesWork(actor: { id: string; role: Role }, owner: { id: s
   return owner.role === 'associate' || owner.id === actor.id;
 }
 
-/** Tasks are ordered by hand inside each panel; the gap leaves room to drop one between two others. */
+/**
+ * The task board's four quadrants: a column (needs action now, or can wait) and
+ * a row (strategic work, or not). Every task sits in one; a new task starts
+ * where the work starts, needing action and strategic.
+ */
+export const TODO_URGENCIES = ['need_action', 'can_wait'] as const;
+export type TodoUrgency = (typeof TODO_URGENCIES)[number];
+export const TODO_IMPORTANCES = ['strategic', 'non_strategic'] as const;
+export type TodoImportance = (typeof TODO_IMPORTANCES)[number];
+
+export const TODO_URGENCY_LABELS: Record<TodoUrgency, string> = {
+  need_action: 'Need action',
+  can_wait: 'Can wait',
+};
+export const TODO_IMPORTANCE_LABELS: Record<TodoImportance, string> = {
+  strategic: 'Strategic',
+  non_strategic: 'Non strategic',
+};
+
+export const DEFAULT_TODO_URGENCY: TodoUrgency = 'need_action';
+export const DEFAULT_TODO_IMPORTANCE: TodoImportance = 'strategic';
+
+/** One quadrant of the board. */
+export interface TodoQuadrant {
+  urgency: TodoUrgency;
+  importance: TodoImportance;
+}
+
+/** The four quadrants, in reading order: the most pressing first. */
+export const TODO_QUADRANTS: readonly TodoQuadrant[] = TODO_IMPORTANCES.flatMap((importance) =>
+  TODO_URGENCIES.map((urgency) => ({ urgency, importance })),
+);
+
+export const sameQuadrant = (a: TodoQuadrant, b: TodoQuadrant) => a.urgency === b.urgency && a.importance === b.importance;
+
+/** Tasks are ordered by hand inside each quadrant; the gap leaves room to drop one between two others. */
 export const TODO_POSITION_STEP = 100;
 
 /** A completed task stays on the board this long before it drops out of the default view. */

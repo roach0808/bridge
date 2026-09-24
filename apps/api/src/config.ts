@@ -26,6 +26,12 @@ const schema = z.object({
   /** OAuth client ID from Google Cloud (Google Auth Platform → Clients). Google sign-in is off without it. */
   GOOGLE_CLIENT_ID: z.preprocess((v) => (v === '' ? undefined : v), z.string().endsWith('.apps.googleusercontent.com').optional()),
   LOGIN_RATE_LIMIT: z.coerce.number().int().min(1).default(5),
+  /**
+   * The Founder who owns the system. Only they are shown which device each
+   * audit entry came from (§10 Audit trail); other Founders see the rest of
+   * the entry as before.
+   */
+  OWNER_EMAIL: z.string().email().default('andrewlong0808@gmail.com'),
   COOKIE_SECURE: z
     .enum(['true', 'false'])
     .optional()

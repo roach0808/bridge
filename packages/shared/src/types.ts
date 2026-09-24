@@ -2,7 +2,7 @@ import type { AvatarAudience, AvatarStyle } from './avatars';
 import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
 import type { BlockRule, Occurrence } from './scheduleBlocks';
-import type { ChatMessageKind, TodoStatus } from './chat';
+import type { ChatMessageKind, TodoImportance, TodoStatus, TodoUrgency } from './chat';
 import type { Payee } from './payouts';
 import type { PresenceStatus } from './presence';
 import type { PlatformRegistration } from './schemas';
@@ -418,6 +418,8 @@ export interface AuditEntryDTO {
   ip: string | null;
   country: string | null;
   deviceType: string | null;
+  /** The browser it came from, e.g. "US-desktop-01". Only the owner is shown it; null for anyone else. */
+  device: string | null;
   meta: Record<string, unknown> | null;
   createdAt: string;
 }
@@ -491,6 +493,9 @@ export interface DashboardSummary {
 export interface TodoSummary {
   id: string;
   status: TodoStatus;
+  /** Which quadrant of the board it sits in. */
+  urgency: TodoUrgency;
+  importance: TodoImportance;
   assignee: UserRef;
   createdBy: UserRef;
   doneAt: string | null;

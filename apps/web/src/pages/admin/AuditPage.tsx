@@ -66,6 +66,8 @@ export default function AuditPage() {
     set(v);
   };
   const rows = query.data?.items ?? [];
+  // Which browser an action came from is the owner's to see; nobody else is sent it.
+  const showDevice = rows.some((e) => e.device);
   const total = query.data?.total ?? 0;
 
   return (
@@ -106,7 +108,7 @@ export default function AuditPage() {
         <EmptyState icon={<HistoryRounded />} title="Nothing recorded yet" description="Changes appear here as people work." />
       ) : (
         <>
-          <TableSurface minWidth={900}>
+          <TableSurface minWidth={showDevice ? 1030 : 900}>
             <Table size="small">
               <TableHead>
                 <TableRow>
@@ -115,6 +117,7 @@ export default function AuditPage() {
                   <TableCell width={180}>Action</TableCell>
                   <TableCell>What</TableCell>
                   <TableCell width={190}>From</TableCell>
+                  {showDevice && <TableCell width={130}>Device</TableCell>}
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -163,6 +166,17 @@ export default function AuditPage() {
                         {e.ip ? ` · ${e.ip}` : ''}
                       </Typography>
                     </TableCell>
+                    {showDevice && (
+                      <TableCell>
+                        {e.device ? (
+                          <Chip size="small" variant="outlined" label={e.device} sx={{ height: 22, fontSize: 11 }} />
+                        ) : (
+                          <Typography variant="caption" color="text.disabled">
+                            —
+                          </Typography>
+                        )}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>

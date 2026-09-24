@@ -1,7 +1,8 @@
 import { listAuditQuerySchema, type AuditEntryDTO, type Paginated } from '@god/shared';
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
-import { requireAuth, requireRole } from '../auth/middleware';
+import { actorOf, requireAuth, requireRole } from '../auth/middleware';
+import { isOwner } from '../auth/owner';
 import { prisma } from '../db';
 import { iso, parseQuery } from '../http';
 
@@ -21,7 +22,10 @@ function maskEmails(meta: AuditEntryDTO['meta']): AuditEntryDTO['meta'] {
   return { ...meta, email: `${name.slice(0, 2)}***@${domain}` };
 }
 
-const toDTO = (a: Prisma.AuditLogGetPayload<object>): AuditEntryDTO => ({
+type AuditRow = Prisma.AuditLogGetPayload<{ include: { device: { select: { label: true } } } }>;
+
+/** `showDevice`: only the owner is told which browser an action came from. */
+const toDTO = (a: AuditRow, showDevice: boolean): AuditEntryDTO => ({
   id: a.id,
   userId: a.userId,
   actorName: a.actorName,
@@ -36,6 +40,7 @@ const toDTO = (a: Prisma.AuditLogGetPayload<object>): AuditEntryDTO => ({
   ip: a.ip,
   country: a.country,
   deviceType: a.deviceType,
+  device: showDevice ? (a.device?.label ?? null) : null,
   meta: maskEmails((a.meta as AuditEntryDTO['meta']) ?? null),
   createdAt: iso(a.createdAt),
 });
@@ -61,16 +66,18 @@ auditRouter.get('/audit', async (req, res) => {
         : {},
     ],
   };
-  const [total, rows] = await prisma.$transaction([
+  const [total, rows, showDevice] = await Promise.all([
     prisma.auditLog.count({ where }),
     prisma.auditLog.findMany({
       where,
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       skip: (page - 1) * pageSize,
       take: pageSize,
+      include: { device: { select: { label: true } } },
     }),
+    isOwner(actorOf(req).id),
   ]);
-  const body: Paginated<AuditEntryDTO> = { items: rows.map(toDTO), page, pageSize, total };
+  const body: Paginated<AuditEntryDTO> = { items: rows.map((r) => toDTO(r, showDevice)), page, pageSize, total };
   res.json(body);
 });
 

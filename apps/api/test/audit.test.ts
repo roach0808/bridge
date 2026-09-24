@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import request from 'supertest';
 import { trimAuditTrail } from '../src/backup/dumps';
-import { app, as, expectError, makeCall, prisma, seedFixtures, PASSWORD, type Fixtures } from './helpers';
+import { app, as, Client, expectError, login, makeCall, passwordHash, prisma, seedFixtures, PASSWORD, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -135,6 +135,69 @@ describe('audit trail', () => {
     });
     expect(await trimAuditTrail()).toBe(1);
     expect((await prisma.auditLog.findMany()).map((a) => a.summary)).toEqual(['recent']);
+  });
+});
+
+describe('the device an action came from (§10)', () => {
+  const DESKTOP = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/124.0 Safari/537.36';
+  const PHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) Version/17.4 Mobile Safari/604.1';
+
+  /** A call transition from one browser, with the token that browser keeps for itself. */
+  async function act(user: { email: string }, callId: string, deviceToken: string, userAgent: string, country = 'US') {
+    const res = await request(app)
+      .post(`/api/v1/calls/${callId}/transition`)
+      .set('Authorization', `Bearer ${await login(user.email)}`)
+      .set('user-agent', userAgent)
+      .set('x-device-id', deviceToken)
+      .set('x-vercel-ip-country', country)
+      .send({ to: 'confirmed' });
+    expect(res.status, res.text).toBe(200);
+  }
+
+  it('names each browser once, by where it is and what it is', async () => {
+    for (const [i, [token, ua]] of [
+      ['device-token-one', DESKTOP],
+      ['device-token-one', DESKTOP],
+      ['device-token-two', PHONE],
+      ['device-token-three', DESKTOP],
+    ].entries()) {
+      const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: `2027-06-0${i + 1}T09:00:00Z` });
+      await act(fx.e1, call.id, token!, ua!);
+    }
+    await trail({ action: 'call.transition' }, 4);
+
+    const devices = await prisma.device.findMany({ orderBy: { firstSeenAt: 'asc' } });
+    // The same browser twice is the same device; the numbers run on per country and kind.
+    expect(devices.map((d) => d.label)).toEqual(['US-desktop-01', 'US-mobile-01', 'US-desktop-02']);
+    const rows = await prisma.auditLog.findMany({ where: { action: 'call.transition' } });
+    expect(rows.every((r) => r.deviceId !== null)).toBe(true);
+  });
+
+  it('is shown to the owner alone, not to another Founder', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    await act(fx.e1, call.id, 'device-token-owner', DESKTOP, 'KR');
+    await trail({ action: 'call.transition' });
+
+    const owner = await as(fx.founder);
+    const seen = (await owner.get('/audit', { action: 'call.transition' })).body.items[0];
+    expect(seen.device).toBe('KR-desktop-01');
+
+    // A second Founder sees the entry, but not the machine it came from.
+    const other = await prisma.user.create({
+      data: { nickname: 'FounderTwo', role: 'founder', email: 'foundertwo@fixtures.test', passwordHash: await passwordHash(), avatarId: 'founder-02' },
+    });
+    const otherFounder = new Client(await login(other.email!), other.email);
+    const theirs = (await otherFounder.get('/audit', { action: 'call.transition' })).body.items[0];
+    expect(theirs.id).toBe(seen.id);
+    expect(theirs.device).toBeNull();
+  });
+
+  it('a request from a browser that names no device is still recorded', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    expect((await (await as(fx.e1)).post(`/calls/${call.id}/transition`, { to: 'confirmed' })).status).toBe(200);
+    const [entry] = await trail({ action: 'call.transition' });
+    expect(entry!.deviceId).toBeNull();
+    expect(await prisma.device.count()).toBe(0);
   });
 });
 

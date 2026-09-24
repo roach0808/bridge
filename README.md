@@ -11,7 +11,7 @@ The spec is [docs/SPEC.md](docs/SPEC.md).
 | **API** | Node 22 · Express 5 · Prisma 6 · PostgreSQL 16 · Socket.IO 4 · Zod · argon2id + JWT with rotating refresh tokens |
 | **Web** | React 19 · Vite · Material UI 7 (light/dark, CSS variables) · TanStack Query 5 · React Router 7 · Luxon |
 | **Shared** | `@god/shared` holds the status workflow, transition rules, Zod schemas, DTO types and the recurrence engine. `@god/api-client` is a typed fetch and socket client with no browser globals, so the mobile app can reuse it |
-| **Tests** | Vitest (1462 shared unit tests) · Supertest (379 API tests on `god_testsuite`) · Playwright (end-to-end workflow with a live observer) |
+| **Tests** | Vitest (1466 shared unit tests) · Supertest (388 API tests on `god_testsuite`) · Playwright (end-to-end workflow with a live observer) |
 
 ## Quick start
 

@@ -171,6 +171,7 @@ describe('cancelling a call (§4.5)', () => {
       durationMinutes: 60,
       projectDetails: 'Another call at the same time',
       platformAssociateName: 'Jordan at GLG',
+      meetingDetails: 'https://meet.google.com/abc-defg-hij',
     };
     const a1 = await as(fx.a1);
     const booked = await a1.post('/calls', clash);
@@ -183,6 +184,36 @@ describe('cancelling a call (§4.5)', () => {
     // A cancelled call is off the calendar; its slot belongs to the new one.
     const cal = await a1.get('/calendar', { from: '2027-04-01T00:00:00Z', to: '2027-04-02T00:00:00Z' });
     expect(cal.body.calls.map((c: { id: string }) => c.id)).toEqual([booked.body.id]);
+  });
+});
+
+describe('meeting details are settled before a call is scheduled (§4.2)', () => {
+  it('refuses to schedule without them, and keeps the ones given', async () => {
+    const a1 = await as(fx.a1);
+    const call = await makeCall(fx, { associate: fx.a1, meetingDetails: null });
+    const refused = await a1.post(`/calls/${call.id}/transition`, { to: 'scheduled' });
+    expectError(refused, 400);
+    expect(refused.body.error.details.issues[0].path).toBe('meetingDetails');
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('on_scheduling');
+
+    const scheduled = await a1.post(`/calls/${call.id}/transition`, {
+      to: 'scheduled',
+      meetingDetails: 'https://zoom.us/j/555 — passcode 9090',
+    });
+    expect(scheduled.status, scheduled.text).toBe(200);
+    expect(scheduled.body.meetingDetails).toBe('https://zoom.us/j/555 — passcode 9090');
+  });
+
+  it('a call that already says how to join needs nothing repeated', async () => {
+    const a1 = await as(fx.a1);
+    const call = await makeCall(fx, { associate: fx.a1, scheduledAt: '2027-05-02T09:00:00Z' });
+    expect((await a1.post(`/calls/${call.id}/transition`, { to: 'scheduled' })).status).toBe(200);
+  });
+
+  it('blank details are no details', async () => {
+    const a1 = await as(fx.a1);
+    const call = await makeCall(fx, { associate: fx.a1, scheduledAt: '2027-05-03T09:00:00Z', meetingDetails: null });
+    expectError(await a1.post(`/calls/${call.id}/transition`, { to: 'scheduled', meetingDetails: '   ' }), 400);
   });
 });
 

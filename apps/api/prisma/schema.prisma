@@ -58,6 +58,17 @@ enum TodoStatus {
   completed
 }
 
+/// Where a task sits on its panel: the column (act now or later) and the row (strategic or not).
+enum TodoUrgency {
+  need_action
+  can_wait
+}
+
+enum TodoImportance {
+  strategic
+  non_strategic
+}
+
 enum AvatarAudience {
   founder
   manager
@@ -404,15 +415,19 @@ model AuditLog {
   deviceType  String?  @map("device_type")
   userAgent   String?  @map("user_agent")
   sessionId   String?  @map("session_id") @db.Uuid
+  /// The browser the request came from (§6.16); its name is for the owner's eyes only.
+  deviceId    String?  @map("device_id") @db.Uuid
   /// Extra detail: changed fields, the target user, the attempted email.
   meta        Json?
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  device Device? @relation(fields: [deviceId], references: [id], onDelete: SetNull)
 
   @@index([createdAt])
   @@index([userId, createdAt])
   @@index([action, createdAt])
+  @@index([deviceId])
   @@map("audit_logs")
 }
 
@@ -557,7 +572,10 @@ model Todo {
   assigneeId     String     @map("assignee_id") @db.Uuid
   createdById    String     @map("created_by") @db.Uuid
   status         TodoStatus @default(open)
-  /// Where the task sits on its panel; dragging a task rewrites these (§6.x tasks).
+  /// The quadrant it sits in; a new task needs action and is strategic.
+  urgency        TodoUrgency    @default(need_action)
+  importance     TodoImportance @default(strategic)
+  /// Where the task sits within its quadrant; dragging a task rewrites these (§6.x tasks).
   position       Int        @default(0)
   doneAt         DateTime?  @map("done_at") @db.Timestamptz(3)
   doneNote       String?    @map("done_note")
@@ -576,6 +594,7 @@ model Todo {
 
   @@index([assigneeId, status])
   @@index([assigneeId, position])
+  @@index([assigneeId, urgency, importance, position])
   @@index([createdById, status])
   @@map("todos")
 }
@@ -710,4 +729,22 @@ model PayCycle {
   closedBy User @relation("PayCycleClosedBy", fields: [closedById], references: [id], onDelete: Restrict)
 
   @@map("pay_cycles")
+}
+
+/// A browser that has signed in, remembered by a random id it keeps (a web page can never
+/// read a MAC address). Named for the audit trail: country, kind and a number, e.g. "US-desktop-01".
+model Device {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// The random id the browser sends as X-Device-Id. Never shown to anyone.
+  token       String   @unique
+  /// The name in the trail, unique across devices.
+  label       String   @unique
+  deviceType  String   @map("device_type")
+  country     String?  @db.Char(2)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(3)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+
+  auditLogs AuditLog[]
+
+  @@map("devices")
 }

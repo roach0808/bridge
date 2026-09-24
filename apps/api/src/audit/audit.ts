@@ -1,6 +1,7 @@
 import type { NextFunction, Request, RequestHandler, Response } from 'express';
 import type { Prisma } from '@prisma/client';
 import { deviceOf } from '../auth/device';
+import { deviceIdFor } from '../auth/devices';
 import { prisma } from '../db';
 import { logger } from '../logger';
 
@@ -22,27 +23,36 @@ export function record(req: Request, res: Response, entry: AuditEntry): void {
   const device = deviceOf(req);
   const actor = req.actor;
   const userId = entry.userId !== undefined ? entry.userId : (actor?.id ?? null);
-  void prisma.auditLog
-    .create({
-      data: {
-        userId,
-        actorRole: actor?.role ?? null,
-        actorName: actor?.nickname ?? null,
-        action: entry.action,
-        summary: entry.summary,
-        entityType: entry.entityType ?? null,
-        entityId: entry.entityId ?? null,
-        method: req.method,
-        path: req.originalUrl.split('?')[0] ?? req.originalUrl,
-        statusCode: res.statusCode,
-        ip: device.ip,
-        country: device.country,
-        deviceType: device.deviceType,
-        userAgent: req.get('user-agent')?.slice(0, 400) ?? null,
-        sessionId: actor?.sessionId ?? null,
-        meta: entry.meta,
-      },
-    })
+  const statusCode = res.statusCode;
+  const path = req.originalUrl.split('?')[0] ?? req.originalUrl;
+  const userAgent = req.get('user-agent')?.slice(0, 400) ?? null;
+  const method = req.method;
+  // The browser it came from, if it named itself; looking it up must not hold
+  // up the response, so the row waits for it.
+  void deviceIdFor(req)
+    .then((deviceId) =>
+      prisma.auditLog.create({
+        data: {
+          userId,
+          actorRole: actor?.role ?? null,
+          actorName: actor?.nickname ?? null,
+          action: entry.action,
+          summary: entry.summary,
+          entityType: entry.entityType ?? null,
+          entityId: entry.entityId ?? null,
+          method,
+          path,
+          statusCode,
+          ip: device.ip,
+          country: device.country,
+          deviceType: device.deviceType,
+          deviceId,
+          userAgent,
+          sessionId: actor?.sessionId ?? null,
+          meta: entry.meta,
+        },
+      }),
+    )
     .catch((err) => logger.warn({ err, action: entry.action }, 'audit write failed'));
 }
 

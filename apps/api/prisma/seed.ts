@@ -218,6 +218,10 @@ async function main() {
     messages?: Array<[typeof pixel, string]>;
   }
 
+  /** Stands in for the joining details of a call whose row does not spell them out. */
+  const defaultMeeting = () =>
+    `Zoom https://zoom.example.com/j/${Math.floor(10_000_000 + Math.random() * 89_999_999)} · passcode ${Math.floor(1000 + Math.random() * 8999)}`;
+
   // The first monthly payment: the Founder paid everyone they owed then.
   const firstPayday = at(-6, 12);
   const calls: SeedCall[] = [
@@ -252,7 +256,9 @@ async function main() {
         notes: c.notes ?? null,
         realIncome: c.realIncome,
         researchLink: c.researchLink,
-        meetingDetails: c.meeting ?? null,
+        // A call cannot be scheduled without a way in, so every call past that
+        // step has one, made up where the row does not name it.
+        meetingDetails: c.meeting ?? (c.status === 'on_scheduling' ? null : defaultMeeting()),
         rateOverride: c.rateOverride,
         ninjaLink: ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling'].includes(c.status)
           ? null

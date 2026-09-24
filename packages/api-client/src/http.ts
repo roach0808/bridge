@@ -42,6 +42,12 @@ export interface ClientOptions {
   onSessionExpired?: () => void;
   /** Called whenever tokens change (login, refresh). */
   onAuth?: (auth: AuthResponse) => void;
+  /**
+   * A token this app keeps for this browser or phone, sent as `X-Device-Id` so
+   * the audit trail can say which device an action came from. No browser can
+   * read a MAC address, so this is the honest stand-in for one.
+   */
+  deviceId?: () => string | null | undefined;
   fetch?: typeof fetch;
 }
 
@@ -120,6 +126,8 @@ export class HttpClient {
     const headers: Record<string, string> = { accept: 'application/json' };
     if (opts.body !== undefined) headers['content-type'] = 'application/json';
     if (opts.auth !== false && this.accessToken) headers.authorization = `Bearer ${this.accessToken}`;
+    const deviceId = this.options.deviceId?.();
+    if (deviceId) headers['x-device-id'] = deviceId;
 
     let res: Response;
     try {

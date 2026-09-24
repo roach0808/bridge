@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
 import { PAYEES } from './payouts';
-import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, TODO_STATUSES } from './chat';
+import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, TODO_IMPORTANCES, TODO_STATUSES, TODO_URGENCIES } from './chat';
 import { ROLES } from './roles';
 import {
   BLOCK_KINDS,
@@ -296,6 +296,8 @@ export const transitionSchema = z
     ninjaLink: webUrl('Enter a link starting with https://').optional(),
     /** Moving to `research_ready`: the research data link, unless the call already has one. */
     researchLink: webUrl('Enter a link starting with https://').optional(),
+    /** Moving to `scheduled`: how to join the meeting, unless the call already says. */
+    meetingDetails: optionalText(2000).optional(),
     actualDurationMinutes: z.coerce
       .number()
       .int('Enter whole minutes')
@@ -411,18 +413,32 @@ export const listTodosQuerySchema = z.object({
 export const todoBoardQuerySchema = z.object({
   status: z.enum([...TODO_STATUSES, 'active', 'all']).default('active'),
 });
-export const createTodoSchema = z.object({
-  assigneeId: uuid,
-  title: trimmed('Title', 200),
-  details: optionalText(5000).optional(),
+/** Where a task sits on the board; left out, a new task needs action and is strategic. */
+export const quadrantSchema = z.object({
+  urgency: z.enum(TODO_URGENCIES).optional(),
+  importance: z.enum(TODO_IMPORTANCES).optional(),
 });
-/** Hands a task to someone else (dragged onto their panel). */
-export const moveTodoSchema = z.object({ assigneeId: uuid });
-/** The tasks of one panel, in the order they should be shown from now on. */
-export const reorderTodosSchema = z.object({
-  assigneeId: uuid,
-  ids: z.array(uuid).min(1).max(500),
-});
+
+export const createTodoSchema = z
+  .object({
+    assigneeId: uuid,
+    title: trimmed('Title', 200),
+    details: optionalText(5000).optional(),
+  })
+  .merge(quadrantSchema);
+/** Hands a task to someone else (dragged onto their panel), into a quadrant of their board. */
+export const moveTodoSchema = z.object({ assigneeId: uuid }).merge(quadrantSchema);
+
+/**
+ * The tasks of one quadrant of one panel, in the order they should be shown from
+ * now on. Tasks dragged in from another quadrant move with it.
+ */
+export const reorderTodosSchema = z
+  .object({
+    assigneeId: uuid,
+    ids: z.array(uuid).min(1).max(500),
+  })
+  .merge(quadrantSchema);
 
 // --- Statistics -----------------------------------------------------------------
 

@@ -387,6 +387,73 @@ describe('the order of a panel (§ drag and drop)', () => {
   });
 });
 
+describe('the four quadrants of a board (§ task board)', () => {
+  const quadrantOf = async (user: typeof fx.a1, personId: string, title: string) => {
+    const board = (await (await as(user)).get('/todos/board')).body;
+    const panel = board.find((p: { person: { id: string } }) => p.person.id === personId);
+    const task = panel.tasks.find((t: { title: string }) => t.title === title);
+    return { urgency: task.urgency, importance: task.importance };
+  };
+
+  it('a new task needs action and is strategic, whoever gives it', async () => {
+    const a1 = await as(fx.a1);
+    const mine = (await a1.post('/todos', { assigneeId: fx.a1.id, title: 'Mine' })).body;
+    expect(mine).toMatchObject({ urgency: 'need_action', importance: 'strategic' });
+
+    // A task handed to me by my Manager lands in the same quadrant as one I write myself.
+    const m1 = await as(fx.m1);
+    const given = (await m1.post('/todos', { assigneeId: fx.a1.id, title: 'Given' })).body;
+    expect(given).toMatchObject({ urgency: 'need_action', importance: 'strategic' });
+    expect(await quadrantOf(fx.a1, fx.a1.id, 'Given')).toEqual({ urgency: 'need_action', importance: 'strategic' });
+
+    // And so does one made from a chat message.
+    const conv = (await m1.post('/chat/conversations', { userId: fx.a1.id })).body;
+    const msg = (await m1.post(`/chat/conversations/${conv.id}/messages`, { body: 'Please chase this' })).body;
+    const fromChat = (await m1.post(`/chat/messages/${msg.id}/todo`)).body;
+    expect(fromChat).toMatchObject({ urgency: 'need_action', importance: 'strategic' });
+  });
+
+  it('a task can be given straight to another quadrant, and dragged into one', async () => {
+    const a1 = await as(fx.a1);
+    const later = (await a1.post('/todos', { assigneeId: fx.a1.id, title: 'Later', urgency: 'can_wait', importance: 'non_strategic' })).body;
+    expect(later).toMatchObject({ urgency: 'can_wait', importance: 'non_strategic' });
+
+    const now = (await a1.post('/todos', { assigneeId: fx.a1.id, title: 'Now' })).body;
+    const also = (await a1.post('/todos', { assigneeId: fx.a1.id, title: 'Also' })).body;
+    // Dragged out of "need action / strategic" and dropped below the one already waiting.
+    const dropped = await a1.post('/todos/reorder', {
+      assigneeId: fx.a1.id,
+      urgency: 'can_wait',
+      importance: 'non_strategic',
+      ids: [later.id, now.id],
+    });
+    expect(dropped.status, dropped.text).toBe(204);
+    expect(await quadrantOf(fx.a1, fx.a1.id, 'Now')).toEqual({ urgency: 'can_wait', importance: 'non_strategic' });
+    // The one left behind stays where it was.
+    expect(await quadrantOf(fx.a1, fx.a1.id, 'Also')).toEqual({ urgency: 'need_action', importance: 'strategic' });
+
+    const board = (await a1.get('/todos/board')).body;
+    const mine = board.find((p: { isMe: boolean }) => p.isMe).tasks as Array<{ id: string; title: string; urgency: string }>;
+    expect(mine.filter((t) => t.urgency === 'can_wait').map((t) => t.title)).toEqual(['Later', 'Now']);
+    expect(also.id).toBeTruthy();
+  });
+
+  it('a task handed to someone else lands in the quadrant it was dropped on', async () => {
+    const m1 = await as(fx.m1);
+    const task = (await m1.post('/todos', { assigneeId: fx.m1.id, title: 'Hand over' })).body;
+    const moved = await m1.post(`/todos/${task.id}/move`, { assigneeId: fx.a1.id, urgency: 'can_wait', importance: 'strategic' });
+    expect(moved.status, moved.text).toBe(200);
+    expect(moved.body).toMatchObject({ urgency: 'can_wait', importance: 'strategic' });
+    expect(moved.body.assignee.id).toBe(fx.a1.id);
+
+    // Dropped on the person rather than a quadrant, it lands where a new task would,
+    // whatever corner it sat in on the giver's own board.
+    const other = (await m1.post('/todos', { assigneeId: fx.m1.id, title: 'Plain hand over', urgency: 'can_wait', importance: 'non_strategic' })).body;
+    const plain = await m1.post(`/todos/${other.id}/move`, { assigneeId: fx.a1.id });
+    expect(plain.body).toMatchObject({ urgency: 'need_action', importance: 'strategic' });
+  });
+});
+
 describe('tasks without a chat message', () => {
   it('a founder gives anyone a task; a manager any associate', async () => {
     const founder = await as(fx.founder);

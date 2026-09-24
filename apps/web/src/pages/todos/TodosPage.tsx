@@ -10,19 +10,31 @@ import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import VerifiedOutlined from '@mui/icons-material/VerifiedOutlined';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import { Box, Button, Card, Checkbox, Collapse, Divider, IconButton, Skeleton, Stack, Tooltip, Typography } from '@mui/material';
-import { ROLE_LABELS, isSelfTask, type TodoDTO, type TodoPanel, type UserRef } from '@god/shared';
+import {
+  DEFAULT_TODO_IMPORTANCE,
+  DEFAULT_TODO_URGENCY,
+  ROLE_LABELS,
+  TODO_IMPORTANCE_LABELS,
+  TODO_QUADRANTS,
+  TODO_URGENCY_LABELS,
+  isSelfTask,
+  sameQuadrant,
+  type TodoDTO,
+  type TodoPanel,
+  type TodoQuadrant,
+  type UserRef,
+} from '@god/shared';
 import {
   DndContext,
   DragOverlay,
   KeyboardSensor,
   PointerSensor,
-  closestCenter,
+  closestCorners,
   useDroppable,
   useSensor,
   useSensors,
   type DragEndEvent,
 } from '@dnd-kit/core';
-import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -49,6 +61,30 @@ const TICK_SX = (color: string) => ({
   '&.Mui-checked, &.Mui-checked.Mui-disabled': { color },
   '&.Mui-disabled:not(.Mui-checked)': { color: 'action.disabled', opacity: 0.5 },
 });
+
+/** Where a new task lands, and where a task handed over without a quadrant goes. */
+const NEW_TASK_QUADRANT: TodoQuadrant = { urgency: DEFAULT_TODO_URGENCY, importance: DEFAULT_TODO_IMPORTANCE };
+
+/** The droppable name of one quadrant of one person's board. */
+const quadrantId = (personId: string, q: TodoQuadrant) => `q:${personId}:${q.urgency}:${q.importance}`;
+
+function parseQuadrantId(id: string): { personId: string; quadrant: TodoQuadrant } | null {
+  const [tag, personId, urgency, importance] = id.split(':');
+  const known = TODO_QUADRANTS.find((q) => q.urgency === urgency && q.importance === importance);
+  return tag === 'q' && personId && known ? { personId, quadrant: known } : null;
+}
+
+const tasksIn = (panel: TodoPanel, q: TodoQuadrant) => panel.tasks.filter((t) => sameQuadrant(t, q));
+
+/** Puts a task where it was dropped; past the end of the list, or on nothing, it goes on top. */
+const insertAt = (list: TodoDTO[], task: TodoDTO, index: number) =>
+  index === -1 ? [task, ...list] : [...list.slice(0, index), task, ...list.slice(index)];
+
+/** The panel's tasks with one quadrant replaced by its new order. */
+const withQuadrant = (tasks: TodoDTO[], q: TodoQuadrant, next: TodoDTO[]) => [
+  ...tasks.filter((t) => !sameQuadrant(t, q) && !next.some((n) => n.id === t.id)),
+  ...next,
+];
 
 /** `active` = not completed yet, the default view. */
 type Filter = 'active' | 'open' | 'done' | 'completed' | 'all';
@@ -91,11 +127,11 @@ export default function TodosPage() {
     void queryClient.invalidateQueries({ queryKey: qk.todos.all });
   };
   const reorder = useMutation({
-    mutationFn: (v: { assigneeId: string; ids: string[] }) => api.todos.reorder(v),
+    mutationFn: (v: { assigneeId: string; ids: string[] } & TodoQuadrant) => api.todos.reorder(v),
     onError: onFailed,
   });
   const move = useMutation({
-    mutationFn: (v: { todo: TodoDTO; to: UserRef }) => api.todos.move(v.todo.id, v.to.id),
+    mutationFn: (v: { todo: TodoDTO; to: UserRef; quadrant: TodoQuadrant }) => api.todos.move(v.todo.id, v.to.id, v.quadrant),
     onSuccess: (saved, v) => {
       toast.success(v.to.id === me.id ? 'Moved to your tasks' : `Handed to ${saved.assignee.nickname}`);
       void queryClient.invalidateQueries({ queryKey: qk.todos.all });
@@ -104,30 +140,51 @@ export default function TodosPage() {
   });
 
   const panelOf = (taskId: string) => panels.find((p) => p.tasks.some((t) => t.id === taskId));
-  const panelFor = (overId: string) =>
-    overId.startsWith('panel:') ? panels.find((p) => `panel:${p.person.id}` === overId) : panelOf(overId);
+  /**
+   * What was dropped on: a quadrant, a task (the quadrant it sits in) or a
+   * person's heading, which hands the task over where a new task would land.
+   */
+  const dropOn = (overId: string): { panel: TodoPanel; quadrant: TodoQuadrant } | null => {
+    const cell = parseQuadrantId(overId);
+    if (cell) {
+      const panel = panels.find((p) => p.person.id === cell.personId);
+      return panel ? { panel, quadrant: cell.quadrant } : null;
+    }
+    if (overId.startsWith('panel:')) {
+      const panel = panels.find((p) => `panel:${p.person.id}` === overId);
+      return panel ? { panel, quadrant: NEW_TASK_QUADRANT } : null;
+    }
+    const panel = panelOf(overId);
+    const task = panel?.tasks.find((t) => t.id === overId);
+    return panel && task ? { panel, quadrant: { urgency: task.urgency, importance: task.importance } } : null;
+  };
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
     setDragging(null);
     if (!over) return;
     const from = panelOf(String(active.id));
-    const to = panelFor(String(over.id));
+    const dest = dropOn(String(over.id));
     const task = from?.tasks.find((t) => t.id === active.id);
-    if (!from || !to || !task) return;
+    if (!from || !dest || !task) return;
+    const { panel: to, quadrant } = dest;
 
     if (to.person.id === from.person.id) {
-      // Up and down its own panel: a new order, saved for everyone who sees the panel.
-      if (String(over.id).startsWith('panel:') || active.id === over.id || !mayArrange(from)) return;
-      const next = arrayMove(
-        from.tasks,
-        from.tasks.findIndex((t) => t.id === active.id),
-        from.tasks.findIndex((t) => t.id === over.id),
-      );
-      setBoard((old) => old.map((p) => (p.person.id === from.person.id ? { ...p, tasks: next } : p)));
-      reorder.mutate({ assigneeId: from.person.id, ids: next.map((t) => t.id) });
+      // Around their own board: a new order within the quadrant it landed in,
+      // saved for everyone who sees the panel.
+      if (!mayArrange(from)) return;
+      const staying = sameQuadrant(task, quadrant);
+      if (staying && active.id === over.id) return;
+      const list = tasksIn(from, quadrant);
+      const overIndex = list.findIndex((t) => t.id === over.id);
+      const next =
+        staying ? arrayMove(list, list.findIndex((t) => t.id === active.id), overIndex === -1 ? list.length - 1 : overIndex)
+        : insertAt(list, { ...task, ...quadrant }, overIndex);
+      setBoard((old) => old.map((p) => (p.person.id === from.person.id ? { ...p, tasks: withQuadrant(p.tasks, quadrant, next) } : p)));
+      reorder.mutate({ assigneeId: from.person.id, ids: next.map((t) => t.id), ...quadrant });
       return;
     }
-    // Onto someone else's panel: the task is handed to them, at the top of their list.
+    // Onto someone else's board: the task is handed to them, at the top of the
+    // quadrant it was dropped on.
     if (!canHandOn(task, me.id) || !to.canGive) {
       toast.info(
         task.conversationId
@@ -145,11 +202,11 @@ export default function TodosPage() {
         p.person.id === from.person.id
           ? { ...p, tasks: p.tasks.filter((t) => t.id !== task.id) }
           : p.person.id === to.person.id
-            ? { ...p, tasks: [{ ...task, assignee: to.person }, ...p.tasks] }
+            ? { ...p, tasks: [{ ...task, ...quadrant, assignee: to.person }, ...p.tasks] }
             : p,
       ),
     );
-    move.mutate({ todo: task, to: to.person });
+    move.mutate({ todo: task, to: to.person, quadrant });
   };
 
   return (
@@ -158,8 +215,8 @@ export default function TodosPage() {
         title="Tasks"
         subtitle={
           gives
-            ? 'Your tasks first, then one panel per person. Drag a task to reorder it, or onto someone’s panel to hand it to them.'
-            : 'Your own to-dos and the tasks given to you. Add one, drag to reorder, and tick it off when it is finished.'
+            ? 'Your board first, then one per person. Four quadrants: what needs action and what can wait, strategic and not. Drag a task to another quadrant, or onto someone’s board to hand it to them.'
+            : 'Your own to-dos and the tasks given to you, in four quadrants: what needs action and what can wait, strategic and not. Drag a task to move it between them.'
         }
         actions={
           <Button variant="contained" startIcon={<AddTaskRounded />} onClick={() => setNewTaskOpen(true)}>
@@ -190,8 +247,7 @@ export default function TodosPage() {
       ) : (
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
-          modifiers={[restrictToVerticalAxis]}
+          collisionDetection={closestCorners}
           onDragStart={({ active }) => setDragging(panelOf(String(active.id))?.tasks.find((t) => t.id === active.id) ?? null)}
           onDragCancel={() => setDragging(null)}
           onDragEnd={onDragEnd}
@@ -236,8 +292,8 @@ export default function TodosPage() {
   );
 }
 
-/** Your own panel is yours to arrange, and so is the panel of anyone you give tasks to. */
-const mayArrange = (panel: TodoPanel) => (panel.isMe || panel.canGive) && panel.tasks.length > 1;
+/** Your own board is yours to arrange, and so is the board of anyone you give tasks to. */
+const mayArrange = (panel: TodoPanel) => (panel.isMe || panel.canGive) && panel.tasks.length > 0;
 
 /** The giver hands an open task to someone else; a task from a chat stays with that chat. */
 const canHandOn = (t: TodoDTO, meId: string) => t.createdBy.id === meId && t.status === 'open' && !t.conversationId;
@@ -322,25 +378,109 @@ function PersonPanel({
       </Stack>
       <Collapse in={open} unmountOnExit>
         <Divider />
-        {tasks.length === 0 ? (
-          <Typography variant="body2" color="text.secondary" sx={{ p: 2 }}>
-            {filter === 'active' ? 'No tasks right now.' : 'No tasks match this filter.'}
-          </Typography>
-        ) : (
-          <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
-            <Stack divider={<Divider />}>
-              {tasks.map((t) => (
-                <SortableTask key={t.id} todo={t} draggable={arrange || canHandOn(t, me.id)} onReopen={() => onReopen(t)} />
-              ))}
-            </Stack>
-          </SortableContext>
-        )}
+        <Box
+          sx={{
+            display: 'grid',
+            gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' },
+            gap: 1.5,
+            p: 1.5,
+          }}
+        >
+          {TODO_QUADRANTS.map((q) => (
+            <Quadrant
+              key={quadrantId(person.id, q)}
+              personId={person.id}
+              quadrant={q}
+              tasks={tasksIn(panel, q)}
+              filter={filter}
+              arrange={arrange}
+              dragging={dragging}
+              onReopen={onReopen}
+            />
+          ))}
+        </Box>
       </Collapse>
     </Card>
   );
 }
 
-/** A task that can be dragged up and down its panel, or onto another panel, by its handle. */
+/**
+ * One of the four parts of a board: need action or can wait, strategic or not.
+ * A task dropped here moves into it; an empty quadrant still takes a drop.
+ */
+function Quadrant({
+  personId,
+  quadrant,
+  tasks,
+  filter,
+  arrange,
+  dragging,
+  onReopen,
+}: {
+  personId: string;
+  quadrant: TodoQuadrant;
+  tasks: TodoDTO[];
+  filter: Filter;
+  arrange: boolean;
+  dragging: TodoDTO | null;
+  onReopen: (t: TodoDTO) => void;
+}) {
+  const me = useMe();
+  const { setNodeRef, isOver } = useDroppable({ id: quadrantId(personId, quadrant), data: quadrant });
+  const open = tasks.filter((t) => t.status === 'open').length;
+  // The quadrant a dragged task would leave is not a target worth lighting up.
+  const lit = Boolean(dragging) && isOver;
+
+  return (
+    <Box
+      ref={setNodeRef}
+      sx={(t) => ({
+        borderRadius: 1.5,
+        border: 1,
+        borderColor: lit ? 'primary.main' : 'divider',
+        bgcolor: lit ? `rgba(${t.vars!.palette.primary.mainChannel} / 0.06)` : 'transparent',
+        transition: 'border-color .15s ease, background-color .15s ease',
+        minHeight: 108,
+        display: 'flex',
+        flexDirection: 'column',
+      })}
+    >
+      <Stack direction="row" spacing={1} alignItems="baseline" sx={{ px: 1.25, pt: 1, pb: 0.5 }}>
+        <Typography variant="caption" fontWeight={700} color={quadrant.urgency === 'need_action' ? 'primary.main' : 'text.secondary'}>
+          {TODO_URGENCY_LABELS[quadrant.urgency]}
+        </Typography>
+        <Typography variant="caption" color="text.disabled">
+          ·
+        </Typography>
+        <Typography variant="caption" color="text.secondary">
+          {TODO_IMPORTANCE_LABELS[quadrant.importance]}
+        </Typography>
+        <Box sx={{ flex: 1 }} />
+        {open > 0 && (
+          <Typography variant="caption" color="text.secondary">
+            {open} open
+          </Typography>
+        )}
+      </Stack>
+      <Divider />
+      {tasks.length === 0 ? (
+        <Typography variant="caption" color="text.disabled" sx={{ px: 1.25, py: 2, flex: 1 }}>
+          {dragging ? 'Drop here' : filter === 'active' ? 'Nothing here.' : 'Nothing matches this filter.'}
+        </Typography>
+      ) : (
+        <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+          <Stack divider={<Divider />}>
+            {tasks.map((t) => (
+              <SortableTask key={t.id} todo={t} draggable={arrange || canHandOn(t, me.id)} onReopen={() => onReopen(t)} />
+            ))}
+          </Stack>
+        </SortableContext>
+      )}
+    </Box>
+  );
+}
+
+/** A task that can be dragged to another quadrant, or onto another board, by its handle. */
 function SortableTask({ todo, draggable, onReopen }: { todo: TodoDTO; draggable: boolean; onReopen: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: todo.id, disabled: !draggable });
   return (
@@ -358,7 +498,7 @@ function SortableTask({ todo, draggable, onReopen }: { todo: TodoDTO; draggable:
       }}
       handle={
         draggable ? (
-          <Tooltip title="Drag to reorder, or onto someone’s panel">
+          <Tooltip title="Drag to another quadrant, or onto someone’s board">
             <IconButton
               size="small"
               aria-label={`Move “${todoText(todo)}”`}

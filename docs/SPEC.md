@@ -2,7 +2,7 @@
 
 The product is branded **Silver Horizon** (logo, favicon, app icons and sign-in banner in `apps/web/public/brand`); earlier versions of this document call it the God System, and the code keeps the `god` names.
 
-Version 1.7 · 2026-09-22 · Status: Phase 1 implemented, deployed
+Version 1.8 · 2026-09-24 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -556,7 +556,9 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | assignee_id | uuid → User | Who the task is for (the taker) |
 | created_by | uuid → User | The giver: a Founder, a Manager, or the taker themselves (a personal to-do) |
 | status | enum: open, done, completed | open → done (the taker ticks it) → completed (the giver confirms). A task you gave yourself goes straight to completed when you tick it. `done_at` is set exactly when done or completed (check constraint) |
-| position | int, default 0 | Where the task sits on its panel; smaller is higher. Dragging renumbers the panel in steps of `TODO_POSITION_STEP` (100). Indexed with `assignee_id` |
+| urgency | enum: need_action, can_wait, default need_action | Which column of the board the task sits in |
+| importance | enum: strategic, non_strategic, default strategic | Which row of the board the task sits in. A new task, however it arrives, starts in **need action · strategic** |
+| position | int, default 0 | Where the task sits within its quadrant; smaller is higher. Dragging renumbers that quadrant in steps of `TODO_POSITION_STEP` (100). Indexed with `assignee_id`, `urgency` and `importance` |
 | done_at | timestamptz, nullable | |
 | done_note | text, nullable | The assignee's note, also the body of the reply |
 | done_message_id | uuid → ChatMessage, nullable, unique | The `todo_done` reply |
@@ -650,8 +652,28 @@ copy). The newest 7 are kept; older rows are deleted after each run.
 | entity_type, entity_id | text, nullable | |
 | method, path, status_code | text, text, integer | The request as sent, and how it ended (failed attempts are kept too) |
 | ip, country, device_type, user_agent, session_id | text, nullable | |
+| device_id | uuid → Device, nullable | The browser it came from (§3.1 Device). Only the owner is shown it |
 | meta | jsonb, nullable | e.g. the attempted email of a failed sign-in |
 | created_at | timestamptz | Kept 365 days, trimmed after the nightly dump |
+
+#### Device **[Implementation]**
+
+A browser cannot read a MAC address — nothing on the web can — so each browser
+keeps a random token of its own in local storage and sends it as `X-Device-Id`.
+The API gives that token a readable name the first time it sees it, and the
+audit trail points at it.
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| token | text, unique | What the browser sends. Never shown to anyone |
+| label | text, unique | `US-desktop-01`: country, kind of machine, and which one of those it is. Numbered per country and kind |
+| device_type | text | desktop, mobile, tablet or unknown, from the user agent |
+| country | char(2), nullable | As the proxy reported it when the device was first seen |
+| first_seen_at, last_seen_at | timestamptz | `last_seen_at` is refreshed at most hourly |
+
+It names the browser, not the person: a second browser on the same machine, or
+cleared site data, is a new device.
 
 ### 3.2 Relationships
 
@@ -677,6 +699,7 @@ Profile      1 ── * ProfileBank
 User         1 ── * AuthIdentity
 User         1 ── * RefreshToken
 User         1 ── * AuditLog
+Device       1 ── * AuditLog             (null when the browser sent no token)
 User         1 ── * Notification
 User         1 ── * DeviceToken
 User         1 ── * WebPushSubscription
@@ -864,7 +887,14 @@ the Call (`isOverride(role, from, to, { isCallAssociate })`).
 **[Implementation]** Error precedence on `POST /calls/:id/transition`: a call
 the user cannot see is 404; an edge not in the table is 409
 `invalid_transition`; a valid edge the user may not take is 403; entering
-`scheduled` without an Expert is 409 `expert_required`.
+`scheduled` without an Expert is 409 `expert_required`, and without meeting
+details 400 with a `meetingDetails` issue.
+
+**[Implementation]** Entering `scheduled` (from `on_scheduling` or
+`on_rescheduling`) requires the **meeting details**: nobody can join a call
+they have no way into. The transition carries them when the call has none yet,
+and they are stored with it; a call that already says how to join needs nothing
+repeated. Blank is no detail.
 
 ### 4.4 Side effects of a transition
 
@@ -873,7 +903,8 @@ locked `FOR UPDATE`):
 
 1. Updates `calls.status`.
 2. Inserts a `call_status_history` row.
-3. Stores the step's extra fields: `ninjaLink` for `ongoing`;
+3. Stores the step's extra fields: `meetingDetails` for `scheduled`;
+   `researchLink` for `research_ready`; `ninjaLink` for `ongoing`;
    `actualDurationMinutes` (and the Expert's current rate as `expert_rate`) for
    `finished`; `realIncome`, the shares and the payee Manager for
    `process_to_bank`.
@@ -1308,12 +1339,12 @@ that the rules no longer allow stays readable, with `canSend: false`.
 | DELETE | /chat/conversations/:id/history | either of the two people | Erases every message, picture and reaction in the chat for both. Tasks made from the chat are kept, each keeping the message's words as its title. Emits `chat:cleared` |
 | DELETE | /chat/messages/:id | the sender | Deletes for both: body erased, picture row deleted at once, reactions removed; a "deleted" placeholder stays. 409 for a message that is a task or a task's done reply. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/reactions | the two people | { emoji }. Toggles the caller's reaction (up to 10 per person per message); not on deleted messages or closed chats. Emits `chat:message-updated` |
-| POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`). Founder → anyone, Manager → any Associate, anyone → themselves (`canGiveTask`); 403 otherwise, 409 if already a task |
+| POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`), in **need action · strategic** like any new task. Founder → anyone, Manager → any Associate, anyone → themselves (`canGiveTask`); 403 otherwise, 409 if already a task |
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
 | GET | /todos/assignees | all | People the caller may give a task to: themselves first, then everyone below them (every Associate for a Manager, everyone for the Founder) |
-| POST | /todos | all | { assigneeId, title, details? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own |
-| POST | /todos/:id/move | the giver | { assigneeId }: hands an open task to someone else the giver may give tasks to (dragged onto their panel); it goes to the top of their panel and they get `todo.assigned`. 409 for a task from a chat (it stays with that chat) or one that is no longer open |
-| POST | /todos/reorder | the panel's owner, or anyone who may give them tasks | { assigneeId, ids }: the panel's new top-to-bottom order (what the filter hides keeps its order below it). 409 when an id is not that person's. Emits `chat:todos-reordered` |
+| POST | /todos | all | { assigneeId, title, details?, urgency?, importance? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own. Without a quadrant it lands in **need action · strategic** |
+| POST | /todos/:id/move | the giver (to someone else), the taker or the giver (within one board) | { assigneeId, urgency?, importance? }: hands an open task to someone else the giver may give tasks to (dragged onto their board); it goes to the top of the quadrant it was dropped on, or, with no quadrant, to **need action · strategic** — a task given to you always turns up in the same corner — and they get `todo.assigned`. 409 for a task from a chat (it stays with that chat) or one that is no longer open. With the same `assigneeId` it only places the task in a quadrant of that person's own board, keeping the one it has if none is given |
+| POST | /todos/reorder | the board's owner, or anyone who may give them tasks | { assigneeId, ids, urgency?, importance? }: the new top-to-bottom order of one quadrant (what the filter hides keeps its order below it). Tasks dragged in from another quadrant move into it. 409 when an id is not that person's. Emits `chat:todos-reordered` |
 | DELETE | /todos/:id | the giver | Removes a task that is open, or completed and no longer needed. 409 while it waits for confirmation |
 | GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (every Associate for a Manager; everyone for the Founder). Each panel: the person, whether the caller may give them tasks, their tasks (whoever gave them) and counts. Query: status as below |
 | GET | /todos | giver or taker | Query: scope = assigned (default) \| created, status = active (default: open, done, and tasks completed within the last 7 days) \| open \| done \| completed \| all. Open first |
@@ -1374,6 +1405,12 @@ itself, and the entries it had left were cleared by the `payouts_and_profile_ass
 are skipped as noise. Each entry has the actor, a plain summary, the request,
 its outcome, and the device, IP and country (§3.1 AuditLog). A failed sign-in
 keeps the attempted email; a successful one does not.
+
+**The device** (§3.1 Device) is named in the entry as `US-desktop-01`, and
+**only the owner Founder** (`OWNER_EMAIL`, `andrewlong0808@gmail.com`) is shown
+it: for every other Founder the field is null and the column is not drawn. A
+request from a browser that sent no token is recorded as before, with no
+device.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
@@ -1528,13 +1565,13 @@ Everyone sees whether the people they may chat with are at their screen.
 | Profiles | all | Two tabs. **Profiles**: one table: profile, status, **Associate** (who looks after it), **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with a green dot where the Profile is registered and a red one where it is not (a red ring when banned), and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons. No rates in the table. Filters All / Mine (an Associate's own Profiles; My team for a Manager) / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) | **Platform status** (not for Experts): one row per Profile and one column per platform (with how many are registered), each cell a green or red status; the Founder, and the Associate looking after a Profile with their Manager, change it in the cell |
 | Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit, **Looked after by** (with a hand-on button for the Founder and the team's Manager) and **Manager share** (the Founder edits it, Managers read it); a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (one row each with its green or red dot; clicking a platform unfolds its status and rate, which the Founder edits there) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
 | Chat | all | Each chat row has a menu with **Clear chat history**. Messages can be deleted by their sender (a placeholder stays), carry pictures (paste, drop or attach; click to enlarge) and emoji reactions; an emoji picker sits by the message box. An arriving message raises a toast with an Open button unless that chat is already on screen, plus a browser notification when one is allowed. Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
-| Tasks | all | One panel per person: your own tasks first, then the people below you (every Associate for a Manager; everyone for the Founder). Filters Active / Open / Waiting for confirmation / Completed / All. Each panel has "New task" for that person — including your own panel, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged up and down by the handle on the left (mouse, touch or keyboard) and the order is saved for everyone who sees that panel; the giver drags an open task onto someone else's panel (it lights up) to hand it to them. **New task** at the top adds one for yourself, or for someone you pick. Panels with nothing in them start folded |
+| Tasks | all | One board per person: your own first, then the people below you (every Associate for a Manager; everyone for the Founder). Each board is **four quadrants** — two columns, **Need action** and **Can wait**, and two rows, **Strategic** and **Non strategic** — each with its own count and its own order. Filters Active / Open / Waiting for confirmation / Completed / All. Each board has "New task" for that person — including your own, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged by the handle on the left (mouse, touch or keyboard) into any of the four quadrants, or onto another quadrant of someone else's board to hand it to them; empty quadrants take a drop too, and the order is saved for everyone who sees that board. A new task, and any task given to you, starts in **Need action · Strategic**. **New task** at the top adds one for yourself, or for someone you pick. Boards with nothing in them start folded |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create (with their share), deactivate; each card shows the Associate's portion of the Manager's share, which the Manager edits |
 | Users | Founder | All users, create any role, with a **Pay** column (an Expert's hourly rate, an Associate's share) set in the create and edit dialogs; editing an Expert's rate can also price their finished calls that have none. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
 | Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Rows say "No bank yet" for a Profile with no open bank account, and submitting invoices warns about calls without a rate or without a bank (`bankReady`) |
 | Statistics | Founder, Manager, Associate | §6.14 |
-| Audit | Founder | §6.16 |
+| Audit | Founder | §6.16. A **Device** column (`US-desktop-01`) for the owner Founder alone; other Founders do not see the column |
 | Notifications | all | List, mark read |
 | Settings | all | Nickname (Founder-approved change **[Assumption]**, read-only for now), password, **Sign in with Google** status, **Signed-in devices** (sign out one or all others), photo upload or avatar, appearance, browser notifications (on/off, send a test); Experts also set their time zone |
 
@@ -1650,6 +1687,7 @@ pnpm dev                      # api on :4000, web on :5173
 | HOST | 0.0.0.0 |
 | PUBLIC_API_URL | http://localhost:4000 |
 | LOGIN_RATE_LIMIT | 5 |
+| OWNER_EMAIL | andrewlong0808@gmail.com (the Founder who owns the system; only they see the device on an audit entry) |
 | COOKIE_SECURE | true in production |
 | LOG_LEVEL | info |
 | TRUST_PROXY | 1 (2 behind Vercel → Render) |
@@ -1677,12 +1715,12 @@ calendar has something to show.
 
 ### 12.4 Testing
 
-- Unit (`packages/shared`, 1462 tests): `canTransition` against every (role,
+- Unit (`packages/shared`, 1466 tests): `canTransition` against every (role,
   from, to) combination with and without the relationship; who may chat with
   whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 379 tests): transition endpoint returns 403 for wrong role,
+- API (`apps/api`, 388 tests): transition endpoint returns 403 for wrong role,
   409 for wrong edge, 200 and a history row for valid moves; confirmation,
   rescheduling requests, Ninja link and duration rules; Experts never seeing
   invoicing, rates, bank data or invoice figures; platform rates (Founder-only,
@@ -1874,4 +1912,5 @@ Container alternative:
 | 2026-09-20 | The call panel names its money in a field of its own: Expected income once finished, Real income once paid. The Profiles table shows the priority-one platform's status by name and unfolds every platform on click. Submitting an invoice from the call page warns when the Profile has no open bank account. Reading the audit trail is no longer written to the audit trail |
 | 2026-09-21 | **Who is paid what**: Experts have an hourly rate and Associates a share, set by the Founder; each call keeps the Expert's rate from when it finished and the shares from when it was paid to bank. The Founder pays the Expert and the Manager (15% of real income by default, per Profile), the Manager passes the Associate's part on. The Calls page has two tabs, In progress and Finance: each person's own money on the calls that took place, with totals, and rows the Founder and Managers select and mark paid. Profiles are looked after by an Associate, handed on by the Founder or within a Manager's team. Platform statuses are green and red dots, with the rate only on click. Calls can be cancelled from the list; the deep search data link leads the call page while it is being prepared, and the dashboard lists booked calls still without it. Tasks can be dragged onto another person's panel, and New task sits at the top of the page. Old "read the audit trail" entries were cleared |
 | 2026-09-21 | Rebranded as **Silver Horizon**: logo in the sidebar, the banner on the sign-in page, new favicon, app and notification icons, navy as the primary colour. The Ninja link of a call now reaches only the Founder and the Expert |
+| 2026-09-24 | The task board is **four quadrants** — Need action / Can wait across, Strategic / Non strategic down — and a task is dragged into any of them, on any board; a new task, and any task given to you, starts in Need action · Strategic. **Meeting details are required before a call is scheduled**, asked for in the step itself. Each browser is remembered as a **device** (`US-desktop-01`) and named in the audit trail, where only the owner Founder (`OWNER_EMAIL`) can see it |
 | 2026-09-22 | A new step, **Research data ready**, which the Founder takes between the Expert's confirmation and the call (it needs the research data link); Associates and Managers never see it. "Deep search" is now "research data". Calls carry **meeting details** (link, passcode…) that whoever runs the call adds and everyone on it reads. Money: everyone is paid **monthly** — the Founder closes each payment cycle by paying everyone they owe, and the month is kept on record (Payment records tab); the Founder's Finance panel shows the cycle's income, what was paid out and the balance. An Associate's share is now a portion of their Manager's share (default 50%), set by the Founder or their own Manager; Associates see their Manager's share and their part, never a call's income or rate. The call panel shows both expected (rate × minutes) and real income. Profiles have a **Platform status** tab, and the Profile's Associate and their Manager may set platform statuses (a rate is no longer required to register; rates stay the Founder's) |
