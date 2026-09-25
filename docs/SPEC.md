@@ -665,7 +665,7 @@ copy). The newest 7 are kept; older rows are deleted after each run.
 | entity_type, entity_id | text, nullable | |
 | method, path, status_code | text, text, integer | The request as sent, and how it ended (failed attempts are kept too) |
 | ip, country, device_type, user_agent, session_id | text, nullable | |
-| device_id | uuid → Device, nullable | The browser it came from (§3.1 Device). Only the owner is shown it |
+| device_id | uuid → Device, nullable | The browser it came from (§3.1 Device) |
 | meta | jsonb, nullable | e.g. the attempted email of a failed sign-in |
 | created_at | timestamptz | Kept 365 days, trimmed after the nightly dump |
 
@@ -1371,28 +1371,27 @@ Sending a message counts as reading the chat. A chat message is pushed to the
 other person's browsers (§7.5) and raises a toast in their open app; it does
 not create a bell notification.
 
-### 6.11a Everyone's chats, for the owner **[Implementation]**
+### 6.11a Everyone's chats, for a Founder **[Implementation]**
 
 Chats are private between the two people in them (§6.11). The one exception is
-the **owner** of the system (`OWNER_EMAIL`, §3.1 Device): they read every chat,
-and only read. No other Founder sees these endpoints — they are 403 for
-everybody else, including other Founders.
+a **Founder**: they read every chat, and only read. Everyone below a Founder
+gets 403.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | /chat/observed | the owner | Every conversation with at least one message, newest first (500 max): { id, people: [UserRef, UserRef], lastMessage, messageCount, createdAt } |
-| GET | /chat/observed/:id/messages | the owner | A page of one chat, same shape and cursors as §6.11 |
+| GET | /chat/observed | Founder | Every conversation with at least one message, newest first (500 max): { id, people: [UserRef, UserRef], lastMessage, messageCount, createdAt } |
+| GET | /chat/observed/:id/messages | Founder | A page of one chat, same shape and cursors as §6.11 |
 
 Looking on must not look like taking part: reading a chat this way leaves no
 read receipt (neither person's "Seen" moves, and their unread counts stand),
-sends nothing, gives no task and reacts to nothing. The owner is not a
+sends nothing, gives no task and reacts to nothing. A Founder is not a
 participant, so the ordinary chat endpoints still answer 404 for them.
 
 Both reads are **recorded in the audit trail** (`chat.observed.list`,
 `chat.observed.thread`, §6.16) — the most sensitive read there is.
 
 Web: **Everyone's chats** (`/chat/all`), reached by the eye button on the Chat
-page, which only the owner is shown. `MeDTO.isOwner` tells the client.
+page, which only a Founder is shown.
 
 ### 6.11b Start By and Complete By **[Implementation]**
 
@@ -1479,11 +1478,10 @@ are skipped as noise. Each entry has the actor, a plain summary, the request,
 its outcome, and the device, IP and country (§3.1 AuditLog). A failed sign-in
 keeps the attempted email; a successful one does not.
 
-**The device** (§3.1 Device) is named in the entry as `US-desktop-01`, and
-**only the owner Founder** (`OWNER_EMAIL`, `andrewlong0808@gmail.com`) is shown
-it: for every other Founder the field is null and the column is not drawn. A
-request from a browser that sent no token is recorded as before, with no
-device.
+**The device** (§3.1 Device) is named in the entry as `US-desktop-01`, for
+every Founder. A request from a browser that sent no token is recorded as
+before, with no device, and the column is not drawn when no entry on the page
+has one.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
@@ -1637,7 +1635,7 @@ Everyone sees whether the people they may chat with are at their screen.
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Every call block carries a status badge (SCHEDULING, SCHEDULED, CONFIRMED, RESCHEDULING, ONGOING, DONE, INVOICED, APPROVED, PAID) next to its colour; others' calls still being scheduled show as "Being scheduled"; past slots cannot start a call. Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
 | Profiles | all | Two tabs. **Profiles**: one table: profile, status, **Associate** (who looks after it), **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with a green dot where the Profile is registered and a red one where it is not (a red ring when banned), and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons. No rates in the table. Filters All / Mine (an Associate's own Profiles; My team for a Manager) / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) | **Platform status** (not for Experts): **every** Profile, with no status filter and no review banner — those belong to the Profiles tab. One row per Profile and one narrow column per platform, the platform's name on its side and a green or red dot in each cell (the words are in the tooltip and in the menu). Because the company works with dozens of networks, the columns are **one priority at a time**: a row of buttons, one per platform priority in use with how many platforms it holds, plus All. A **Manager** column (the Associate's Manager, or the Manager themselves when one looks after the Profile) and a Manager filter beside the priority buttons. The Founder, and the Associate looking after a Profile with their Manager, change a status in the cell |
 | Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit, **Looked after by** (with a hand-on button for the Founder and the team's Manager) and **Manager share** (the Founder edits it, Managers read it); a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (one row each with its green or red dot; clicking a platform unfolds its status and rate, which the Founder edits there) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
-| Everyone's chats | the owner (`OWNER_EMAIL`) | `/chat/all`: every conversation in the system, the two people on each row, and the thread as a plain transcript — who said it, when and what, oldest first, older pages on request. Read only: no message box, no reactions, no read receipt, and a line on the page saying every chat opened is recorded in the audit trail. Reached by the eye button beside **New chat**, shown to the owner alone |
+| Everyone's chats | Founder | `/chat/all`: every conversation in the system, the two people on each row, and the thread as a plain transcript — who said it, when and what, oldest first, older pages on request. Read only: no message box, no reactions, no read receipt, and a line on the page saying every chat opened is recorded in the audit trail. Reached by the eye button beside **New chat**, shown to Founders alone |
 | Chat | all | Each chat row has a menu with **Clear chat history**. Messages can be deleted by their sender (a placeholder stays), carry pictures (paste, drop or attach; click to enlarge) and emoji reactions; an emoji picker sits by the message box. An arriving message raises a toast with an Open button unless that chat is already on screen, plus a browser notification when one is allowed. Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
 | Tasks | all | **One table**, and nothing else on the page: Owner, Start, End date, Description, Status. Every heading sorts, and under every heading is that column's filter — who owns it, starting on or after a day, due on or before a day, a search over the words, and a status (Unfinished by default). A past end date is red. A row opens the task in a dialog (§18): owner, the two dates with their own labels, and, behind **More details**, the description, expected deliverable, definition of done and what it waits for — with **Save & create another** for a batch. An end date typed with no start warns on the spot. Status is one dropdown: the owner moves it along (Not Started, In Progress, Blocked — which asks why — and Ready for Review), and whoever gave the task confirms it or sends it back. Rows are **dragged** by the handle on the left: up and down to set the order a person's tasks are kept in, or onto someone else's row to hand the task to them (the giver only, while it is unfinished and not from a chat). That order is what the table opens in; clicking a column heading sorts by it instead and the handles go quiet until the handle heading is clicked again. A task can also be handed over by changing the Owner on a task you gave |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
@@ -1645,7 +1643,7 @@ Everyone sees whether the people they may chat with are at their screen.
 | Users | Founder | All users, create any role, with a **Pay** column (an Expert's hourly rate, an Associate's share) set in the create and edit dialogs; editing an Expert's rate can also price their finished calls that have none. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
 | Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Rows say "No bank yet" for a Profile with no open bank account, and submitting invoices warns about calls without a rate or without a bank (`bankReady`) |
 | Statistics | Founder, Manager, Associate | §6.14 |
-| Audit | Founder | §6.16. A **Device** column (`US-desktop-01`) for the owner Founder alone; other Founders do not see the column |
+| Audit | Founder | §6.16, including the **Device** column (`US-desktop-01`) |
 | Notifications | all | List, mark read |
 | Settings | all | Nickname (Founder-approved change **[Assumption]**, read-only for now), password, **Sign in with Google** status, **Signed-in devices** (sign out one or all others), photo upload or avatar, appearance, browser notifications (on/off, send a test); Experts also set their time zone |
 
@@ -1761,7 +1759,6 @@ pnpm dev                      # api on :4000, web on :5173
 | HOST | 0.0.0.0 |
 | PUBLIC_API_URL | http://localhost:4000 |
 | LOGIN_RATE_LIMIT | 5 |
-| OWNER_EMAIL | andrewlong0808@gmail.com (the Founder who owns the system; only they see the device on an audit entry) |
 | COOKIE_SECURE | true in production |
 | LOG_LEVEL | info |
 | TRUST_PROXY | 1 (2 behind Vercel → Render) |
@@ -1996,6 +1993,7 @@ Container alternative:
 | 2026-09-20 | The call panel names its money in a field of its own: Expected income once finished, Real income once paid. The Profiles table shows the priority-one platform's status by name and unfolds every platform on click. Submitting an invoice from the call page warns when the Profile has no open bank account. Reading the audit trail is no longer written to the audit trail |
 | 2026-09-21 | **Who is paid what**: Experts have an hourly rate and Associates a share, set by the Founder; each call keeps the Expert's rate from when it finished and the shares from when it was paid to bank. The Founder pays the Expert and the Manager (15% of real income by default, per Profile), the Manager passes the Associate's part on. The Calls page has two tabs, In progress and Finance: each person's own money on the calls that took place, with totals, and rows the Founder and Managers select and mark paid. Profiles are looked after by an Associate, handed on by the Founder or within a Manager's team. Platform statuses are green and red dots, with the rate only on click. Calls can be cancelled from the list; the deep search data link leads the call page while it is being prepared, and the dashboard lists booked calls still without it. Tasks can be dragged onto another person's panel, and New task sits at the top of the page. Old "read the audit trail" entries were cleared |
 | 2026-09-21 | Rebranded as **Silver Horizon**: logo in the sidebar, the banner on the sign-in page, new favicon, app and notification icons, navy as the primary colour. The Ninja link of a call now reaches only the Founder and the Expert |
+| 2026-09-25 | **Every Founder** can read everyone's chats and see the device on an audit entry. Both had belonged to one Founder alone; there is no owner-only anything now, and `OWNER_EMAIL` is gone |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

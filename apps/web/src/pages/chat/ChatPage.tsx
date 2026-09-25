@@ -204,8 +204,8 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
           Chats
         </Typography>
         <Stack direction="row" spacing={0.5} alignItems="center">
-          {/* The owner of the system can read everyone's chats (§6.11a). */}
-          {me.isOwner && (
+          {/* A Founder can read everyone's chats (§6.11a). */}
+          {me.role === 'founder' && (
             <Tooltip title="Read everyone’s chats">
               <IconButton onClick={() => navigate('/chat/all')} aria-label="Everyone’s chats">
                 <VisibilityOutlined fontSize="small" />

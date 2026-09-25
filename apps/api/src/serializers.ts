@@ -10,7 +10,6 @@ import type {
   UserDTO,
   UserRef,
 } from '@god/shared';
-import { isOwnerEmail } from './auth/owner';
 import { dateOnly, iso, isoOrNull } from './http';
 
 /** The only user columns ever selected for display about someone else. */
@@ -68,11 +67,7 @@ export const toUserDTO = (u: UserRow, viewer: { id: string; role: Role }): UserD
 
 export const meSelect = { ...userSelect, email: true } satisfies Prisma.UserSelect;
 export type MeRow = Prisma.UserGetPayload<{ select: typeof meSelect }>;
-export const toMeDTO = (u: MeRow): MeDTO => ({
-  ...toUserDTO(u, { id: u.id, role: u.role as Role }),
-  email: u.email,
-  isOwner: isOwnerEmail(u.email),
-});
+export const toMeDTO = (u: MeRow): MeDTO => ({ ...toUserDTO(u, { id: u.id, role: u.role as Role }), email: u.email });
 
 export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO => ({
   id: p.id,

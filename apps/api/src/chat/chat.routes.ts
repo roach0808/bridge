@@ -38,8 +38,7 @@ import {
 } from '@god/shared';
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
-import { actorOf, requireAuth, type Actor } from '../auth/middleware';
-import { requireOwner } from '../auth/owner';
+import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
 import { prisma, type Db } from '../db';
 import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { idParam, iso, isoOrNull, parseBody, parseQuery } from '../http';
@@ -367,15 +366,13 @@ async function messagesAfter(conversationId: string, after: { createdAt: Date; i
 // --- Everyone's chats, for the owner ------------------------------------------
 
 /**
- * The owner of the system (§6.11a) reads every chat, and only reads: they are
- * not in these conversations, so there is nothing to send, no task to give and
- * no read receipt to leave. Opening one leaves no "Seen" behind, which is the
- * point — looking on must not look like taking part. Each read is recorded in
- * the audit trail.
+ * A Founder (§6.11a) reads every chat, and only reads: they are not in these
+ * conversations, so there is nothing to send, no task to give and no read
+ * receipt to leave. Opening one leaves no "Seen" behind, which is the point —
+ * looking on must not look like taking part. Each read is recorded in the
+ * audit trail.
  */
-chatRouter.get('/chat/observed', async (req, res) => {
-  const actor = actorOf(req);
-  await requireOwner(actor.id);
+chatRouter.get('/chat/observed', requireRole('founder'), async (_req, res) => {
   const rows = await prisma.conversation.findMany({
     where: { lastMessageAt: { not: null } },
     include: conversationInclude,
@@ -385,9 +382,7 @@ chatRouter.get('/chat/observed', async (req, res) => {
   res.json(await toObservedChatDTOs(rows));
 });
 
-chatRouter.get('/chat/observed/:id/messages', async (req, res) => {
-  const actor = actorOf(req);
-  await requireOwner(actor.id);
+chatRouter.get('/chat/observed/:id/messages', requireRole('founder'), async (req, res) => {
   const id = idParam(req);
   const exists = id ? await prisma.conversation.findUnique({ where: { id }, select: { id: true } }) : null;
   if (!exists) throw notFound('Conversation');

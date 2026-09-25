@@ -40,7 +40,5 @@ export function testEnv(): Record<string, string> {
     PUSH_ENABLED: 'false',
     CORS_ORIGINS: 'http://localhost:5173',
     GOOGLE_CLIENT_ID: 'test-client.apps.googleusercontent.com',
-    // The fixture Founder owns the system: only they see which device an entry came from.
-    OWNER_EMAIL: 'founder@fixtures.test',
   };
 }

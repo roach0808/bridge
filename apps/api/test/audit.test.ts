@@ -173,23 +173,25 @@ describe('the device an action came from (§10)', () => {
     expect(rows.every((r) => r.deviceId !== null)).toBe(true);
   });
 
-  it('is shown to the owner alone, not to another Founder', async () => {
+  it('is shown to every Founder, and to nobody else', async () => {
     const call = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
     await act(fx.e1, call.id, 'device-token-owner', DESKTOP, 'KR');
     await trail({ action: 'call.transition' });
 
-    const owner = await as(fx.founder);
-    const seen = (await owner.get('/audit', { action: 'call.transition' })).body.items[0];
+    const seen = (await (await as(fx.founder)).get('/audit', { action: 'call.transition' })).body.items[0];
     expect(seen.device).toBe('KR-desktop-01');
 
-    // A second Founder sees the entry, but not the machine it came from.
+    // A second Founder reads the same entry, device and all.
     const other = await prisma.user.create({
       data: { nickname: 'FounderTwo', role: 'founder', email: 'foundertwo@fixtures.test', passwordHash: await passwordHash(), avatarId: 'founder-02' },
     });
     const otherFounder = new Client(await login(other.email!), other.email);
     const theirs = (await otherFounder.get('/audit', { action: 'call.transition' })).body.items[0];
     expect(theirs.id).toBe(seen.id);
-    expect(theirs.device).toBeNull();
+    expect(theirs.device).toBe('KR-desktop-01');
+
+    // The trail itself is still nobody else's.
+    expectError(await (await as(fx.m1)).get('/audit'), 403);
   });
 
   it('a request from a browser that names no device is still recorded', async () => {

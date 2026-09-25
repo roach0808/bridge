@@ -33,17 +33,11 @@ export interface UserDTO extends UserRef {
 /** Only `/me` returns the email. */
 export interface MeDTO extends UserDTO {
   email: string;
-  /**
-   * The one Founder who owns the system (`OWNER_EMAIL`). A few things are
-   * theirs alone: the device an audit entry came from, and reading the chats
-   * of everyone else.
-   */
-  isOwner: boolean;
 }
 
 /**
- * A chat between two other people, as the owner reads it (§6.11a). There is no
- * "other" person here and nothing to send: the owner is looking on, not talking.
+ * A chat between two other people, as a Founder reads it (§6.11a). There is no
+ * "other" person here and nothing to send: they are looking on, not talking.
  */
 export interface ObservedChatDTO {
   id: string;

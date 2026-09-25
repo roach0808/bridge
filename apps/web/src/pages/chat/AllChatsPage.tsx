@@ -17,21 +17,22 @@ const PAGE_SIZE = 40;
 const PANEL_HEIGHT = { xs: 'calc(100dvh - 200px)', md: 'calc(100vh - 220px)' };
 
 /**
- * Every chat in the system, for the owner of it (§6.11a) — and only to read.
- * There is no message box, no reaction and no read receipt: looking on must not
- * look like taking part, and the other two are never told. Each chat opened is
+ * Every chat in the system, for a Founder (§6.11a) — and only to read. There is
+ * no message box, no reaction and no read receipt: looking on must not look
+ * like taking part, and the other two are never told. Each chat opened is
  * written to the audit trail.
  */
 export default function AllChatsPage() {
   const me = useMe();
   const navigate = useNavigate();
   const { conversationId = null } = useParams();
-  const query = useQuery({ queryKey: qk.chat.observed, queryFn: api.chat.observed, enabled: me.isOwner });
+  const founder = me.role === 'founder';
+  const query = useQuery({ queryKey: qk.chat.observed, queryFn: api.chat.observed, enabled: founder });
 
-  if (!me.isOwner) {
+  if (!founder) {
     return (
       <Card>
-        <EmptyState title="Not your page" description="Only the owner of the system can read everyone’s chats." />
+        <EmptyState title="Not your page" description="Only a Founder can read everyone’s chats." />
       </Card>
     );
   }

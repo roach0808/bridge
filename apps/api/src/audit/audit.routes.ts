@@ -1,8 +1,7 @@
 import { listAuditQuerySchema, type AuditEntryDTO, type Paginated } from '@god/shared';
 import { Prisma } from '@prisma/client';
 import { Router } from 'express';
-import { actorOf, requireAuth, requireRole } from '../auth/middleware';
-import { isOwner } from '../auth/owner';
+import { requireAuth, requireRole } from '../auth/middleware';
 import { prisma } from '../db';
 import { iso, parseQuery } from '../http';
 
@@ -24,8 +23,7 @@ function maskEmails(meta: AuditEntryDTO['meta']): AuditEntryDTO['meta'] {
 
 type AuditRow = Prisma.AuditLogGetPayload<{ include: { device: { select: { label: true } } } }>;
 
-/** `showDevice`: only the owner is told which browser an action came from. */
-const toDTO = (a: AuditRow, showDevice: boolean): AuditEntryDTO => ({
+const toDTO = (a: AuditRow): AuditEntryDTO => ({
   id: a.id,
   userId: a.userId,
   actorName: a.actorName,
@@ -40,7 +38,7 @@ const toDTO = (a: AuditRow, showDevice: boolean): AuditEntryDTO => ({
   ip: a.ip,
   country: a.country,
   deviceType: a.deviceType,
-  device: showDevice ? (a.device?.label ?? null) : null,
+  device: a.device?.label ?? null,
   meta: maskEmails((a.meta as AuditEntryDTO['meta']) ?? null),
   createdAt: iso(a.createdAt),
 });
@@ -66,7 +64,7 @@ auditRouter.get('/audit', async (req, res) => {
         : {},
     ],
   };
-  const [total, rows, showDevice] = await Promise.all([
+  const [total, rows] = await Promise.all([
     prisma.auditLog.count({ where }),
     prisma.auditLog.findMany({
       where,
@@ -75,9 +73,8 @@ auditRouter.get('/audit', async (req, res) => {
       take: pageSize,
       include: { device: { select: { label: true } } },
     }),
-    isOwner(actorOf(req).id),
   ]);
-  const body: Paginated<AuditEntryDTO> = { items: rows.map((r) => toDTO(r, showDevice)), page, pageSize, total };
+  const body: Paginated<AuditEntryDTO> = { items: rows.map(toDTO), page, pageSize, total };
   res.json(body);
 });
 

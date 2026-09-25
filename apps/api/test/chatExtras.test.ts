@@ -144,13 +144,12 @@ describe('erasing a chat history', () => {
   });
 });
 
-describe('the owner reads everyone’s chats (§6.11a)', () => {
-  it('lists every chat and its messages, for the owner alone', async () => {
-    // The fixture Founder is the owner (OWNER_EMAIL); a second Founder is not.
+describe('a Founder reads everyone’s chats (§6.11a)', () => {
+  it('lists every chat and its messages, for any Founder and nobody else', async () => {
     const other = await prisma.user.create({
       data: { nickname: 'FounderTwo', role: 'founder', email: 'foundertwo@fixtures.test', passwordHash: await passwordHash(), avatarId: 'founder-02' },
     });
-    const notTheOwner = new Client(await login(other.email!), other.email);
+    const secondFounder = new Client(await login(other.email!), other.email);
     const owner = await as(fx.founder);
 
     const { ca, cb, id } = await chat(fx.m1, fx.a1);
@@ -165,8 +164,12 @@ describe('the owner reads everyone’s chats (§6.11a)', () => {
     const thread = (await owner.get(`/chat/observed/${id}/messages`)).body;
     expect(thread.items.map((m: { body: string }) => m.body)).toEqual(['Can you take the Tuesday call?', 'Yes, I will arrange it']);
 
-    // Every other Founder, and everyone else, is refused.
-    for (const who of [notTheOwner, await as(fx.m1), await as(fx.a1), await as(fx.e1)]) {
+    // The second Founder reads the same chats.
+    expect((await secondFounder.get('/chat/observed')).body).toHaveLength(1);
+    expect((await secondFounder.get(`/chat/observed/${id}/messages`)).body.items).toHaveLength(2);
+
+    // Nobody below a Founder sees any of it.
+    for (const who of [await as(fx.m1), await as(fx.a1), await as(fx.e1)]) {
       expectError(await who.get('/chat/observed'), 403);
       expectError(await who.get(`/chat/observed/${id}/messages`), 403);
     }
