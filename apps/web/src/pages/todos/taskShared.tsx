@@ -1,5 +1,5 @@
 import { Box, MenuItem, Select } from '@mui/material';
-import { TODO_STATUS_LABELS, isActiveTodo, type TodoDTO, type TodoStatus } from '@god/shared';
+import { TODO_STATUS_LABELS, isActiveTodo, isSelfTask, type TodoDTO, type TodoStatus } from '@god/shared';
 import { useMe } from '@/auth/AuthProvider';
 import { inZone, zoneAbbr } from '@/lib/time';
 import { useTaskActions } from './todoShared';
@@ -57,10 +57,13 @@ export function StatusControl({ todo }: { todo: TodoDTO }) {
   const { setStatus, done, confirm, reopen, busy, blockDialog } = useTaskActions(todo);
   const mine = todo.assignee.id === me.id;
   const iGave = todo.createdBy.id === me.id;
+  // A task you gave yourself has nobody to review it: ticking it finishes it,
+  // so the choice has to say Completed rather than Ready for Review.
+  const self = isSelfTask(todo);
 
   // What this person can turn this task into, from where it is now.
   const options: TodoStatus[] = [];
-  if (mine && isActiveTodo(todo.status)) options.push('open', 'in_progress', 'blocked', 'done');
+  if (mine && isActiveTodo(todo.status)) options.push('open', 'in_progress', 'blocked', self ? 'completed' : 'done');
   if (iGave && todo.status === 'done') options.push('done', 'completed', 'open');
   if (iGave && todo.status === 'completed') options.push('completed', 'open');
   const choices = [...new Set(options)];
@@ -69,7 +72,8 @@ export function StatusControl({ todo }: { todo: TodoDTO }) {
   const go = (next: TodoStatus) => {
     if (next === todo.status) return;
     if (next === 'done') return void done.mutate(undefined);
-    if (next === 'completed') return void confirm.mutate();
+    // Finishing your own task is the same tick; only a giver confirms someone else's.
+    if (next === 'completed') return void (isActiveTodo(todo.status) ? done.mutate(undefined) : confirm.mutate());
     if (todo.status === 'done' || todo.status === 'completed') return void reopen.mutate();
     setStatus(next as 'open' | 'in_progress' | 'blocked');
   };

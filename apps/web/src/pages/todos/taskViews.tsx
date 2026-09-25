@@ -17,7 +17,16 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { TODO_STATUSES, TODO_STATUS_LABELS, isActiveTodo, type TodoDTO, type TodoPanel, type TodoStatus, type UserRef } from '@god/shared';
+import {
+  COMPLETED_TASK_DAYS,
+  TODO_STATUSES,
+  TODO_STATUS_LABELS,
+  isActiveTodo,
+  type TodoDTO,
+  type TodoPanel,
+  type TodoStatus,
+  type UserRef,
+} from '@god/shared';
 import {
   DndContext,
   DragOverlay,
@@ -68,9 +77,10 @@ interface Filters {
   complete: string;
   text: string;
   /**
-   * A status, `all`, or `active` — everything not yet completed. A task marked
-   * Ready for Review is not finished: it is waiting for the person who gave it,
-   * and it has to stay in sight for them to do anything about it.
+   * A status, `all`, or `active` — everything still going on. A task marked
+   * Ready for Review is not finished: it waits for the person who gave it, and
+   * has to stay in sight for them to act on. A task just completed stays for a
+   * week too, so that finishing one never makes it vanish under your hand.
    */
   status: string;
 }
@@ -247,7 +257,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
             <TableCell sx={{ py: 0.5 }}>
               <Stack direction="row" spacing={0.5} alignItems="center">
                 <Filter value={filters.status} onChange={(v) => set('status', v)} select>
-                  <MenuItem value="active">Unfinished</MenuItem>
+                  <MenuItem value="active">Active</MenuItem>
                   <MenuItem value="all">Any status</MenuItem>
                   {TODO_STATUSES.map((s) => (
                     <MenuItem key={s} value={s}>
@@ -384,7 +394,15 @@ function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boo
         </Tooltip>
       </TableCell>
       <TableCell>
-        <Typography variant="body2" noWrap title={t.details ? `${text}\n\n${t.details}` : text}>
+        <Typography
+          variant="body2"
+          noWrap
+          title={t.details ? `${text}\n\n${t.details}` : text}
+          sx={{
+            textDecoration: t.status === 'completed' ? 'line-through' : 'none',
+            color: t.status === 'completed' ? 'text.secondary' : 'text.primary',
+          }}
+        >
           {text}
         </Typography>
       </TableCell>
@@ -394,6 +412,10 @@ function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boo
     </TableRow>
   );
 }
+
+/** Finished, but recently enough that it is still worth seeing. */
+const justCompleted = (t: TodoDTO) =>
+  t.confirmedAt !== null && Date.now() - new Date(t.confirmedAt).getTime() < COMPLETED_TASK_DAYS * 24 * 60 * 60 * 1000;
 
 /** The giver hands an unfinished task on; one from a chat stays with that chat. */
 const canHandOn = (t: TodoDTO, meId: string) => t.createdBy.id === meId && isActiveTodo(t.status) && !t.conversationId;
@@ -408,7 +430,9 @@ const startOfDayMs = (day: string, zone: string) => {
 
 function matches(t: TodoDTO, f: Filters, zone: string): boolean {
   if (f.owner !== 'all' && t.assignee.id !== f.owner) return false;
-  if (f.status === 'active' ? t.status === 'completed' : f.status !== 'all' && t.status !== f.status) return false;
+  if (f.status === 'active') {
+    if (t.status === 'completed' && !justCompleted(t)) return false;
+  } else if (f.status !== 'all' && t.status !== f.status) return false;
   if (f.start) {
     if (!t.startByAt) return false;
     if (new Date(t.startByAt).getTime() < dayStart(f.start, zone)) return false;
