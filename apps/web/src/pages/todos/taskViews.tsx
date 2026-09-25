@@ -1,8 +1,10 @@
 import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
+import DragIndicatorRounded from '@mui/icons-material/DragIndicatorRounded';
 import {
   Box,
   Card,
+  IconButton,
   MenuItem,
   Stack,
   Table,
@@ -15,11 +17,29 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { TODO_STATUSES, TODO_STATUS_LABELS, isActiveTodo, type TodoDTO, type TodoPanel, type TodoStatus } from '@god/shared';
+import { TODO_STATUSES, TODO_STATUS_LABELS, isActiveTodo, type TodoDTO, type TodoPanel, type TodoStatus, type UserRef } from '@god/shared';
+import {
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { useAuth } from '@/auth/AuthProvider';
+import { useAuth, useMe } from '@/auth/AuthProvider';
 import { EmptyState } from '@/components/common';
 import { UserChip } from '@/components/identity';
+import { useToast } from '@/components/ToastProvider';
+import { api } from '@/lib/api';
+import { errorMessage } from '@/lib/errors';
+import { qk } from '@/lib/queryKeys';
 import { TableSurface } from '../admin/adminShared';
 import { StatusControl, formatWhen } from './taskShared';
 import { todoText } from './todoShared';
@@ -33,9 +53,12 @@ import { todoText } from './todoShared';
 
 export const allTasks = (panels: TodoPanel[]): TodoDTO[] => panels.flatMap((p) => p.tasks);
 
-/** The columns worth sorting by. Sorting the words of a task alphabetically
- * tells nobody anything, so Description is not one of them. */
-type Column = 'owner' | 'start' | 'complete' | 'status';
+/**
+ * The columns worth sorting by, plus `order` — the order people have dragged
+ * their tasks into, which is where the table starts. Sorting the words of a
+ * task alphabetically tells nobody anything, so Description is not one of them.
+ */
+type Column = 'order' | 'owner' | 'start' | 'complete' | 'status';
 
 interface Filters {
   owner: string;
@@ -51,16 +74,93 @@ interface Filters {
 export const NO_FILTERS: Filters = { owner: 'all', start: '', complete: '', text: '', status: 'active' };
 
 export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t: TodoDTO) => void }) {
+  const me = useMe();
   const { zone } = useAuth();
+  const toast = useToast();
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [sort, setSort] = useState<{ by: Column; desc: boolean }>({ by: 'start', desc: false });
+  const [sort, setSort] = useState<{ by: Column; desc: boolean }>({ by: 'order', desc: false });
+  const [dragging, setDragging] = useState<TodoDTO | null>(null);
   const tasks = useMemo(() => allTasks(panels), [panels]);
   const owners = useMemo(() => panels.map((p) => p.person), [panels]);
 
   const set = (key: keyof Filters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const filtered = useMemo(() => tasks.filter((t) => matches(t, filters, zone)), [tasks, filters, zone]);
-  const rows = useMemo(() => [...filtered].sort(compare(sort.by, sort.desc, zone)), [filtered, sort, zone]);
+  // In `order` the rows keep the order they were dragged into — one group per
+  // person, as the server sends them. A column sort is a different question.
+  const rows = useMemo(
+    () => (sort.by === 'order' ? filtered : [...filtered].sort(compare(sort.by, sort.desc))),
+    [filtered, sort],
+  );
   const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
+  const draggable = sort.by === 'order';
+
+  const sensors = useSensors(
+    // A few pixels of movement, so a tap on the handle still behaves like a tap.
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+  const setTasks = (update: (old: TodoPanel[]) => TodoPanel[]) =>
+    queryClient.setQueryData<TodoPanel[]>(qk.todos.board('all'), (old) => (old ? update(old) : old));
+  const onFailed = (err: unknown) => {
+    toast.error(errorMessage(err));
+    void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+  };
+  const reorder = useMutation({ mutationFn: (v: { assigneeId: string; ids: string[] }) => api.todos.reorder(v), onError: onFailed });
+  const handOver = useMutation({
+    mutationFn: (v: { todo: TodoDTO; to: UserRef }) => api.todos.move(v.todo.id, v.to.id),
+    onSuccess: (saved, v) => {
+      toast.success(v.to.id === me.id ? 'Moved to your tasks' : `Handed to ${saved.assignee.nickname}`);
+      void queryClient.invalidateQueries({ queryKey: qk.todos.all });
+    },
+    onError: onFailed,
+  });
+
+  const panelOf = (taskId: string) => panels.find((p) => p.tasks.some((t) => t.id === taskId));
+
+  /**
+   * Dropped on a row of your own, the task takes that place in your order.
+   * Dropped on someone else's row, it is handed to them — the same two things
+   * dragging always did.
+   */
+  const onDragEnd = ({ active, over }: DragEndEvent) => {
+    setDragging(null);
+    if (!over || active.id === over.id) return;
+    const from = panelOf(String(active.id));
+    const to = panelOf(String(over.id));
+    const task = from?.tasks.find((t) => t.id === active.id);
+    if (!from || !to || !task) return;
+
+    if (to.person.id === from.person.id) {
+      if (!from.isMe && !from.canGive) return;
+      const list = from.tasks;
+      const next = arrayMove(
+        list,
+        list.findIndex((t) => t.id === active.id),
+        list.findIndex((t) => t.id === over.id),
+      );
+      setTasks((old) => old.map((p) => (p.person.id === from.person.id ? { ...p, tasks: next } : p)));
+      reorder.mutate({ assigneeId: from.person.id, ids: next.map((t) => t.id) });
+      return;
+    }
+    if (!canHandOn(task, me.id) || !to.canGive) {
+      toast.info(
+        task.conversationId ? 'A task from a chat stays with the person in that chat'
+        : task.createdBy.id !== me.id ? 'Only the person who gave a task can hand it to someone else'
+        : !isActiveTodo(task.status) ? 'Only unfinished tasks can be handed on'
+        : `You cannot give tasks to ${to.person.nickname}`,
+      );
+      return;
+    }
+    setTasks((old) =>
+      old.map((p) =>
+        p.person.id === from.person.id ? { ...p, tasks: p.tasks.filter((t) => t.id !== task.id) }
+        : p.person.id === to.person.id ? { ...p, tasks: [{ ...task, assignee: to.person }, ...p.tasks] }
+        : p,
+      ),
+    );
+    handOver.mutate({ todo: task, to: to.person });
+  };
 
   const heading = (key: Column, label: string, width?: number) => (
     <TableCell key={key} sx={{ minWidth: width }}>
@@ -76,10 +176,43 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
   );
 
   return (
-    <TableSurface minWidth={900}>
+    <DndContext
+      sensors={sensors}
+      collisionDetection={closestCenter}
+      modifiers={[restrictToVerticalAxis]}
+      onDragStart={({ active }) => setDragging(tasks.find((t) => t.id === active.id) ?? null)}
+      onDragCancel={() => setDragging(null)}
+      onDragEnd={onDragEnd}
+    >
+      {/* What follows the pointer, so a row can travel to another person. */}
+      <DragOverlay>
+        {dragging ? (
+          <Card sx={{ px: 1.5, py: 1, boxShadow: 6, cursor: 'grabbing' }}>
+            <Stack direction="row" spacing={1} alignItems="center">
+              <DragIndicatorRounded sx={{ fontSize: 17, color: 'text.disabled' }} />
+              <Typography variant="body2" noWrap>
+                {todoText(dragging)}
+              </Typography>
+            </Stack>
+          </Card>
+        ) : null}
+      </DragOverlay>
+      <TableSurface minWidth={940}>
       <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
+            <TableCell width={36} sx={{ px: 0.5 }}>
+              <Tooltip title={draggable ? 'Rows are in the order they were dragged into' : 'Show the dragged order, so rows can be dragged again'}>
+                <TableSortLabel
+                  active={draggable}
+                  hideSortIcon
+                  onClick={() => setSort({ by: 'order', desc: false })}
+                  sx={{ '& .MuiTableSortLabel-icon': { display: 'none' } }}
+                >
+                  <DragIndicatorRounded sx={{ fontSize: 17, color: draggable ? 'text.secondary' : 'text.disabled' }} />
+                </TableSortLabel>
+              </Tooltip>
+            </TableCell>
             {heading('owner', 'Owner', 150)}
             {heading('start', 'Start', 130)}
             {heading('complete', 'End date', 140)}
@@ -87,6 +220,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
             {heading('status', 'Status', 150)}
           </TableRow>
           <TableRow>
+            <TableCell sx={{ py: 0.5 }} />
             <TableCell sx={{ py: 0.5 }}>
               <Filter value={filters.owner} onChange={(v) => set('owner', v)} select>
                 <MenuItem value="all">Anyone</MenuItem>
@@ -136,7 +270,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={5} sx={{ border: 0 }}>
+              <TableCell colSpan={6} sx={{ border: 0 }}>
                 <Card variant="outlined">
                   <EmptyState
                     icon={<ChecklistRounded />}
@@ -147,11 +281,16 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
               </TableCell>
             </TableRow>
           ) : (
-            rows.map((t) => <TaskRow key={t.id} todo={t} onOpen={() => onOpen(t)} />)
+            <SortableContext items={rows.map((t) => t.id)} strategy={verticalListSortingStrategy}>
+              {rows.map((t) => (
+                <TaskRow key={t.id} todo={t} draggable={draggable} onOpen={() => onOpen(t)} />
+              ))}
+            </SortableContext>
           )}
         </TableBody>
       </Table>
-    </TableSurface>
+      </TableSurface>
+    </DndContext>
   );
 }
 
@@ -193,12 +332,34 @@ function Filter({
   );
 }
 
-function TaskRow({ todo: t, onOpen }: { todo: TodoDTO; onOpen: () => void }) {
+function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boolean; onOpen: () => void }) {
   const { zone } = useAuth();
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id, disabled: !draggable });
   const overdue = t.completeByAt !== null && isActiveTodo(t.status) && new Date(t.completeByAt).getTime() < Date.now();
   const text = todoText(t);
   return (
-    <TableRow hover sx={{ cursor: 'pointer' }} onClick={onOpen}>
+    <TableRow
+      hover
+      ref={setNodeRef}
+      sx={{ cursor: 'pointer', position: 'relative', zIndex: isDragging ? 2 : undefined, opacity: isDragging ? 0.35 : 1 }}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      onClick={onOpen}
+    >
+      <TableCell onClick={(e) => e.stopPropagation()} sx={{ px: 0.5 }}>
+        {draggable ? (
+          <Tooltip title="Drag to reorder, or onto someone else’s row to hand it to them">
+            <IconButton
+              size="small"
+              aria-label={`Move “${text}”`}
+              {...attributes}
+              {...listeners}
+              sx={{ cursor: 'grab', touchAction: 'none', color: 'text.disabled', p: 0.25, '&:active': { cursor: 'grabbing' } }}
+            >
+              <DragIndicatorRounded sx={{ fontSize: 17 }} />
+            </IconButton>
+          </Tooltip>
+        ) : null}
+      </TableCell>
       <TableCell>
         <UserChip user={t.assignee} size={22} showRole={false} />
       </TableCell>
@@ -230,6 +391,9 @@ function TaskRow({ todo: t, onOpen }: { todo: TodoDTO; onOpen: () => void }) {
   );
 }
 
+/** The giver hands an unfinished task on; one from a chat stays with that chat. */
+const canHandOn = (t: TodoDTO, meId: string) => t.createdBy.id === meId && isActiveTodo(t.status) && !t.conversationId;
+
 /** A day the reader typed, as the first moment of that day in their own zone. */
 const dayStart = (day: string, zone: string) => new Date(`${day}T00:00:00`).getTime() && startOfDayMs(day, zone);
 const startOfDayMs = (day: string, zone: string) => {
@@ -260,7 +424,7 @@ function matches(t: TodoDTO, f: Filters, zone: string): boolean {
 const STATUS_ORDER: Record<TodoStatus, number> = { open: 0, in_progress: 1, blocked: 2, done: 3, completed: 4 };
 
 /** A column's order. A task with no date sorts last, whichever way the column runs. */
-function compare(by: Column, desc: boolean, _zone: string) {
+function compare(by: Column, desc: boolean) {
   const dates = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1);
   return (x: TodoDTO, y: TodoDTO) => {
     const flip = desc ? -1 : 1;
