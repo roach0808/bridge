@@ -67,7 +67,11 @@ interface Filters {
   /** A day: tasks due on or before it. */
   complete: string;
   text: string;
-  /** A status, `active` for everything unfinished, or `all`. */
+  /**
+   * A status, `all`, or `active` — everything not yet completed. A task marked
+   * Ready for Review is not finished: it is waiting for the person who gave it,
+   * and it has to stay in sight for them to do anything about it.
+   */
   status: string;
 }
 
@@ -404,7 +408,7 @@ const startOfDayMs = (day: string, zone: string) => {
 
 function matches(t: TodoDTO, f: Filters, zone: string): boolean {
   if (f.owner !== 'all' && t.assignee.id !== f.owner) return false;
-  if (f.status === 'active' ? !isActiveTodo(t.status) : f.status !== 'all' && t.status !== f.status) return false;
+  if (f.status === 'active' ? t.status === 'completed' : f.status !== 'all' && t.status !== f.status) return false;
   if (f.start) {
     if (!t.startByAt) return false;
     if (new Date(t.startByAt).getTime() < dayStart(f.start, zone)) return false;
