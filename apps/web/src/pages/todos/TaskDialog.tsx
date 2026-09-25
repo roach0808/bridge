@@ -1,19 +1,8 @@
 import ExpandMoreRounded from '@mui/icons-material/ExpandMoreRounded';
-import { Alert, Box, Button, Chip, Collapse, MenuItem, Stack, TextField, Typography } from '@mui/material';
+import { Alert, Box, Button, Collapse, MenuItem, Stack, TextField, Typography } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import {
-  NO_START_DATE_WARNING,
-  ROLE_LABELS,
-  TODO_IMPORTANCES,
-  TODO_IMPORTANCE_LABELS,
-  TODO_URGENCIES,
-  TODO_URGENCY_LABELS,
-  type TodoDTO,
-  type TodoImportance,
-  type TodoUrgency,
-  type UserRef,
-} from '@god/shared';
+import { NO_START_DATE_WARNING, ROLE_LABELS, isActiveTodo, type TodoDTO, type UserRef } from '@god/shared';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useEffect, useMemo, useState } from 'react';
@@ -81,8 +70,6 @@ export function TaskDialog({
   const [assigneeId, setAssigneeId] = useState(me.id);
   const [title, setTitle] = useState('');
   const [details, setDetails] = useState('');
-  const [urgency, setUrgency] = useState<TodoUrgency>('need_action');
-  const [importance, setImportance] = useState<TodoImportance>('strategic');
   const [startBy, setStartBy] = useState<When>(empty);
   const [completeBy, setCompleteBy] = useState<When>(empty);
   const [deliverable, setDeliverable] = useState('');
@@ -91,7 +78,11 @@ export function TaskDialog({
   const [more, setMore] = useState(false);
   const [again, setAgain] = useState(false);
 
-  const people = useQuery({ queryKey: [...qk.todos.all, 'assignees'], queryFn: api.todos.assignees, enabled: open && !editing && !assignee });
+  // Who the task can be for, or handed to: the giver may pass on a task of
+  // theirs that is still unfinished and did not come from a chat.
+  const handOver = Boolean(todo && todo.createdBy.id === me.id && !todo.conversationId && isActiveTodo(todo.status));
+  const ownerIsMine = (!editing && !assignee) || handOver;
+  const people = useQuery({ queryKey: [...qk.todos.all, 'assignees'], queryFn: api.todos.assignees, enabled: open && ownerIsMine });
   const board = useQuery({ queryKey: qk.todos.board('active'), queryFn: () => api.todos.board({ status: 'active' }), enabled: open && more });
   // Everything else still to do, as candidates for "what must happen first".
   const candidates = useMemo(
@@ -107,8 +98,6 @@ export function TaskDialog({
     setAssigneeId(todo?.assignee.id ?? assignee?.id ?? me.id);
     setTitle(todo?.title ?? '');
     setDetails(todo?.details ?? '');
-    setUrgency(todo?.urgency ?? 'need_action');
-    setImportance(todo?.importance ?? 'strategic');
     setStartBy(toWhen(todo?.startByAt ?? null, todo?.startByHasTime ?? false, taskZone));
     setCompleteBy(toWhen(todo?.completeByAt ?? null, todo?.completeByHasTime ?? false, taskZone));
     setDeliverable(todo?.expectedDeliverable ?? '');
@@ -125,8 +114,6 @@ export function TaskDialog({
 
   const body = {
     details: details.trim() || null,
-    urgency,
-    importance,
     startByAt: start.at,
     startByHasTime: start.hasTime,
     completeByAt: complete.at,
@@ -138,10 +125,12 @@ export function TaskDialog({
   };
 
   const save = useMutation({
-    mutationFn: () =>
-      todo
-        ? api.todos.update(todo.id, { ...body, ...(fromChat ? {} : { title: title.trim() }) })
-        : api.todos.create({ assigneeId, title: title.trim(), ...body }),
+    mutationFn: async () => {
+      if (!todo) return api.todos.create({ assigneeId, title: title.trim(), ...body });
+      // Handing it over first, so the rest is saved onto the task as it now is.
+      if (assigneeId !== todo.assignee.id) await api.todos.move(todo.id, assigneeId);
+      return api.todos.update(todo.id, { ...body, ...(fromChat ? {} : { title: title.trim() }) });
+    },
     onSuccess: (saved) => {
       refresh(saved);
       toast.success(editing ? 'Task saved' : saved.assignee.id === me.id ? 'Task added' : `Task given to ${saved.assignee.nickname}`);
@@ -187,8 +176,15 @@ export function TaskDialog({
         )
       }
     >
-      {!editing && !assignee && (
-        <TextField select required label="Owner" value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}>
+      {ownerIsMine ?
+        <TextField
+          select
+          required
+          label="Owner"
+          value={assigneeId}
+          onChange={(e) => setAssigneeId(e.target.value)}
+          helperText={editing && assigneeId !== todo!.assignee.id ? `Saving hands this task to ${people.data?.find((u) => u.id === assigneeId)?.nickname}` : undefined}
+        >
           {(people.data ?? []).map((u) => (
             <MenuItem key={u.id} value={u.id}>
               {u.id === me.id ? 'You' : u.nickname}
@@ -198,7 +194,9 @@ export function TaskDialog({
             </MenuItem>
           ))}
         </TextField>
-      )}
+      : editing ?
+        <TextField label="Owner" value={todo!.assignee.nickname} disabled />
+      : null}
 
       <TextField
         required
@@ -271,36 +269,6 @@ export function TaskDialog({
             minRows={2}
             slotProps={{ htmlInput: { maxLength: 2000 } }}
           />
-          <Box>
-            <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
-              Where it sits on the board
-            </Typography>
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              {TODO_URGENCIES.map((u) => (
-                <Chip
-                  key={u}
-                  clickable
-                  size="small"
-                  label={TODO_URGENCY_LABELS[u]}
-                  color={urgency === u ? 'primary' : 'default'}
-                  variant={urgency === u ? 'filled' : 'outlined'}
-                  onClick={() => setUrgency(u)}
-                />
-              ))}
-              <Box sx={{ width: 8 }} />
-              {TODO_IMPORTANCES.map((i) => (
-                <Chip
-                  key={i}
-                  clickable
-                  size="small"
-                  label={TODO_IMPORTANCE_LABELS[i]}
-                  color={importance === i ? 'primary' : 'default'}
-                  variant={importance === i ? 'filled' : 'outlined'}
-                  onClick={() => setImportance(i)}
-                />
-              ))}
-            </Stack>
-          </Box>
           <TextField
             select
             label="Waits for"
