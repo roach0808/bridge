@@ -298,6 +298,14 @@ export function useTaskActions(todo: TodoDTO) {
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
+  const reopen = useMutation({
+    mutationFn: () => api.todos.reopen(todo.id),
+    onSuccess: (saved) => {
+      refresh(saved);
+      toast.success('Sent back');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
   const status = useMutation({
     mutationFn: (v: { status: 'open' | 'in_progress' | 'blocked'; blockedReason?: string }) =>
       api.todos.setStatus(todo.id, v.status, v.blockedReason),
@@ -347,8 +355,9 @@ export function useTaskActions(todo: TodoDTO) {
     done,
     confirm,
     remove,
+    reopen,
     setStatus,
     blockDialog,
-    busy: done.isPending || confirm.isPending || remove.isPending || status.isPending,
+    busy: done.isPending || confirm.isPending || remove.isPending || reopen.isPending || status.isPending,
   };
 }

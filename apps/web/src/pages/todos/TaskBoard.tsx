@@ -420,7 +420,7 @@ function Quadrant({
       <Divider />
       {tasks.length === 0 ? (
         <Typography variant="caption" color="text.disabled" sx={{ px: 1.25, py: 2, flex: 1 }}>
-          {dragging ? 'Drop here' : filter === 'active' ? 'Nothing here.' : 'Nothing matches this filter.'}
+          {dragging ? 'Drop here' : 'Nothing here.'}
         </Typography>
       ) : (
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>

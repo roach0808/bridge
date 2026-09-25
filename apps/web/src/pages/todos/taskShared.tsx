@@ -1,23 +1,20 @@
 import ErrorOutlineRounded from '@mui/icons-material/ErrorOutlineRounded';
-import FlagOutlined from '@mui/icons-material/FlagOutlined';
 import PlayArrowRounded from '@mui/icons-material/PlayArrowRounded';
 import { Box, MenuItem, Select, Stack, Tooltip, Typography } from '@mui/material';
 import {
-  TODO_PRIORITY_LABELS,
-  TODO_PRIORITY_SHORT,
   TODO_RISK_LABELS,
   TODO_STATUS_LABELS,
+  isActiveTodo,
   needsStartDate,
-  priorityOf,
   taskRisk,
   type TodoDTO,
-  type TodoPriority,
   type TodoRisk,
   type TodoStatus,
 } from '@god/shared';
 import { DateTime } from 'luxon';
-import { useAuth } from '@/auth/AuthProvider';
+import { useAuth, useMe } from '@/auth/AuthProvider';
 import { inZone, zoneAbbr } from '@/lib/time';
+import { useTaskActions } from './todoShared';
 
 /**
  * Start By and Complete By, never folded into one "due date". Start By is when
@@ -80,27 +77,6 @@ export function RiskChip({ risk, always }: { risk: TodoRisk | null; always?: boo
   );
 }
 
-const PRIORITY_COLOR: Record<TodoPriority, string> = { p1: 'error.main', p2: 'warning.main', p3: 'text.disabled' };
-
-/** P1, P2 or P3 — which follows from the quadrant the task sits in. */
-export function PriorityChip({ todo }: { todo: Pick<TodoDTO, 'urgency' | 'importance'> }) {
-  const priority = priorityOf(todo);
-  return (
-    <Tooltip title={`${TODO_PRIORITY_LABELS[priority]} — from “${labelOfQuadrant(todo)}”`}>
-      <Box
-        component="span"
-        sx={{ display: 'inline-flex', alignItems: 'center', gap: 0.35, fontSize: '0.72rem', fontWeight: 700, color: PRIORITY_COLOR[priority] }}
-      >
-        <FlagOutlined sx={{ fontSize: 13 }} />
-        {TODO_PRIORITY_SHORT[priority]}
-      </Box>
-    </Tooltip>
-  );
-}
-
-const labelOfQuadrant = (t: Pick<TodoDTO, 'urgency' | 'importance'>) =>
-  `${t.urgency === 'need_action' ? 'Need action' : 'Can wait'} · ${t.importance === 'strategic' ? 'Strategic' : 'Non strategic'}`;
-
 /**
  * When to begin, and when it must be finished. Shown as two labelled things,
  * because a deadline read as a start date is the mistake this prevents.
@@ -119,14 +95,14 @@ export function TaskWhen({ todo, compact }: { todo: TodoDTO; compact?: boolean }
   return (
     <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap flexWrap="wrap">
       {todo.startByAt && (
-        <Tooltip title={`Start By — begin work no later than this${own === zone ? '' : ` (${formatWhen(todo.startByAt, todo.startByHasTime, own)} for them)`}`}>
+        <Tooltip title={`Start — begin work no later than this${own === zone ? '' : ` (${formatWhen(todo.startByAt, todo.startByHasTime, own)} for them)`}`}>
           <Typography variant="caption" sx={{ color: 'primary.main', fontWeight: 600, whiteSpace: 'nowrap' }}>
             <PlayArrowRounded sx={{ fontSize: 12, verticalAlign: '-1px' }} /> {formatWhen(todo.startByAt, todo.startByHasTime, zone)}
           </Typography>
         </Tooltip>
       )}
       {todo.completeByAt && (
-        <Tooltip title={`Complete By — finished by this moment${own === zone ? '' : ` (${formatWhen(todo.completeByAt, todo.completeByHasTime, own)} for them)`}`}>
+        <Tooltip title={`End date — finished by this moment${own === zone ? '' : ` (${formatWhen(todo.completeByAt, todo.completeByHasTime, own)} for them)`}`}>
           <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600, whiteSpace: 'nowrap' }}>
             Due {formatWhen(todo.completeByAt, todo.completeByHasTime, zone)}
           </Typography>
@@ -175,37 +151,53 @@ export function StatusPill({ status }: { status: TodoStatus }) {
 }
 
 /**
- * The owner says where the work stands. Finishing is not here: that asks the
- * giver to verify, and belongs with the tick.
+ * Where the work stands, as one control. The owner moves it along — not
+ * started, in progress, blocked, or finished and ready to be checked — and
+ * whoever gave the task confirms it or sends it back. Blocked asks why first.
+ * Everyone else reads the pill.
  */
-export function ProgressSelect({
-  status,
-  disabled,
-  onChange,
-}: {
-  status: TodoStatus;
-  disabled?: boolean;
-  onChange: (status: 'open' | 'in_progress' | 'blocked') => void;
-}) {
-  const finished = status === 'done' || status === 'completed';
-  if (finished) return <StatusPill status={status} />;
+export function StatusControl({ todo }: { todo: TodoDTO }) {
+  const me = useMe();
+  const { setStatus, done, confirm, reopen, busy, blockDialog } = useTaskActions(todo);
+  const mine = todo.assignee.id === me.id;
+  const iGave = todo.createdBy.id === me.id;
+
+  // What this person can turn this task into, from where it is now.
+  const options: TodoStatus[] = [];
+  if (mine && isActiveTodo(todo.status)) options.push('open', 'in_progress', 'blocked', 'done');
+  if (iGave && todo.status === 'done') options.push('done', 'completed', 'open');
+  if (iGave && todo.status === 'completed') options.push('completed', 'open');
+  const choices = [...new Set(options)];
+  if (choices.length < 2) return <StatusPill status={todo.status} />;
+
+  const go = (next: TodoStatus) => {
+    if (next === todo.status) return;
+    if (next === 'done') return void done.mutate(undefined);
+    if (next === 'completed') return void confirm.mutate();
+    if (todo.status === 'done' || todo.status === 'completed') return void reopen.mutate();
+    setStatus(next as 'open' | 'in_progress' | 'blocked');
+  };
+
   return (
-    <Select
-      size="small"
-      variant="standard"
-      disableUnderline
-      value={status}
-      disabled={disabled}
-      onChange={(e) => onChange(e.target.value as 'open' | 'in_progress' | 'blocked')}
-      renderValue={(v) => <StatusPill status={v as TodoStatus} />}
-      inputProps={{ 'aria-label': 'Where the work stands' }}
-      sx={{ '& .MuiSelect-select': { py: 0.25, display: 'flex', alignItems: 'center' } }}
-    >
-      {(['open', 'in_progress', 'blocked'] as const).map((s) => (
-        <MenuItem key={s} value={s}>
-          <StatusPill status={s} />
-        </MenuItem>
-      ))}
-    </Select>
+    <>
+      <Select
+        size="small"
+        variant="standard"
+        disableUnderline
+        value={todo.status}
+        disabled={busy}
+        onChange={(e) => go(e.target.value as TodoStatus)}
+        renderValue={(v) => <StatusPill status={v as TodoStatus} />}
+        inputProps={{ 'aria-label': 'Status' }}
+        sx={{ '& .MuiSelect-select': { py: 0.25, display: 'flex', alignItems: 'center' } }}
+      >
+        {choices.map((s) => (
+          <MenuItem key={s} value={s}>
+            <StatusPill status={s} />
+          </MenuItem>
+        ))}
+      </Select>
+      {blockDialog}
+    </>
   );
 }

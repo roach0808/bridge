@@ -7,10 +7,8 @@ import {
   ROLE_LABELS,
   TODO_IMPORTANCES,
   TODO_IMPORTANCE_LABELS,
-  TODO_PRIORITY_LABELS,
   TODO_URGENCIES,
   TODO_URGENCY_LABELS,
-  priorityOf,
   type TodoDTO,
   type TodoImportance,
   type TodoUrgency,
@@ -169,12 +167,8 @@ export function TaskDialog({
       open={open}
       onClose={onClose}
       maxWidth="md"
-      title={editing ? 'Task' : assigneeId === me.id ? 'New task' : 'New task'}
-      subtitle={
-        editing ?
-          `Given by ${todo!.createdBy.nickname} · ${TODO_PRIORITY_LABELS[priorityOf({ urgency, importance })]}`
-        : TODO_PRIORITY_LABELS[priorityOf({ urgency, importance })]
-      }
+      title={editing ? 'Task' : 'New task'}
+      subtitle={editing ? `Given by ${todo!.createdBy.nickname}` : undefined}
       submitLabel={editing ? 'Save' : assigneeId === me.id ? 'Add task' : 'Give task'}
       pending={save.isPending}
       submitDisabled={!title.trim() || backwards}
@@ -221,7 +215,7 @@ export function TaskDialog({
       {/* Two rows, never one: when to begin, and when it must already be finished. */}
       <Box sx={{ display: 'grid', gap: 1.5 }}>
         <WhenRow
-          label="Start By"
+          label="Start"
           hint="Begin work no later than this"
           color="primary.main"
           value={startBy}
@@ -230,45 +224,16 @@ export function TaskDialog({
           onChange={setStartBy}
         />
         <WhenRow
-          label="Complete By"
+          label="End date"
           hint="Must already be finished by this"
           color="text.primary"
           value={completeBy}
           zone={taskZone}
           zoneLabel={zoneLabel}
           onChange={setCompleteBy}
-          error={backwards ? 'Complete By cannot be before Start By' : errors.completeByAt}
+          error={backwards ? 'The end date cannot be before the start' : errors.completeByAt}
         />
         {completeBy.date && !startBy.date && <Alert severity="warning">{NO_START_DATE_WARNING}</Alert>}
-      </Box>
-
-      <Box>
-        <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
-          Where it sits on the board — which sets its priority
-        </Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-          {TODO_URGENCIES.map((u) => (
-            <Chip
-              key={u}
-              clickable
-              label={TODO_URGENCY_LABELS[u]}
-              color={urgency === u ? 'primary' : 'default'}
-              variant={urgency === u ? 'filled' : 'outlined'}
-              onClick={() => setUrgency(u)}
-            />
-          ))}
-          <Box sx={{ width: 8 }} />
-          {TODO_IMPORTANCES.map((i) => (
-            <Chip
-              key={i}
-              clickable
-              label={TODO_IMPORTANCE_LABELS[i]}
-              color={importance === i ? 'primary' : 'default'}
-              variant={importance === i ? 'filled' : 'outlined'}
-              onClick={() => setImportance(i)}
-            />
-          ))}
-        </Stack>
       </Box>
 
       <Button
@@ -306,6 +271,36 @@ export function TaskDialog({
             minRows={2}
             slotProps={{ htmlInput: { maxLength: 2000 } }}
           />
+          <Box>
+            <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
+              Where it sits on the board
+            </Typography>
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              {TODO_URGENCIES.map((u) => (
+                <Chip
+                  key={u}
+                  clickable
+                  size="small"
+                  label={TODO_URGENCY_LABELS[u]}
+                  color={urgency === u ? 'primary' : 'default'}
+                  variant={urgency === u ? 'filled' : 'outlined'}
+                  onClick={() => setUrgency(u)}
+                />
+              ))}
+              <Box sx={{ width: 8 }} />
+              {TODO_IMPORTANCES.map((i) => (
+                <Chip
+                  key={i}
+                  clickable
+                  size="small"
+                  label={TODO_IMPORTANCE_LABELS[i]}
+                  color={importance === i ? 'primary' : 'default'}
+                  variant={importance === i ? 'filled' : 'outlined'}
+                  onClick={() => setImportance(i)}
+                />
+              ))}
+            </Stack>
+          </Box>
           <TextField
             select
             label="Waits for"
