@@ -419,13 +419,68 @@ export const quadrantSchema = z.object({
   importance: z.enum(TODO_IMPORTANCES).optional(),
 });
 
+/**
+ * When work should begin, and when it must already be finished. A day on its
+ * own is sent as the start of that day with `hasTime` false, so "Thursday"
+ * stays a day and never becomes midnight for a reader in another zone.
+ */
+const taskDatesSchema = z.object({
+  startByAt: isoDateTime.nullish(),
+  startByHasTime: z.boolean().optional(),
+  completeByAt: isoDateTime.nullish(),
+  completeByHasTime: z.boolean().optional(),
+  timeZone: timeZone.optional(),
+});
+
+/** A deadline before the day work may begin is a mistake, not a plan. */
+const datesInOrder = (v: { startByAt?: string | null; completeByAt?: string | null }, ctx: z.RefinementCtx) => {
+  if (v.startByAt && v.completeByAt && v.completeByAt < v.startByAt) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['completeByAt'], message: 'Complete By cannot be before Start By' });
+  }
+};
+
+const taskDetailsSchema = z.object({
+  details: optionalText(5000).optional(),
+  expectedDeliverable: optionalText(2000).optional(),
+  definitionOfDone: optionalText(2000).optional(),
+  /** Tasks that must happen first. */
+  dependsOn: z.array(uuid).max(20).optional(),
+});
+
 export const createTodoSchema = z
   .object({
     assigneeId: uuid,
     title: trimmed('Title', 200),
-    details: optionalText(5000).optional(),
   })
-  .merge(quadrantSchema);
+  .merge(quadrantSchema)
+  .merge(taskDatesSchema)
+  .merge(taskDetailsSchema)
+  .superRefine(datesInOrder);
+
+/** Changing a task after it was given. Every field is optional; what is sent is what changes. */
+export const updateTodoSchema = z
+  .object({
+    title: trimmed('Title', 200).optional(),
+  })
+  .merge(quadrantSchema)
+  .merge(taskDatesSchema)
+  .merge(taskDetailsSchema)
+  .superRefine(datesInOrder);
+
+/**
+ * The states the owner moves between on their own: not started, working on it,
+ * or stuck. Blocked says why — work nobody can explain is not a status.
+ */
+export const todoStatusSchema = z
+  .object({
+    status: z.enum(['open', 'in_progress', 'blocked'] as const),
+    blockedReason: optionalText(1000).optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.status === 'blocked' && !v.blockedReason) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['blockedReason'], message: 'Say what is blocking the task' });
+    }
+  });
 /** Hands a task to someone else (dragged onto their panel), into a quadrant of their board. */
 export const moveTodoSchema = z.object({ assigneeId: uuid }).merge(quadrantSchema);
 

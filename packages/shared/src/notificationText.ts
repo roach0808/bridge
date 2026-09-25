@@ -22,6 +22,8 @@ export function notificationText(n: NotificationDTO): { title: string; body: str
       return { title: `${who} paid you`, body: n.payload.summary ?? '' };
     case 'todo.assigned':
       return { title: `${who} gave you a task`, body: n.payload.summary ?? '' };
+    case 'todo.blocked':
+      return { title: `${who} is blocked on a task`, body: n.payload.summary ?? '' };
     case 'todo.done':
       return { title: `${who} finished a task`, body: n.payload.summary ?? '' };
     case 'todo.completed':

@@ -12,3 +12,4 @@ export * from './chat';
 export * from './presence';
 export * from './notificationText';
 export * from './payouts';
+export * from './tasks';

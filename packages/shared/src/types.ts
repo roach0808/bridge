@@ -319,6 +319,8 @@ export type NotificationType =
   /** The Founder (or the Manager) marked someone's pay for one or more calls as paid. */
   | 'call.paid'
   | 'todo.assigned'
+  /** The owner cannot get on with a task and has said why. */
+  | 'todo.blocked'
   | 'todo.done'
   | 'todo.completed'
   | 'todo.reopened'
@@ -569,7 +571,34 @@ export interface TodoDTO extends TodoSummary {
   details: string | null;
   /** The note the assignee added when marking it done. */
   doneNote: string | null;
+  /** Why the task is blocked; set exactly while its status is `blocked`. */
+  blockedReason: string | null;
+  /**
+   * When work should begin, and when it must already be finished. Two separate
+   * things: a deadline is not a start date (§ tasks). `…HasTime` is false when
+   * only a day was given, and the time of day means nothing.
+   */
+  startByAt: string | null;
+  startByHasTime: boolean;
+  completeByAt: string | null;
+  completeByHasTime: boolean;
+  /** The zone those times were written in; the owner's when nobody said otherwise. */
+  timeZone: string;
+  /** What must be produced, and how completion is judged. */
+  expectedDeliverable: string | null;
+  definitionOfDone: string | null;
+  /** Tasks that must happen first; this one is waiting while any is unfinished. */
+  dependsOn: TodoDependency[];
   createdAt: string;
+  updatedAt: string;
+}
+
+/** A task this one waits for, as much of it as the waiting task needs to show. */
+export interface TodoDependency {
+  id: string;
+  title: string;
+  status: TodoStatus;
+  assignee: UserRef;
 }
 
 // --- Statistics ------------------------------------------------------------------
@@ -733,8 +762,11 @@ export interface TodoPanel {
   /** The caller may give this person tasks. */
   canGive: boolean;
   tasks: TodoDTO[];
-  /** Counts over all of this person's tasks, whatever the filter. */
-  counts: { open: number; done: number; completed: number };
+  /**
+   * Counts over all of this person's tasks, whatever the filter. `open` is
+   * everything still to do — not started, in progress or blocked.
+   */
+  counts: { open: number; inProgress: number; blocked: number; done: number; completed: number };
 }
 
 /** Someone's presence, sent to the people who may chat with them. */

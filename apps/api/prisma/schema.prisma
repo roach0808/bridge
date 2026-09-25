@@ -52,8 +52,13 @@ enum ChatMessageKind {
 }
 
 /// open → done (the taker ticks it) → completed (the giver confirms).
+/// Not Started (open) -> In Progress -> Ready for Review (done) -> Completed, with
+/// Blocked to one side. `open` and `done` keep their old names so older rows,
+/// and an older API during a deploy, stay valid.
 enum TodoStatus {
   open
+  in_progress
+  blocked
   done
   completed
 }
@@ -577,6 +582,19 @@ model Todo {
   importance     TodoImportance @default(strategic)
   /// Where the task sits within its quadrant; dragging a task rewrites these (§6.x tasks).
   position       Int        @default(0)
+  /// Why the task is stuck; set exactly while the status is `blocked`.
+  blockedReason  String?    @map("blocked_reason")
+  /// When work should begin, and when it must already be finished: two separate
+  /// things. `hasTime` is false when only a day was given.
+  startByAt          DateTime? @map("start_by_at") @db.Timestamptz(3)
+  startByHasTime     Boolean   @default(false) @map("start_by_has_time")
+  completeByAt       DateTime? @map("complete_by_at") @db.Timestamptz(3)
+  completeByHasTime  Boolean   @default(false) @map("complete_by_has_time")
+  /// The zone those times were written in; the owner's when nobody said otherwise.
+  timeZone           String?   @map("time_zone")
+  /// What must be produced, and how completion is judged.
+  expectedDeliverable String?  @map("expected_deliverable")
+  definitionOfDone    String?  @map("definition_of_done")
   doneAt         DateTime?  @map("done_at") @db.Timestamptz(3)
   doneNote       String?    @map("done_note")
   /// The chat reply posted when the assignee marked it done.
@@ -592,11 +610,30 @@ model Todo {
   assignee     User         @relation("TodoAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
   createdBy    User         @relation("TodoCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
 
+  dependsOn   TodoDependency[] @relation("TodoWaiting")
+  dependedOnBy TodoDependency[] @relation("TodoBlocker")
+
   @@index([assigneeId, status])
   @@index([assigneeId, position])
   @@index([assigneeId, urgency, importance, position])
   @@index([createdById, status])
+  @@index([startByAt])
+  @@index([completeByAt])
   @@map("todos")
+}
+
+/// What a task waits for: it cannot sensibly be started until the other is done.
+model TodoDependency {
+  todoId      String   @map("todo_id") @db.Uuid
+  dependsOnId String   @map("depends_on_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  todo      Todo @relation("TodoWaiting", fields: [todoId], references: [id], onDelete: Cascade)
+  dependsOn Todo @relation("TodoBlocker", fields: [dependsOnId], references: [id], onDelete: Cascade)
+
+  @@id([todoId, dependsOnId])
+  @@index([dependsOnId])
+  @@map("todo_dependencies")
 }
 
 /// A browser's Web Push subscription (one per browser profile). Moves to whoever signs in last.

@@ -1,5 +1,7 @@
 import {
+  ACTIVE_TODO_STATUSES,
   canChat,
+  isActiveTodo,
   CHAT_IMAGE_MAX_BYTES,
   COMPLETED_TASK_DAYS,
   canGiveTask,
@@ -12,10 +14,13 @@ import {
   listTodosQuerySchema,
   moveTodoSchema,
   reorderTodosSchema,
+  sameQuadrant,
   startConversationSchema,
   todoBoardQuerySchema,
   TODO_POSITION_STEP,
   todoDoneSchema,
+  todoStatusSchema,
+  updateTodoSchema,
   type ChatMessageDTO,
   type ChatMessagePage,
   type ConversationDTO,
@@ -58,7 +63,8 @@ const conversationInclude = {
 type ConversationRow = Prisma.ConversationGetPayload<{ include: typeof conversationInclude }>;
 
 const todoSummaryInclude = {
-  assignee: { select: userRefSelect },
+  // The owner's zone is the one a task's times are read in unless it says otherwise.
+  assignee: { select: { ...userRefSelect, timeZone: true } },
   createdBy: { select: userRefSelect },
 } satisfies Prisma.TodoInclude;
 
@@ -74,6 +80,10 @@ type MessageRow = Prisma.ChatMessageGetPayload<{ include: typeof messageInclude 
 const todoInclude = {
   ...todoSummaryInclude,
   message: { select: { id: true, body: true, createdAt: true, sender: { select: userRefSelect } } },
+  dependsOn: {
+    select: { dependsOn: { select: { id: true, title: true, status: true, message: { select: { body: true } }, assignee: { select: userRefSelect } } } },
+    orderBy: { createdAt: 'asc' },
+  },
 } satisfies Prisma.TodoInclude;
 type TodoRow = Prisma.TodoGetPayload<{ include: typeof todoInclude }>;
 
@@ -125,8 +135,36 @@ const toTodoDTO = (t: TodoRow): TodoDTO => ({
   title: t.title,
   details: t.details,
   doneNote: t.doneNote,
+  blockedReason: t.blockedReason,
+  startByAt: isoOrNull(t.startByAt),
+  startByHasTime: t.startByHasTime,
+  completeByAt: isoOrNull(t.completeByAt),
+  completeByHasTime: t.completeByHasTime,
+  // A task with no zone of its own is read in the owner's.
+  timeZone: t.timeZone ?? t.assignee.timeZone,
+  expectedDeliverable: t.expectedDeliverable,
+  definitionOfDone: t.definitionOfDone,
+  dependsOn: t.dependsOn.map((d) => ({
+    id: d.dependsOn.id,
+    title: todoText(d.dependsOn),
+    status: d.dependsOn.status,
+    assignee: toUserRef(d.dependsOn.assignee),
+  })),
   createdAt: iso(t.createdAt),
+  updatedAt: iso(t.updatedAt),
 });
+
+/** Everything still to do, in progress or stuck, then the two finished states. */
+function countsFor(rows: Array<{ assigneeId: string; status: TodoStatus; _count: { _all: number } }>, personId: string): TodoPanel['counts'] {
+  const of = (status: TodoStatus) => rows.find((c) => c.assigneeId === personId && c.status === status)?._count._all ?? 0;
+  return {
+    open: of('open') + of('in_progress') + of('blocked'),
+    inProgress: of('in_progress'),
+    blocked: of('blocked'),
+    done: of('done'),
+    completed: of('completed'),
+  };
+}
 
 const isParticipant = (c: { userAId: string; userBId: string }, userId: string) => c.userAId === userId || c.userBId === userId;
 const otherOf = (c: ConversationRow, userId: string) => (c.userAId === userId ? c.userB : c.userA);
@@ -171,7 +209,11 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
           '-infinity'::timestamptz)
       WHERE c.id = ANY(${ids}::uuid[])
       GROUP BY c.id`,
-    db.todo.groupBy({ by: ['conversationId'], where: { conversationId: { in: ids }, status: 'open' }, _count: { _all: true } }),
+    db.todo.groupBy({
+      by: ['conversationId'],
+      where: { conversationId: { in: ids }, status: { in: [...ACTIVE_TODO_STATUSES] } },
+      _count: { _all: true },
+    }),
   ]);
   return rows.map((c) => {
     const last = lastMessages.find((m) => m.conversation_id === c.id);
@@ -706,21 +748,25 @@ chatRouter.post('/todos', async (req, res) => {
     const todo = await tx.todo.create({
       data: {
         title: input.title,
-        details: input.details ?? null,
         assigneeId: assignee.id,
         createdById: actor.id,
         ...quadrant,
+        ...taskFields(input),
         position: await topPosition(tx, assignee.id, quadrant),
       },
       include: todoInclude,
     });
+    // The row is read back once its dependencies are in place, so the answer
+    // carries them.
+    if (input.dependsOn?.length) await setDependencies(tx, todo.id, input.dependsOn);
+    const withDeps = input.dependsOn?.length ? await tx.todo.findUniqueOrThrow({ where: { id: todo.id }, include: todoInclude }) : todo;
     // A task you put on your own list tells you nothing you don't know.
     const deliver = await notify(tx, assignee.id === actor.id ? [] : [assignee.id], 'todo.assigned', {
       todoId: todo.id,
       actor: { nickname: actor.nickname, role: actor.role },
       summary: clip(input.title, 120),
     });
-    return { todo, deliver };
+    return { todo: withDeps, deliver };
   });
   deliver();
   const dto = toTodoDTO(todo);
@@ -733,6 +779,171 @@ chatRouter.delete('/todos/:id', async (req, res) => {
   await removeTodo(actor, await loadTodo(actor, idParam(req)));
   res.status(204).end();
 });
+
+/**
+ * When work should begin and when it must be finished, what it should produce,
+ * and how anyone can tell it is done. Only the fields that were sent change.
+ */
+function taskFields(input: TaskFieldInput): TaskFields {
+  const data: TaskFields = {};
+  if (input.title !== undefined) data.title = input.title;
+  if (input.details !== undefined) data.details = input.details ?? null;
+  if (input.expectedDeliverable !== undefined) data.expectedDeliverable = input.expectedDeliverable ?? null;
+  if (input.definitionOfDone !== undefined) data.definitionOfDone = input.definitionOfDone ?? null;
+  if (input.timeZone !== undefined) data.timeZone = input.timeZone;
+  // A date cleared takes its "and a time was given" with it.
+  if (input.startByAt !== undefined) {
+    data.startByAt = input.startByAt ? new Date(input.startByAt) : null;
+    data.startByHasTime = input.startByAt ? (input.startByHasTime ?? false) : false;
+  }
+  if (input.completeByAt !== undefined) {
+    data.completeByAt = input.completeByAt ? new Date(input.completeByAt) : null;
+    data.completeByHasTime = input.completeByAt ? (input.completeByHasTime ?? false) : false;
+  }
+  return data;
+}
+
+/** The stored shape of those fields, usable in a create and in an update alike. */
+type TaskFields = Partial<{
+  title: string;
+  details: string | null;
+  expectedDeliverable: string | null;
+  definitionOfDone: string | null;
+  timeZone: string;
+  startByAt: Date | null;
+  startByHasTime: boolean;
+  completeByAt: Date | null;
+  completeByHasTime: boolean;
+}>;
+
+type TaskFieldInput = Partial<{
+  title: string;
+  details: string | null;
+  expectedDeliverable: string | null;
+  definitionOfDone: string | null;
+  timeZone: string;
+  startByAt: string | null;
+  startByHasTime: boolean;
+  completeByAt: string | null;
+  completeByHasTime: boolean;
+}>;
+
+/**
+ * What a task waits for. A task cannot wait for itself, nor for anything that
+ * already waits on it — a circle of tasks is a plan nobody can ever start.
+ */
+async function setDependencies(tx: Db, todoId: string, ids: string[]) {
+  const unique = [...new Set(ids)].filter((id) => id !== todoId);
+  const found = await tx.todo.findMany({ where: { id: { in: unique } }, select: { id: true } });
+  if (found.length !== unique.length) {
+    throw badRequest('One of those tasks no longer exists', { issues: [{ path: 'dependsOn', message: 'Task not found' }] });
+  }
+  for (const id of unique) {
+    if (await waitsOn(tx, id, todoId)) {
+      throw conflict('That task already waits for this one, and two tasks cannot wait for each other');
+    }
+  }
+  await tx.todoDependency.deleteMany({ where: { todoId } });
+  if (unique.length) await tx.todoDependency.createMany({ data: unique.map((dependsOnId) => ({ todoId, dependsOnId })) });
+}
+
+/** Does `from` wait, directly or through others, for `target`? */
+async function waitsOn(tx: Db, from: string, target: string): Promise<boolean> {
+  const seen = new Set<string>();
+  let frontier = [from];
+  // The chain is short in practice; the cap stops a malformed graph spinning.
+  for (let depth = 0; depth < 20 && frontier.length; depth += 1) {
+    const rows = await tx.todoDependency.findMany({ where: { todoId: { in: frontier } }, select: { dependsOnId: true } });
+    const next = rows.map((r) => r.dependsOnId).filter((id) => !seen.has(id));
+    if (next.includes(target)) return true;
+    next.forEach((id) => seen.add(id));
+    frontier = next;
+  }
+  return false;
+}
+
+/**
+ * Who may change a task: the person who gave it, and anyone above the owner who
+ * could have given it to them. Not the owner — a deadline you can move yourself
+ * is not a commitment to anyone. A task you gave yourself is yours either way,
+ * because you are also the giver.
+ */
+function mayEditTask(actor: Actor, todo: { createdById: string; assignee: { id: string; role: string } }): boolean {
+  if (todo.createdById === actor.id) return true;
+  return todo.assignee.id !== actor.id && canGiveTask(actor, asTaker(todo.assignee));
+}
+
+/** Changing a task after it was given: its wording, its dates, what it should produce. */
+chatRouter.patch('/todos/:id', async (req, res) => {
+  const actor = actorOf(req);
+  const existing = await loadTodoForEdit(actor, idParam(req));
+  const input = parseBody(updateTodoSchema, req);
+  if (!mayEditTask(actor, existing)) throw forbidden('You cannot change this task');
+  if (input.title !== undefined && existing.messageId) {
+    throw conflict('This task came from a chat message, so its words are the message');
+  }
+  const quadrant =
+    input.urgency || input.importance ?
+      { urgency: input.urgency ?? existing.urgency, importance: input.importance ?? existing.importance }
+    : null;
+
+  const todo = await prisma.$transaction(async (tx) => {
+    if (input.dependsOn !== undefined) await setDependencies(tx, existing.id, input.dependsOn);
+    return tx.todo.update({
+      where: { id: existing.id },
+      data: {
+        ...taskFields(input),
+        ...(quadrant ?? {}),
+        // Moved to another quadrant, it goes to the top of it, as a drop would.
+        ...(quadrant && !sameQuadrant(quadrant, existing) ? { position: await topPosition(tx, existing.assigneeId, quadrant) } : {}),
+      },
+      include: todoInclude,
+    });
+  });
+  const dto = toTodoDTO(todo);
+  emitTodo(todo, dto);
+  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: todo.assigneeId });
+  res.json(dto);
+});
+
+/**
+ * The owner says where the work stands: not started, in progress, or blocked
+ * with a reason. Finishing is a different move (`done`), because it asks the
+ * giver for something.
+ */
+chatRouter.post('/todos/:id/status', async (req, res) => {
+  const actor = actorOf(req);
+  const existing = await loadTodoForEdit(actor, idParam(req));
+  const { status, blockedReason } = parseBody(todoStatusSchema, req);
+  if (existing.assigneeId !== actor.id && !mayEditTask(actor, existing)) throw forbidden('You cannot change this task');
+  if (!isActiveTodo(existing.status)) throw conflict('This task is already finished; reopen it first');
+
+  const todo = await prisma.todo.update({
+    where: { id: existing.id },
+    data: { status, blockedReason: status === 'blocked' ? (blockedReason ?? null) : null },
+    include: todoInclude,
+  });
+  const dto = toTodoDTO(todo);
+  emitTodo(todo, dto);
+  // A task nobody can get on with is the giver's problem too.
+  if (status === 'blocked' && existing.createdById !== actor.id) {
+    const deliver = await notify(prisma, [existing.createdById], 'todo.blocked', {
+      todoId: todo.id,
+      actor: { nickname: actor.nickname, role: actor.role },
+      summary: `Blocked: ${clip(todoText(todo), 100)}${blockedReason ? ` — ${clip(blockedReason, 120)}` : ''}`,
+    });
+    deliver();
+  }
+  res.json(dto);
+});
+
+/** A task the caller gave or was given, with enough of it to decide who may change it. */
+async function loadTodoForEdit(actor: Actor, id: string | null) {
+  const t = id ? await prisma.todo.findUnique({ where: { id }, include: { assignee: { select: { id: true, role: true } } } }) : null;
+  if (!t) throw notFound('Task');
+  if (t.assigneeId !== actor.id && t.createdById !== actor.id && !canGiveTask(actor, asTaker(t.assignee))) throw notFound('Task');
+  return t;
+}
 
 /**
  * Drag and drop onto someone else's panel: the giver hands an open task to another
@@ -770,7 +981,7 @@ chatRouter.post('/todos/:id/move', async (req, res) => {
   }
   if (existing.createdById !== actor.id) throw forbidden('Only the person who gave the task can hand it to someone else');
   if (existing.conversationId) throw conflict('This task came from a chat, so it stays with the person in that chat');
-  if (existing.status !== 'open') throw conflict('Only open tasks can be handed on');
+  if (!isActiveTodo(existing.status)) throw conflict('Only tasks still to do can be handed on');
   const assignee = await prisma.user.findUnique({
     where: { id: assigneeId },
     select: { id: true, role: true, managerId: true, isActive: true },
@@ -860,7 +1071,7 @@ function todoStatusWhere(status: 'active' | 'all' | TodoStatus): Prisma.TodoWher
   if (status === 'all') return {};
   if (status !== 'active') return { status };
   const since = new Date(Date.now() - COMPLETED_TASK_DAYS * 24 * 60 * 60 * 1000);
-  return { OR: [{ status: { in: ['open', 'done'] } }, { status: 'completed', confirmedAt: { gte: since } }] };
+  return { OR: [{ status: { in: [...ACTIVE_TODO_STATUSES, 'done'] } }, { status: 'completed', confirmedAt: { gte: since } }] };
 }
 
 chatRouter.get('/todos', async (req, res) => {
@@ -924,11 +1135,7 @@ chatRouter.get('/todos/board', async (req, res) => {
     isMe: person.id === actor.id,
     canGive: canGiveTask(actor, asTaker(person)),
     tasks: rows.filter((t) => t.assigneeId === person.id).map(toTodoDTO),
-    counts: {
-      open: counts.find((c) => c.assigneeId === person.id && c.status === 'open')?._count._all ?? 0,
-      done: counts.find((c) => c.assigneeId === person.id && c.status === 'done')?._count._all ?? 0,
-      completed: counts.find((c) => c.assigneeId === person.id && c.status === 'completed')?._count._all ?? 0,
-    },
+    counts: countsFor(counts, person.id),
   }));
   // Only people with tasks, plus everyone the caller may give tasks to.
   res.json(body.filter((p) => p.isMe || p.canGive || p.tasks.length > 0));
@@ -943,15 +1150,16 @@ chatRouter.post('/todos/:id/done', async (req, res) => {
   const existing = await loadTodo(actor, idParam(req));
   const { note } = parseBody(todoDoneSchema, req);
   if (existing.assigneeId !== actor.id) throw forbidden('Only the person the task is for can mark it done');
-  if (existing.status !== 'open') throw conflict('This task is already done');
+  if (!isActiveTodo(existing.status)) throw conflict('This task is already done');
   const mine = existing.createdById === actor.id;
 
   const now = new Date();
   const { todo, message, deliver } = await prisma.$transaction(async (tx) => {
     // Guard against a double click racing past the check above.
     const claimed = await tx.todo.updateMany({
-      where: { id: existing.id, status: 'open' },
-      data: { status: mine ? 'completed' : 'done', doneAt: now, doneNote: note ?? null, ...(mine ? { confirmedAt: now } : {}) },
+      where: { id: existing.id, status: { in: [...ACTIVE_TODO_STATUSES] } },
+      // Finishing a blocked task unblocks it: the reason no longer applies.
+      data: { status: mine ? 'completed' : 'done', doneAt: now, doneNote: note ?? null, blockedReason: null, ...(mine ? { confirmedAt: now } : {}) },
     });
     if (!claimed.count) throw conflict('This task is already done');
     let message: MessageRow | null = null;
@@ -1006,7 +1214,7 @@ async function reviewTodo(actor: Actor, id: string | null, action: 'confirm' | '
       data:
         action === 'confirm'
           ? { status: 'completed', confirmedAt: new Date() }
-          : { status: 'open', doneAt: null, doneNote: null, doneMessageId: null, confirmedAt: null },
+          : { status: 'open', doneAt: null, doneNote: null, doneMessageId: null, confirmedAt: null, blockedReason: null },
     });
     if (!claimed.count) throw conflict('This task just changed; refresh and try again');
     const todo = await tx.todo.findUniqueOrThrow({ where: { id: existing.id }, include: todoInclude });

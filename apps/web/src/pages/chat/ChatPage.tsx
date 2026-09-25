@@ -37,6 +37,7 @@ import {
   CHAT_MESSAGE_MAX,
   ROLE_LABELS,
   ROLES,
+  isActiveTodo,
   type ChatMessageDTO,
   type ConversationDTO,
   type ChatMessagePage,
@@ -376,7 +377,7 @@ function MessageMenu({
 
   const me = useMe();
   const canMake = !message.todo && conversation.canGiveTask && !message.image && !message.deleted;
-  const canRemove = message.todo?.status === 'open' && message.todo.createdBy.id === me.id;
+  const canRemove = message.todo !== null && isActiveTodo(message.todo.status) && message.todo.createdBy.id === me.id;
   const canDelete = message.sender.id === me.id && !message.todo && !message.deleted;
   const canReact = conversation.canSend && !message.deleted;
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -558,7 +559,7 @@ function MessageBubble({
               <Typography variant="caption" color="text.secondary">
                 {todo.assignee.id === me.id ? 'for you' : `for ${todo.assignee.nickname}`}
               </Typography>
-              {todo.status === 'open' && todo.assignee.id === me.id && (
+              {isActiveTodo(todo.status) && todo.assignee.id === me.id && (
                 <Button size="small" variant="contained" color="success" startIcon={<TaskAltRounded />} onClick={() => onDone(m)} sx={{ height: 24, fontSize: 12, py: 0 }}>
                   Mark done
                 </Button>

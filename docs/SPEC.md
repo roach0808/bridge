@@ -2,7 +2,7 @@
 
 The product is branded **Silver Horizon** (logo, favicon, app icons and sign-in banner in `apps/web/public/brand`); earlier versions of this document call it the God System, and the code keeps the `god` names.
 
-Version 1.8 · 2026-09-24 · Status: Phase 1 implemented, deployed
+Version 1.9 · 2026-09-25 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -555,7 +555,13 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | conversation_id | uuid → Conversation, nullable | Set exactly when the task came from a chat message |
 | assignee_id | uuid → User | Who the task is for (the taker) |
 | created_by | uuid → User | The giver: a Founder, a Manager, or the taker themselves (a personal to-do) |
-| status | enum: open, done, completed | open → done (the taker ticks it) → completed (the giver confirms). A task you gave yourself goes straight to completed when you tick it. `done_at` is set exactly when done or completed (check constraint) |
+| status | enum: open, in_progress, blocked, done, completed | **Not Started** (`open`) → **In Progress** → **Ready for Review** (`done`, the taker ticks it) → **Completed** (the giver confirms), with **Blocked** to one side. The two stored names are older than the words on screen (`TODO_STATUS_LABELS`); they were kept so every existing task stayed valid. A task you gave yourself goes straight to completed when you tick it. `done_at` is set exactly when done or completed (check constraint) |
+| blocked_reason | text, nullable | Why the work cannot go on. Set exactly while the status is `blocked` (check constraint): a task nobody can explain is not a status |
+| start_by_at, start_by_has_time | timestamptz nullable, boolean | **Start By**: the moment work should begin. `has_time` is false when only a day was given, and the time of day means nothing |
+| complete_by_at, complete_by_has_time | timestamptz nullable, boolean | **Complete By**: the moment the work must already be finished. A check constraint keeps it at or after Start By |
+| time_zone | text, nullable | The zone those times were written in; the owner's when nobody said otherwise |
+| expected_deliverable | text, nullable | What must be produced or accomplished |
+| definition_of_done | text, nullable | How anyone can tell it is finished |
 | urgency | enum: need_action, can_wait, default need_action | Which column of the board the task sits in |
 | importance | enum: strategic, non_strategic, default strategic | Which row of the board the task sits in. A new task, however it arrives, starts in **need action · strategic** |
 | position | int, default 0 | Where the task sits within its quadrant; smaller is higher. Dragging renumbers that quadrant in steps of `TODO_POSITION_STEP` (100). Indexed with `assignee_id`, `urgency` and `importance` |
@@ -563,6 +569,13 @@ transition. Bank details are payment data: only the Founder reads or edits them.
 | done_note | text, nullable | The assignee's note, also the body of the reply |
 | done_message_id | uuid → ChatMessage, nullable, unique | The `todo_done` reply |
 | created_at, updated_at | timestamptz | |
+
+#### TodoDependency **[Implementation]**
+
+What a task waits for: `(todo_id, depends_on_id)`, both to `todos`, deleted with
+either. A task never waits for itself (check constraint) and never for anything
+that already waits on it — a circle of tasks is a plan nobody can start, so the
+API walks the chain and refuses one (409).
 
 #### ProfilePlatformStatus rates
 
@@ -1342,7 +1355,9 @@ that the rules no longer allow stays readable, with `canSend: false`.
 | POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`), in **need action · strategic** like any new task. Founder → anyone, Manager → any Associate, anyone → themselves (`canGiveTask`); 403 otherwise, 409 if already a task |
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |
 | GET | /todos/assignees | all | People the caller may give a task to: themselves first, then everyone below them (every Associate for a Manager, everyone for the Founder) |
-| POST | /todos | all | { assigneeId, title, details?, urgency?, importance? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own. Without a quadrant it lands in **need action · strategic** |
+| PATCH | /todos/:id | the giver, and anyone who may give the owner tasks | Changes a task after it was given: `title` (not for a chat task, whose words are the message), `details`, the two dates, `expectedDeliverable`, `definitionOfDone`, the quadrant, `dependsOn`. **Not the owner**: a deadline you can move yourself is not a commitment to anyone, though a task you gave yourself is yours either way |
+| POST | /todos/:id/status | the owner, or anyone who may change the task | { status: open \| in_progress \| blocked, blockedReason? }. Where the work stands. `blocked` must say why (400 otherwise), and tells the giver (`todo.blocked`). Finishing is `done`, not this: that asks the giver for something. 409 once the task is finished |
+| POST | /todos | all | { assigneeId, title, details?, urgency?, importance?, startByAt?, startByHasTime?, completeByAt?, completeByHasTime?, timeZone?, expectedDeliverable?, definitionOfDone?, dependsOn? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own. Without a quadrant it lands in **need action · strategic** |
 | POST | /todos/:id/move | the giver (to someone else), the taker or the giver (within one board) | { assigneeId, urgency?, importance? }: hands an open task to someone else the giver may give tasks to (dragged onto their board); it goes to the top of the quadrant it was dropped on, or, with no quadrant, to **need action · strategic** — a task given to you always turns up in the same corner — and they get `todo.assigned`. 409 for a task from a chat (it stays with that chat) or one that is no longer open. With the same `assigneeId` it only places the task in a quadrant of that person's own board, keeping the one it has if none is given |
 | POST | /todos/reorder | the board's owner, or anyone who may give them tasks | { assigneeId, ids, urgency?, importance? }: the new top-to-bottom order of one quadrant (what the filter hides keeps its order below it). Tasks dragged in from another quadrant move into it. 409 when an id is not that person's. Emits `chat:todos-reordered` |
 | DELETE | /todos/:id | the giver | Removes a task that is open, or completed and no longer needed. 409 while it waits for confirmation |
@@ -1378,6 +1393,41 @@ Both reads are **recorded in the audit trail** (`chat.observed.list`,
 
 Web: **Everyone's chats** (`/chat/all`), reached by the eye button on the Chat
 page, which only the owner is shown. `MeDTO.isOwner` tells the client.
+
+### 6.11b Start By and Complete By **[Implementation]**
+
+A due date read as a start date is the mistake the task board exists to
+prevent, so execution timing and accountability timing are separate fields,
+separately sorted and separately shown:
+
+| | Meaning |
+|---|---|
+| **Start By** | Begin work no later than this date, or date and time |
+| **Complete By** | The work must already be finished by this moment |
+
+A day with no time of day is stored as the start of that day with
+`hasTime` false, so "Thursday" stays a day and never becomes midnight for a
+reader in another zone. A time is shown in the reader's zone, with the owner's
+beside it when they differ; the interface never says "EOD" or "tomorrow".
+
+**Priority** (P1, P2, P3) is not a field anyone sets: it follows from the
+quadrant, so a task cannot be P1 on one screen and "can wait" on another.
+Need action · Strategic is P1; Can wait · Non strategic is P3; the two mixed
+quadrants are P2 (`priorityOf`).
+
+**Sorting** lives in `packages/shared/src/tasks.ts` as two pure functions:
+
+- **Execution** (`byExecution`): Start By date, then Start By time (a whole day
+  comes before the same day with an hour on it), then priority, then Complete By.
+- **Deadline** (`byDeadline`): Complete By, then priority, then Start By.
+
+A task with no date sorts **last** in both, never first.
+
+**Risk** (`taskRisk`): `overdue` past the deadline; `high_risk` due today and
+not started; `at_risk` due tomorrow and not started; `on_track` once someone has
+picked it up. A task with no deadline, or one already finished, says nothing.
+A deadline with **no start date** raises its own warning (§14 of the PRS): "No
+start date assigned. Team member may not know when to begin this task."
 
 ### 6.12 Presence **[Implementation]**
 
@@ -1589,7 +1639,8 @@ Everyone sees whether the people they may chat with are at their screen.
 | Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit, **Looked after by** (with a hand-on button for the Founder and the team's Manager) and **Manager share** (the Founder edits it, Managers read it); a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (one row each with its green or red dot; clicking a platform unfolds its status and rate, which the Founder edits there) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
 | Everyone's chats | the owner (`OWNER_EMAIL`) | `/chat/all`: every conversation in the system, the two people on each row, and the thread as a plain transcript — who said it, when and what, oldest first, older pages on request. Read only: no message box, no reactions, no read receipt, and a line on the page saying every chat opened is recorded in the audit trail. Reached by the eye button beside **New chat**, shown to the owner alone |
 | Chat | all | Each chat row has a menu with **Clear chat history**. Messages can be deleted by their sender (a placeholder stays), carry pictures (paste, drop or attach; click to enlarge) and emoji reactions; an emoji picker sits by the message box. An arriving message raises a toast with an Open button unless that chat is already on screen, plus a browser notification when one is allowed. Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
-| Tasks | all | One board per person: your own first, then the people below you (every Associate for a Manager; everyone for the Founder). Each board is **four quadrants** — two columns, **Need action** and **Can wait**, and two rows, **Strategic** and **Non strategic** — each with its own count and its own order. Filters Active / Open / Waiting for confirmation / Completed / All. Each board has "New task" for that person — including your own, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged by the handle on the left (mouse, touch or keyboard) into any of the four quadrants, or onto another quadrant of someone else's board to hand it to them; empty quadrants take a drop too, and the order is saved for everyone who sees that board. A new task, and any task given to you, starts in **Need action · Strategic**. **New task** at the top adds one for yourself, or for someone you pick. Boards with nothing in them start folded |
+| Tasks | all | Four views of the same list, chosen by tab and kept in the URL. **Execution** (the default) answers what to work on now: one row per task — Task, Owner, Start By, Complete By, Priority, Status — sorted by Start By, with the risk showing beside the status and "Waits for …" under a task held up by another. **Deadline** is the same rows sorted by Complete By. **Today** is everyone's started, unfinished work grouped by person, above a team-workload table (Active, Due today, Overdue, Blocked, Ready for review) for anyone who sees more than their own tasks. **Board** is the quadrants below. A row opens the task in a dialog with everything in it (§18): owner, the two dates with their own labels, the quadrant that sets the priority, description, expected deliverable, definition of done and what it waits for, with **Save & create another** for a batch. A deadline typed with no start date warns on the spot. Where the work stands is a dropdown on the owner's own rows — Not Started, In Progress, Blocked — and Blocked asks why before it is set |
+| Task board | all | One board per person: your own first, then the people below you (every Associate for a Manager; everyone for the Founder). Each board is **four quadrants** — two columns, **Need action** and **Can wait**, and two rows, **Strategic** and **Non strategic** — each with its own count and its own order. Filters Active / Open / Waiting for confirmation / Completed / All. Each board has "New task" for that person — including your own, for a personal to-do, which has a single tick and is done the moment you tick it. A task is one line, with a coloured bar and tick boxes showing its state at a glance: the taker's tick, the giver's tick, what it says, who gave it and when, then reopen, delete and a link to the chat. Tasks are dragged by the handle on the left (mouse, touch or keyboard) into any of the four quadrants, or onto another quadrant of someone else's board to hand it to them; empty quadrants take a drop too, and the order is saved for everyone who sees that board. A new task, and any task given to you, starts in **Need action · Strategic**. **New task** at the top adds one for yourself, or for someone you pick. Boards with nothing in them start folded |
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create (with their share), deactivate; each card shows the Associate's portion of the Manager's share, which the Manager edits |
 | Users | Founder | All users, create any role, with a **Pay** column (an Expert's hourly rate, an Associate's share) set in the create and edit dialogs; editing an Expert's rate can also price their finished calls that have none. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
@@ -1749,12 +1800,12 @@ run, to be corrected on the Platforms page.
 
 ### 12.4 Testing
 
-- Unit (`packages/shared`, 1466 tests): `canTransition` against every (role,
+- Unit (`packages/shared`, 1481 tests): `canTransition` against every (role,
   from, to) combination with and without the relationship; who may chat with
   whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 392 tests): transition endpoint returns 403 for wrong role,
+- API (`apps/api`, 409 tests): transition endpoint returns 403 for wrong role,
   409 for wrong edge, 200 and a history row for valid moves; confirmation,
   rescheduling requests, Ninja link and duration rules; Experts never seeing
   invoicing, rates, bank data or invoice figures; platform rates (Founder-only,
@@ -1946,6 +1997,7 @@ Container alternative:
 | 2026-09-20 | The call panel names its money in a field of its own: Expected income once finished, Real income once paid. The Profiles table shows the priority-one platform's status by name and unfolds every platform on click. Submitting an invoice from the call page warns when the Profile has no open bank account. Reading the audit trail is no longer written to the audit trail |
 | 2026-09-21 | **Who is paid what**: Experts have an hourly rate and Associates a share, set by the Founder; each call keeps the Expert's rate from when it finished and the shares from when it was paid to bank. The Founder pays the Expert and the Manager (15% of real income by default, per Profile), the Manager passes the Associate's part on. The Calls page has two tabs, In progress and Finance: each person's own money on the calls that took place, with totals, and rows the Founder and Managers select and mark paid. Profiles are looked after by an Associate, handed on by the Founder or within a Manager's team. Platform statuses are green and red dots, with the rate only on click. Calls can be cancelled from the list; the deep search data link leads the call page while it is being prepared, and the dashboard lists booked calls still without it. Tasks can be dragged onto another person's panel, and New task sits at the top of the page. Old "read the audit trail" entries were cleared |
 | 2026-09-21 | Rebranded as **Silver Horizon**: logo in the sidebar, the banner on the sign-in page, new favicon, app and notification icons, navy as the primary colour. The Ninja link of a call now reaches only the Founder and the Expert |
+| 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |
 | 2026-09-24 | The owner Founder (`OWNER_EMAIL`) can read **everyone's chats** at `/chat/all` — reading only, leaving no read receipt, and recorded in the audit trail |
 | 2026-09-24 | The **47 expert networks** the company works with are in the database, grouped into four priorities. The **Platform status** tab shows every Profile — no review banner, no status filter — with the **Manager** in place of the Associate and a filter by Manager, and one narrow column per platform, shown a **priority at a time** so the table fits a screen |
 | 2026-09-24 | The task board is **four quadrants** — Need action / Can wait across, Strategic / Non strategic down — and a task is dragged into any of them, on any board; a new task, and any task given to you, starts in Need action · Strategic. **Meeting details are required before a call is scheduled**, asked for in the step itself. Each browser is remembered as a **device** (`US-desktop-01`) and named in the audit trail, where only the owner Founder (`OWNER_EMAIL`) can see it |

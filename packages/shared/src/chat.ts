@@ -16,8 +16,13 @@ export function canChat(a: { id: string; role: Role }, b: { id: string; role: Ro
 export const CHAT_MESSAGE_KINDS = ['text', 'todo_done'] as const;
 export type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
 
-/** open → done (the taker ticks it) → completed (the giver confirms it). */
-export const TODO_STATUSES = ['open', 'done', 'completed'] as const;
+/**
+ * Not Started → In Progress → Ready for Review (the taker ticks it) → Completed
+ * (the giver confirms it), with Blocked to one side. The stored names are older
+ * than the words on screen: `open` is Not Started and `done` is Ready for
+ * Review (see TODO_STATUS_LABELS in tasks.ts).
+ */
+export const TODO_STATUSES = ['open', 'in_progress', 'blocked', 'done', 'completed'] as const;
 export type TodoStatus = (typeof TODO_STATUSES)[number];
 
 /**

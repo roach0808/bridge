@@ -9,6 +9,7 @@ import NotificationsNoneRounded from '@mui/icons-material/NotificationsNoneRound
 import PaidOutlined from '@mui/icons-material/PaidOutlined';
 import SwapHorizRounded from '@mui/icons-material/SwapHorizRounded';
 import PersonAddAlt1Outlined from '@mui/icons-material/PersonAddAlt1Outlined';
+import BlockRounded from '@mui/icons-material/BlockRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedUserOutlined from '@mui/icons-material/VerifiedUserOutlined';
@@ -48,6 +49,7 @@ const TYPE_META: Record<NotificationType, { icon: ComponentType<SvgIconProps>; l
   'call.created': { icon: AddRounded, label: 'New call' },
   'call.paid': { icon: PaidOutlined, label: 'Payment' },
   'todo.assigned': { icon: ChecklistRounded, label: 'Task' },
+  'todo.blocked': { icon: BlockRounded, label: 'Blocked' },
   'todo.done': { icon: TaskAltRounded, label: 'Task done' },
   'todo.completed': { icon: TaskAltRounded, label: 'Task completed' },
   'todo.reopened': { icon: ChecklistRounded, label: 'Task reopened' },

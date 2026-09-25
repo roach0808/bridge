@@ -380,6 +380,63 @@ async function main() {
     });
   }
 
+  // Tasks, with the two dates the whole board turns on: when to begin, and when
+  // it must already be finished. A few are deliberately awkward — one overdue,
+  // one blocked, one with a deadline and no start date — so every indicator in
+  // the two views has something to show.
+  const startOfDay = (dayOffset: number) => today.plus({ days: dayOffset }).toJSDate();
+  const tasks: Array<{
+    owner: typeof pixel;
+    by: typeof atlas;
+    title: string;
+    startBy: number | null;
+    completeBy: number | null;
+    completeAt?: [number, number];
+    urgency?: 'need_action' | 'can_wait';
+    importance?: 'strategic' | 'non_strategic';
+    status?: 'open' | 'in_progress' | 'blocked';
+    blockedReason?: string;
+    deliverable?: string;
+    done?: string;
+  }> = [
+    { owner: pixel, by: atlas, title: 'Send invitations to 20 SMEs', startBy: 0, completeBy: 1, completeAt: [18, 0], deliverable: '20 invitations sent', done: 'Every invitation accepted by the platform' },
+    { owner: pixel, by: atlas, title: 'Prepare the LinkedIn post', startBy: 0, completeBy: 1, completeAt: [14, 30], status: 'in_progress' },
+    { owner: pixel, by: pixel, title: 'Fill 5 Bridge profiles', startBy: 1, completeBy: 2, deliverable: 'Five profiles completed and verified' },
+    { owner: sprout, by: atlas, title: 'Research 30 AI-infrastructure experts', startBy: -1, completeBy: 0, completeAt: [18, 0], status: 'in_progress', deliverable: 'A list of 30 candidates', done: 'Each with full name, LinkedIn URL, current and former company, title, expertise and why they were chosen' },
+    { owner: sprout, by: atlas, title: 'Invite 2 associates on every P1 platform', startBy: -2, completeBy: -1, blockedReason: 'Waiting on the Capvision login', status: 'blocked' },
+    { owner: mango, by: beacon, title: 'Complete 2 new profiles', startBy: 0, completeBy: 1 },
+    { owner: mango, by: beacon, title: 'Tidy the platform notes', startBy: 3, completeBy: 5, urgency: 'can_wait', importance: 'non_strategic' },
+    { owner: comet, by: beacon, title: 'Create next week’s plan', startBy: null, completeBy: 2, urgency: 'can_wait' },
+    { owner: comet, by: founder, title: 'Prepare the Hushed number', startBy: 2, completeBy: 3, importance: 'non_strategic' },
+  ];
+  let taskPosition = 0;
+  const seeded: Record<string, string> = {};
+  for (const t of tasks) {
+    const row = await prisma.todo.create({
+      data: {
+        title: t.title,
+        assigneeId: t.owner.id,
+        createdById: t.by.id,
+        status: t.status ?? 'open',
+        blockedReason: t.blockedReason ?? null,
+        urgency: t.urgency ?? 'need_action',
+        importance: t.importance ?? 'strategic',
+        position: (taskPosition += 100),
+        startByAt: t.startBy === null ? null : startOfDay(t.startBy),
+        completeByAt: t.completeBy === null ? null : t.completeAt ? at(t.completeBy, t.completeAt[0], t.completeAt[1]) : startOfDay(t.completeBy),
+        completeByHasTime: Boolean(t.completeAt),
+        timeZone: TEAM_TIME_ZONE,
+        expectedDeliverable: t.deliverable ?? null,
+        definitionOfDone: t.done ?? null,
+      },
+    });
+    seeded[t.title] = row.id;
+  }
+  // Outreach cannot start until the research it rests on is finished.
+  await prisma.todoDependency.create({
+    data: { todoId: seeded['Invite 2 associates on every P1 platform']!, dependsOnId: seeded['Research 30 AI-infrastructure experts']! },
+  });
+
   console.log(`Done. Sign in as ${FOUNDER_EMAIL} (or atlas@, pixel@, ember@ … @god.local) with password ${PASSWORD}`);
 }
 

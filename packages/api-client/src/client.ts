@@ -103,6 +103,24 @@ export interface BlockMutationResult {
   created: ScheduleBlockDTO[];
 }
 
+/** What a task's fields can be changed to; what is sent is what changes. */
+export interface UpdateTodoInput {
+  title?: string;
+  details?: string | null;
+  expectedDeliverable?: string | null;
+  definitionOfDone?: string | null;
+  /** An ISO instant, with `hasTime` false when only a day was chosen. */
+  startByAt?: string | null;
+  startByHasTime?: boolean;
+  completeByAt?: string | null;
+  completeByHasTime?: boolean;
+  timeZone?: string;
+  urgency?: TodoQuadrant['urgency'];
+  importance?: TodoQuadrant['importance'];
+  /** The tasks this one waits for; the whole list, not an addition. */
+  dependsOn?: string[];
+}
+
 export function createApiClient(options: ClientOptions) {
   const http = new HttpClient(options);
   const get = <T>(path: string, query?: Query) => http.request<T>('GET', path, { query });
@@ -265,9 +283,13 @@ export function createApiClient(options: ClientOptions) {
       board: (query?: { status?: TodoStatus | 'active' | 'all' }) => get<TodoPanel[]>('/todos/board', query),
       /** People the caller may give a task to. */
       assignees: () => get<UserRef[]>('/todos/assignees'),
-      create: (input: { assigneeId: string; title: string; details?: string | null } & Partial<TodoQuadrant>) =>
-        post<TodoDTO>('/todos', input),
+      create: (input: { assigneeId: string; title: string } & UpdateTodoInput & Partial<TodoQuadrant>) => post<TodoDTO>('/todos', input),
       remove: (id: string) => del<void>(`/todos/${enc(id)}`),
+      /** Changes a task after it was given: wording, dates, deliverable, what it waits for. */
+      update: (id: string, input: UpdateTodoInput) => patch<TodoDTO>(`/todos/${enc(id)}`, input),
+      /** The owner says where the work stands. `blocked` must say why. */
+      setStatus: (id: string, status: 'open' | 'in_progress' | 'blocked', blockedReason?: string) =>
+        post<TodoDTO>(`/todos/${enc(id)}/status`, blockedReason ? { status, blockedReason } : { status }),
       done: (id: string, note?: string) => post<TodoDTO>(`/todos/${enc(id)}/done`, note ? { note } : {}),
       /** The giver confirms a done task: it becomes completed. */
       confirm: (id: string) => post<TodoDTO>(`/todos/${enc(id)}/confirm`),

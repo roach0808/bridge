@@ -3,7 +3,7 @@ import ReplayRounded from '@mui/icons-material/ReplayRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
 import { Box, MenuItem, TextField, Typography } from '@mui/material';
-import { ROLE_LABELS, type TodoDTO, type TodoSummary, type UserRef } from '@god/shared';
+import { ROLE_LABELS, TODO_STATUS_LABELS, type TodoDTO, type TodoStatus, type TodoSummary, type UserRef } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { useMe } from '@/auth/AuthProvider';
@@ -13,9 +13,14 @@ import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { FormDialog } from '../admin/adminShared';
 
-export const TODO_COLORS = { open: '#e0913a', done: '#3f8fd6', completed: '#3fb68b' } as const;
-
-const TODO_LABELS = { open: 'Task', done: 'Done · to confirm', completed: 'Completed' } as const;
+/** The colour bar down the left of a task, by where the work stands. */
+export const TODO_COLORS: Record<TodoStatus, string> = {
+  open: '#e0913a',
+  in_progress: '#3f8fd6',
+  blocked: '#dc4a4a',
+  done: '#9b7fd4',
+  completed: '#3fb68b',
+};
 
 /** What a task asks for: the chat message it was made from, or its title. */
 export const todoText = (t: Pick<TodoDTO, 'message' | 'title'>) => t.message?.body ?? t.title ?? '';
@@ -42,7 +47,7 @@ export function TodoPill({ todo, compact }: { todo: Pick<TodoSummary, 'status'>;
     >
       {todo.status === 'done' && <TaskAltRounded sx={{ fontSize: 13 }} />}
       {todo.status === 'completed' && <VerifiedRounded sx={{ fontSize: 13 }} />}
-      {TODO_LABELS[todo.status]}
+      {TODO_STATUS_LABELS[todo.status]}
     </Box>
   );
 }
@@ -252,4 +257,98 @@ export function NewTaskDialog({ open, assignee, onClose }: { open: boolean; assi
       />
     </FormDialog>
   );
+}
+
+/**
+ * The things anyone can do to a task from a list or a board: tick it off, say
+ * where the work stands, confirm it, or clear it away. One hook, so a row on
+ * the board and a row in the execution view behave identically.
+ *
+ * Marking a task blocked asks why first — `blockDialog` is that question, and
+ * the caller renders it wherever it has room.
+ */
+export function useTaskActions(todo: TodoDTO) {
+  const refresh = useRefreshTodos();
+  const toast = useToast();
+  const self = todo.assignee.id === todo.createdBy.id;
+  const [blocking, setBlocking] = useState(false);
+  const [reason, setReason] = useState('');
+
+  const done = useMutation({
+    mutationFn: (note?: string) => api.todos.done(todo.id, note),
+    onSuccess: (saved) => {
+      refresh(saved);
+      toast.success(saved.conversationId ? 'Marked done — your reply was posted in the chat' : self ? 'Done' : 'Ready for review');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const confirm = useMutation({
+    mutationFn: () => api.todos.confirm(todo.id),
+    onSuccess: (saved) => {
+      refresh(saved);
+      toast.success('Completed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const remove = useMutation({
+    mutationFn: () => api.todos.remove(todo.id),
+    onSuccess: () => {
+      refresh(todo);
+      toast.success('Task removed');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const status = useMutation({
+    mutationFn: (v: { status: 'open' | 'in_progress' | 'blocked'; blockedReason?: string }) =>
+      api.todos.setStatus(todo.id, v.status, v.blockedReason),
+    onSuccess: (saved) => {
+      refresh(saved);
+      setBlocking(false);
+      setReason('');
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  /** Blocked needs a reason; the other two are a single click. */
+  const setStatus = (next: 'open' | 'in_progress' | 'blocked') => {
+    if (next === 'blocked') {
+      setReason(todo.blockedReason ?? '');
+      setBlocking(true);
+      return;
+    }
+    status.mutate({ status: next });
+  };
+
+  const blockDialog = (
+    <FormDialog
+      open={blocking}
+      onClose={() => setBlocking(false)}
+      title="What is blocking this task?"
+      subtitle={todoText(todo)}
+      submitLabel="Mark blocked"
+      pending={status.isPending}
+      submitDisabled={!reason.trim()}
+      onSubmit={() => status.mutate({ status: 'blocked', blockedReason: reason.trim() })}
+    >
+      <TextField
+        required
+        label="Reason"
+        placeholder="e.g. Waiting on the platform login"
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        multiline
+        minRows={2}
+        slotProps={{ htmlInput: { maxLength: 1000 } }}
+      />
+    </FormDialog>
+  );
+
+  return {
+    done,
+    confirm,
+    remove,
+    setStatus,
+    blockDialog,
+    busy: done.isPending || confirm.isPending || remove.isPending || status.isPending,
+  };
 }
