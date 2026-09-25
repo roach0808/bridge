@@ -33,7 +33,9 @@ import { todoText } from './todoShared';
 
 export const allTasks = (panels: TodoPanel[]): TodoDTO[] => panels.flatMap((p) => p.tasks);
 
-type Column = 'owner' | 'start' | 'complete' | 'description' | 'status';
+/** The columns worth sorting by. Sorting the words of a task alphabetically
+ * tells nobody anything, so Description is not one of them. */
+type Column = 'owner' | 'start' | 'complete' | 'status';
 
 interface Filters {
   owner: string;
@@ -81,7 +83,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
             {heading('owner', 'Owner', 150)}
             {heading('start', 'Start', 130)}
             {heading('complete', 'End date', 140)}
-            {heading('description', 'Description', 280)}
+            <TableCell sx={{ minWidth: 280 }}>Description</TableCell>
             {heading('status', 'Status', 150)}
           </TableRow>
           <TableRow>
@@ -266,8 +268,6 @@ function compare(by: Column, desc: boolean, _zone: string) {
     switch (by) {
       case 'owner':
         return flip * x.assignee.nickname.localeCompare(y.assignee.nickname);
-      case 'description':
-        return flip * todoText(x).localeCompare(todoText(y));
       case 'status':
         return flip * (STATUS_ORDER[x.status] - STATUS_ORDER[y.status]);
       default:
