@@ -50,7 +50,7 @@ import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { TableSurface } from '../admin/adminShared';
-import { StatusControl, formatWhen } from './taskShared';
+import { StatusControl, UrgencyScore, formatWhen, urgencyOf } from './taskShared';
 import { todoText } from './todoShared';
 
 /**
@@ -67,7 +67,7 @@ export const allTasks = (panels: TodoPanel[]): TodoDTO[] => panels.flatMap((p) =
  * their tasks into, which is where the table starts. Sorting the words of a
  * task alphabetically tells nobody anything, so Description is not one of them.
  */
-type Column = 'order' | 'owner' | 'start' | 'complete' | 'status';
+type Column = 'order' | 'owner' | 'start' | 'complete' | 'urgency' | 'status';
 
 interface Filters {
   owner: string;
@@ -93,7 +93,8 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
   const toast = useToast();
   const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>(NO_FILTERS);
-  const [sort, setSort] = useState<{ by: Column; desc: boolean }>({ by: 'order', desc: false });
+  // Most pressing first: the question the table is usually asked.
+  const [sort, setSort] = useState<{ by: Column; desc: boolean }>({ by: 'urgency', desc: true });
   const [dragging, setDragging] = useState<TodoDTO | null>(null);
   const tasks = useMemo(() => allTasks(panels), [panels]);
   const owners = useMemo(() => panels.map((p) => p.person), [panels]);
@@ -103,8 +104,8 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
   // In `order` the rows keep the order they were dragged into — one group per
   // person, as the server sends them. A column sort is a different question.
   const rows = useMemo(
-    () => (sort.by === 'order' ? filtered : [...filtered].sort(compare(sort.by, sort.desc))),
-    [filtered, sort],
+    () => (sort.by === 'order' ? filtered : [...filtered].sort(compare(sort.by, sort.desc, zone))),
+    [filtered, sort, zone],
   );
   const filtering = JSON.stringify(filters) !== JSON.stringify(NO_FILTERS);
   const draggable = sort.by === 'order';
@@ -211,7 +212,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
           </Card>
         ) : null}
       </DragOverlay>
-      <TableSurface minWidth={940}>
+      <TableSurface minWidth={1020}>
       <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
@@ -230,6 +231,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
             {heading('owner', 'Owner', 150)}
             {heading('start', 'Start', 130)}
             {heading('complete', 'End date', 140)}
+            {heading('urgency', 'Urgency', 84)}
             <TableCell sx={{ minWidth: 280 }}>Description</TableCell>
             {heading('status', 'Status', 150)}
           </TableRow>
@@ -251,6 +253,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
             <TableCell sx={{ py: 0.5 }}>
               <Filter type="date" value={filters.complete} onChange={(v) => set('complete', v)} title="Due on or before" />
             </TableCell>
+            <TableCell sx={{ py: 0.5 }} />
             <TableCell sx={{ py: 0.5 }}>
               <Filter value={filters.text} onChange={(v) => set('text', v)} placeholder="Search" />
             </TableCell>
@@ -284,7 +287,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={6} sx={{ border: 0 }}>
+              <TableCell colSpan={7} sx={{ border: 0 }}>
                 <Card variant="outlined">
                   <EmptyState
                     icon={<ChecklistRounded />}
@@ -394,6 +397,9 @@ function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boo
         </Tooltip>
       </TableCell>
       <TableCell>
+        <UrgencyScore score={urgencyOf(t, zone)} />
+      </TableCell>
+      <TableCell>
         <Typography
           variant="body2"
           noWrap
@@ -452,12 +458,19 @@ function matches(t: TodoDTO, f: Filters, zone: string): boolean {
 const STATUS_ORDER: Record<TodoStatus, number> = { open: 0, in_progress: 1, blocked: 2, done: 3, completed: 4 };
 
 /** A column's order. A task with no date sorts last, whichever way the column runs. */
-function compare(by: Column, desc: boolean) {
+function compare(by: Column, desc: boolean, zone: string) {
   const dates = (a: string | null, b: string | null) => (a === b ? 0 : a === null ? 1 : b === null ? -1 : a < b ? -1 : 1);
   return (x: TodoDTO, y: TodoDTO) => {
     const flip = desc ? -1 : 1;
     const undated = by === 'start' ? dates(x.startByAt, y.startByAt) : by === 'complete' ? dates(x.completeByAt, y.completeByAt) : 0;
     switch (by) {
+      case 'urgency': {
+        const ux = urgencyOf(x, zone);
+        const uy = urgencyOf(y, zone);
+        // Nothing pressing sorts last either way, not to the top of an ascending list.
+        if ((ux === null) !== (uy === null)) return ux === null ? 1 : -1;
+        return ux === null || uy === null ? x.createdAt.localeCompare(y.createdAt) : flip * (ux - uy) || x.createdAt.localeCompare(y.createdAt);
+      }
       case 'owner':
         return flip * x.assignee.nickname.localeCompare(y.assignee.nickname);
       case 'status':

@@ -1,5 +1,6 @@
-import { Box, MenuItem, Select } from '@mui/material';
-import { TODO_STATUS_LABELS, isActiveTodo, isSelfTask, type TodoDTO, type TodoStatus } from '@god/shared';
+import { Box, MenuItem, Select, Tooltip, Typography } from '@mui/material';
+import { TODO_STATUS_LABELS, isActiveTodo, isSelfTask, urgencyFromDays, type TodoDTO, type TodoStatus } from '@god/shared';
+import { DateTime } from 'luxon';
 import { useMe } from '@/auth/AuthProvider';
 import { inZone, zoneAbbr } from '@/lib/time';
 import { useTaskActions } from './todoShared';
@@ -9,6 +10,46 @@ import { useTaskActions } from './todoShared';
  * and where the work stands. Start and end date are separate fields, and the
  * table keeps them in separate columns, because a deadline is not a start date.
  */
+
+/** Whole days between two moments, counted in the reader's own days. */
+export function daysBetween(fromIso: string, toIso: string, zone: string): number {
+  const from = inZone(fromIso, zone).startOf('day');
+  return Math.round(inZone(toIso, zone).startOf('day').diff(from, 'days').days);
+}
+
+/** Whole days from today to a moment, in the reader's own days. */
+export const daysUntil = (iso: string, zone: string) => daysBetween(DateTime.now().setZone(zone).toISO()!, iso, zone);
+
+/**
+ * How pressing a task is, 0–100 (`urgencyFromDays`). Measured over the time the
+ * task was given: from its start date to its end date, or, when nobody set a
+ * start, from the day it was written down. A task with no end date, and a task
+ * already completed, is not pressing at all.
+ */
+export function urgencyOf(todo: TodoDTO, zone: string): number | null {
+  if (!todo.completeByAt || todo.status === 'completed') return null;
+  const total = daysBetween(todo.startByAt ?? todo.createdAt, todo.completeByAt, zone);
+  return urgencyFromDays(daysUntil(todo.completeByAt, zone), total);
+}
+
+/** The number itself, loud when the deadline is close and quiet when it is not. */
+export function UrgencyScore({ score }: { score: number | null }) {
+  if (score === null) {
+    return (
+      <Typography variant="body2" color="text.disabled">
+        —
+      </Typography>
+    );
+  }
+  const color = score >= 90 ? 'error.main' : score >= 60 ? 'warning.main' : score >= 30 ? 'text.primary' : 'text.secondary';
+  return (
+    <Tooltip title={`${score} of 100 — how much of this task's time has gone`}>
+      <Typography variant="body2" sx={{ color, fontWeight: score >= 60 ? 700 : 500, fontVariantNumeric: 'tabular-nums' }}>
+        {score}
+      </Typography>
+    </Tooltip>
+  );
+}
 
 /** "Thu, Mar 4" for a day, "Fri 6:00 PM IST" when a time of day was given. */
 export function formatWhen(iso: string, hasTime: boolean, zone: string): string {

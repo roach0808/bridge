@@ -111,6 +111,33 @@ export function byDeadline(a: SortableTask, b: SortableTask): number {
   return start !== 0 ? start : a.createdAt.localeCompare(b.createdAt);
 }
 
+// --- Urgency -------------------------------------------------------------------
+
+/**
+ * How pressing a task is, from 0 to 100, as a share of the time it was given.
+ *
+ *     urgency = 100 × (1 − (daysLeft ÷ totalDays)²)
+ *
+ * Squaring is what makes it useful: the score barely moves through the first
+ * half of a task's life and then climbs steeply near the end, which is when a
+ * deadline actually starts to matter. A 30-day task sits at 0 on day one, 56
+ * with 20 days left, 75 with 15, 89 with 10, 97 with 5, and 100 on the day.
+ *
+ * Past the deadline it is 100; with as much time left as the task was ever
+ * given, it is 0; and a task with no deadline has no urgency at all.
+ */
+export const MAX_URGENCY = 100;
+
+export function urgencyFromDays(daysLeft: number | null, totalDays: number | null): number | null {
+  if (daysLeft === null) return null;
+  // Due today, or already past: nothing is more pressing than that.
+  if (daysLeft <= 0) return MAX_URGENCY;
+  // No room between start and deadline to measure against, or more time left
+  // than the task was given: not pressing yet.
+  if (totalDays === null || totalDays <= 0 || daysLeft >= totalDays) return 0;
+  return Math.round(MAX_URGENCY * (1 - (daysLeft / totalDays) ** 2));
+}
+
 // --- Risk ----------------------------------------------------------------------
 
 /**

@@ -12,6 +12,7 @@ import {
   needsStartDate,
   priorityOf,
   taskRisk,
+  urgencyFromDays,
   type SortableTask,
   type TodoStatus,
 } from '../src';
@@ -158,5 +159,56 @@ describe('the five statuses', () => {
     // The names on screen, whatever the database calls them.
     expect(TODO_STATUS_LABELS.open).toBe('Not Started');
     expect(TODO_STATUS_LABELS.done).toBe('Ready for Review');
+  });
+});
+
+describe('how pressing a task is', () => {
+  const urgency = (daysLeft: number, totalDays: number) => urgencyFromDays(daysLeft, totalDays)!;
+
+  it('follows the curve, from the day it starts to the day it is due', () => {
+    // A 30-day task, as the days run out.
+    expect(urgency(30, 30)).toBe(0);
+    expect(urgency(20, 30)).toBe(56);
+    expect(urgency(15, 30)).toBe(75);
+    expect(urgency(10, 30)).toBe(89);
+    expect(urgency(5, 30)).toBe(97);
+    expect(urgency(0, 30)).toBe(100);
+  });
+
+  it('climbs steeply towards the end, which is the point of squaring it', () => {
+    // One day in, barely anything. Half the time gone, 75 rather than the 50 a
+    // straight line would say. One day left, as good as due.
+    expect(urgency(29, 30)).toBe(7);
+    expect(urgency(15, 30)).toBe(75);
+    expect(urgency(1, 30)).toBe(100);
+  });
+
+  it('is 100 once the deadline has passed, whatever the task was given', () => {
+    expect(urgency(-1, 30)).toBe(100);
+    expect(urgency(-90, 1)).toBe(100);
+  });
+
+  it('is 0 while there is more time left than the task was ever given', () => {
+    expect(urgency(40, 30)).toBe(0);
+    expect(urgency(31, 30)).toBe(0);
+  });
+
+  it('says nothing about a task with no deadline, and nothing silly about a strange one', () => {
+    expect(urgencyFromDays(null, 30)).toBeNull();
+    // Starting and ending on the same day: not pressing until the day itself.
+    expect(urgency(3, 0)).toBe(0);
+    expect(urgency(0, 0)).toBe(100);
+    expect(urgencyFromDays(5, null)).toBe(0);
+  });
+
+  it('never leaves the scale', () => {
+    for (let total = 1; total <= 60; total += 1) {
+      for (let left = -5; left <= total + 5; left += 1) {
+        const score = urgency(left, total);
+        expect(score).toBeGreaterThanOrEqual(0);
+        expect(score).toBeLessThanOrEqual(100);
+        expect(Number.isInteger(score)).toBe(true);
+      }
+    }
   });
 });
