@@ -176,9 +176,11 @@ describe('the Associate’s part is a portion of the Manager’s share', () => {
       manager: { percent: 20, amount: 100, keeps: 80 },
       associate: { percent: 20, amount: 20 },
     });
-    // Only the Founder sets the Profile's share.
+    // A Manager may correct a Profile, but the share they are paid is not
+    // theirs to set: the value is ignored rather than refused.
     const tried = await c.m1.patch(`/profiles/${fx.approvedProfile.id}`, { managerSharePercent: 50 });
-    expect(tried.status).toBe(403);
+    expect(tried.status, tried.text).toBe(200);
+    expect(tried.body.managerSharePercent).toBe(5);
   });
 
   it('a Manager running the call themselves keeps the whole share', async () => {

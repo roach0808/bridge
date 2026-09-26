@@ -133,6 +133,14 @@ export function canAssignProfile(
 }
 
 /**
+ * Who may change a Profile's details: everyone who works with Profiles. An
+ * Expert only ever reads the Profile of a call of theirs. Approving one, taking
+ * it out of use, its rates, its banks and the Manager's share stay the
+ * Founder's (§6.4).
+ */
+export const canEditProfile = (viewer: { role: Role }): boolean => viewer.role !== 'expert';
+
+/**
  * Who may set a Profile's status on the platforms: the Founder, the Associate
  * looking after it, and the Manager of that Associate's team (§6.4).
  */
@@ -192,6 +200,7 @@ export const toProfileDTO = (
   manager: platforms ? managerOf(p.associate) : null,
   canAssign: canAssignProfile(viewer, p.associate),
   canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer, p.associate),
+  canEdit: canEditProfile(viewer),
   managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,
   createdBy: toUserRef(p.createdBy),
   reviewedBy: p.reviewedBy ? toUserRef(p.reviewedBy) : null,

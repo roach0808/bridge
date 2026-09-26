@@ -20,6 +20,7 @@ import { fromDateOnly, idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import {
   canAssignProfile,
+  canEditProfile,
   canEditProfilePlatforms,
   platformRefOrder,
   platformRefSelect,
@@ -180,12 +181,14 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
   assertProfileAvatar(input.avatarId);
 
   const isFounder = actor.role === 'founder';
-  if (!isFounder && profile.createdById !== actor.id) {
-    throw forbidden('Only the Founder edits profiles');
-  }
-  if (!isFounder && profile.status === 'approved') {
-    throw forbidden('Only the Founder edits approved profiles');
-  }
+  if (!canEditProfile(actor)) throw forbidden('Experts cannot change a profile');
+  /**
+   * An edit to a Profile still waiting on review, or one that was turned down,
+   * puts it back in the queue. An approved Profile stays approved: keeping its
+   * details current is the team's job, and sending it back would take it out of
+   * use for calls over a corrected phone number.
+   */
+  const resubmit = !isFounder && profile.status !== 'approved';
   const { updated, deliver } = await prisma.$transaction(async (tx) => {
     // The list is replaced as a whole, keeping the order it was sent in.
     if (isFounder && input.addresses) {
@@ -202,12 +205,11 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
         avatarId: input.avatarId,
         // Only the Founder decides the Manager's share.
         managerSharePercent: isFounder ? input.managerSharePercent : undefined,
-        // An author's edit sends their submission back for review.
-        ...(isFounder ? {} : { status: 'pending', reviewedById: null, reviewedAt: null, rejectionReason: null }),
+        ...(resubmit ? { status: 'pending', reviewedById: null, reviewedAt: null, rejectionReason: null } : {}),
       },
       include: includeFor(actor),
     });
-    const deliver = isFounder ? () => {} : await notifyFounders(tx, actor, updated, true);
+    const deliver = resubmit ? await notifyFounders(tx, actor, updated, true) : () => {};
     return { updated, deliver };
   });
   deliver();

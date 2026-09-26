@@ -45,7 +45,7 @@ export default function ProfileDetailPage() {
   const query = useQuery({ queryKey: qk.profiles.detail(id), queryFn: () => api.profiles.get(id), enabled: Boolean(id) });
   const p = query.data;
   const isFounder = me.role === 'founder';
-  const mayEdit = isFounder || (p?.createdBy?.id === me.id && p?.status !== 'approved');
+  const mayEdit = p?.canEdit ?? false;
 
   return (
     <Box>
@@ -202,7 +202,9 @@ function ReviewBar({ profile, onReject }: { profile: ProfileDTO; onReject: () =>
 
 /** The profile form, in place on the page rather than in a popup. */
 function EditCard({ profile, onDone }: { profile: ProfileDTO; onDone: () => void }) {
-  const form = useProfileForm({ profile, resubmit: profile.status !== 'approved', onClose: onDone });
+  const me = useMe();
+  // Only a Profile still to be reviewed goes back in the queue when it changes.
+  const form = useProfileForm({ profile, resubmit: me.role !== 'founder' && profile.status !== 'approved', onClose: onDone });
   return (
     <Card component="form" onSubmit={(e) => { e.preventDefault(); form.submit(); }}>
       <CardContent sx={{ p: { xs: 2, md: 2.5 } }}>

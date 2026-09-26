@@ -63,15 +63,20 @@ describe('POST /profiles', () => {
     expect((await (await as(fx.a2)).post('/calls', call)).status).toBe(201);
   });
 
-  it('an associate resubmitting after a rejection notifies the founders again; approved profiles are locked', async () => {
+  it('an associate resubmitting after a rejection notifies the founders again', async () => {
     const f = await as(fx.founder);
     const a1 = await as(fx.a1);
     await f.post(`/profiles/${fx.pendingProfile.id}/reject`, { reason: 'Add the career history' });
     const res = await a1.patch(`/profiles/${fx.pendingProfile.id}`, { careerHistory: 'VP at X' });
     expect(res.body).toMatchObject({ status: 'pending', careerHistory: 'VP at X' });
     expect(await prisma.notification.count({ where: { type: 'profile.submitted', userId: fx.founder.id } })).toBe(1);
+
+    // Once approved it stays approved, and keeping it current asks nobody again.
     await f.post(`/profiles/${fx.pendingProfile.id}/approve`);
-    expectError(await a1.patch(`/profiles/${fx.pendingProfile.id}`, { name: 'Changed' }), 403);
+    const changed = await a1.patch(`/profiles/${fx.pendingProfile.id}`, { name: 'Changed' });
+    expect(changed.status, changed.text).toBe(200);
+    expect(changed.body).toMatchObject({ name: 'Changed', status: 'approved' });
+    expect(await prisma.notification.count({ where: { type: 'profile.submitted', userId: fx.founder.id } })).toBe(1);
   });
 
   it('experts cannot create or review profiles', async () => {
@@ -167,8 +172,32 @@ describe('approve / reject', () => {
 });
 
 describe('PATCH /profiles/:id', () => {
-  it('associate cannot edit a profile they did not author', async () => {
-    expectError(await (await as(fx.a1)).patch(`/profiles/${fx.approvedProfile.id}`, { name: 'Hacked' }), 403);
+  it('anyone but an Expert edits a profile, whoever wrote it', async () => {
+    const path = `/profiles/${fx.approvedProfile.id}`;
+    // An Associate who did not write it, and a Manager of another team.
+    for (const [who, name] of [
+      [await as(fx.a3), 'Dana Corrected'],
+      [await as(fx.m1), 'Dana Corrected Again'],
+    ] as const) {
+      const res = await who.patch(path, { name, phone: '+1 555 0100' });
+      expect(res.status, res.text).toBe(200);
+      expect(res.body).toMatchObject({ name, status: 'approved' });
+    }
+    // The Expert on a call with the Profile reads it and no more.
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    expectError(await (await as(fx.e1)).patch(path, { name: 'Hacked' }), 403);
+  });
+
+  it('the details a Founder alone decides are ignored from anyone else', async () => {
+    const res = await (await as(fx.a1)).patch(`/profiles/${fx.approvedProfile.id}`, {
+      name: 'Dana Approved',
+      onboardedAt: '2020-01-01',
+      managerSharePercent: 90,
+    });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.onboardedAt).not.toBe('2020-01-01');
+    const row = await prisma.profile.findUniqueOrThrow({ where: { id: fx.approvedProfile.id } });
+    expect(Number(row.managerSharePercent)).not.toBe(90);
   });
 
   it('an author’s edit sends a rejected profile back to pending', async () => {

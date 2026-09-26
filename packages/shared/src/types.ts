@@ -153,6 +153,8 @@ export interface ProfileDTO {
   canAssign: boolean;
   /** The viewer may change the Profile's status on the platforms (the Founder; its Associate; their Manager). */
   canEditPlatforms: boolean;
+  /** The viewer may change the Profile's details: everyone but an Expert. */
+  canEdit: boolean;
   /** The Manager's percent of this Profile's real income. Founder and Managers only. */
   managerSharePercent: number | null;
   createdBy: UserRef;

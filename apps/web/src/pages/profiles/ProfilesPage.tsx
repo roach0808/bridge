@@ -263,7 +263,7 @@ export default function ProfilesPage() {
 function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isExpert: boolean; onOpen: (edit: boolean) => void }) {
   const me = useMe();
   const pending = pendingItems(p);
-  const mayEdit = me.role === 'founder' || (p.createdBy?.id === me.id && p.status !== 'approved');
+  const mayEdit = p.canEdit;
   // The row shows the first platform; the rest unfold underneath it.
   const [platformsOpen, setPlatformsOpen] = useState(false);
   return (
