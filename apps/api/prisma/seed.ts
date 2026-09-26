@@ -409,10 +409,11 @@ async function main() {
     { owner: comet, by: beacon, title: 'Create next week’s plan', startBy: null, completeBy: 2, urgency: 'can_wait' },
     { owner: comet, by: founder, title: 'Prepare the Hushed number', startBy: 2, completeBy: 3, importance: 'non_strategic' },
     // Longer runs, so the urgency column has a curve to show rather than a
-    // column of hundreds: a 30-day task a third, a half and two thirds through.
-    { owner: pixel, by: atlas, title: 'Build the Q4 expert pipeline', startBy: -10, completeBy: 20, deliverable: '200 vetted experts across the P1 platforms' },
-    { owner: sprout, by: atlas, title: 'Rewrite the outreach templates', startBy: -15, completeBy: 15, urgency: 'can_wait' },
-    { owner: mango, by: beacon, title: 'Reconcile the platform invoices', startBy: -20, completeBy: 10, deliverable: 'Every invoice matched to a call' },
+    // column of hundreds. Each is a 30-day task counting both ends, a third, a
+    // half and two thirds through: 56, 75 and 89.
+    { owner: pixel, by: atlas, title: 'Build the Q4 expert pipeline', startBy: -9, completeBy: 20, deliverable: '200 vetted experts across the P1 platforms' },
+    { owner: sprout, by: atlas, title: 'Rewrite the outreach templates', startBy: -14, completeBy: 15, urgency: 'can_wait' },
+    { owner: mango, by: beacon, title: 'Reconcile the platform invoices', startBy: -19, completeBy: 10, deliverable: 'Every invoice matched to a call' },
   ];
   let taskPosition = 0;
   const seeded: Record<string, string> = {};

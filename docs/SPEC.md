@@ -1429,8 +1429,10 @@ the time it was given:
 urgency = 100 × (1 − (daysLeft ÷ totalDays)²)
 ```
 
-`totalDays` runs from the start date to the end date — or, when nobody set a
-start, from the day the task was written down. Past the deadline it is 100;
+`totalDays` runs from the start date to the end date **counting both ends**, so
+a task that starts and ends on the same day was given one day and nothing is
+ever measured against a period of zero; when nobody set a start, it runs from
+the day the task was written down. Past the deadline it is 100;
 with as much time left as the task was ever given, 0; with no end date, or once
 completed, nothing at all. Squaring is what makes it useful: a 30-day task
 scores 7 after one day, 56 with 20 days left, 75 with 15, 89 with 10, 97 with 5

@@ -23,12 +23,16 @@ export const daysUntil = (iso: string, zone: string) => daysBetween(DateTime.now
 /**
  * How pressing a task is, 0–100 (`urgencyFromDays`). Measured over the time the
  * task was given: from its start date to its end date, or, when nobody set a
- * start, from the day it was written down. A task with no end date, and a task
- * already completed, is not pressing at all.
+ * start, from the day it was written down.
+ *
+ * The period counts both ends — a task that starts and ends on the same day was
+ * given one day, not none — so no task is ever measured against a period of
+ * zero. A task with no end date, and a task already completed, is not pressing
+ * at all.
  */
 export function urgencyOf(todo: TodoDTO, zone: string): number | null {
   if (!todo.completeByAt || todo.status === 'completed') return null;
-  const total = daysBetween(todo.startByAt ?? todo.createdAt, todo.completeByAt, zone);
+  const total = daysBetween(todo.startByAt ?? todo.createdAt, todo.completeByAt, zone) + 1;
   return urgencyFromDays(daysUntil(todo.completeByAt, zone), total);
 }
 
