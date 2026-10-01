@@ -130,7 +130,7 @@ grouped under Managers; they are assigned per Call.
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
 | Delete own chat message; react; send pictures | ✓ | ✓ | ✓ | ✓ |
 | Clear a chat's whole history | the two people in it | same | same | same |
-| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates, Experts | Founders, Managers | Founders, Managers |
+| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
 | View a Call's status history | ✓ | ✓ (every Associate's + own) | own | assigned (without invoicing steps) |
 | View the audit trail (§6.16) | ✓ | | | |
@@ -1332,10 +1332,12 @@ One-to-one chats. Who may chat with whom (`canChat` in
 `packages/shared/src/chat.ts`, enforced by the API):
 
 - a Founder with anyone;
-- a Manager with Managers, with any Associate and with any Expert;
-- Associates and Experts with Managers and Founders only.
+- a Manager with Managers and with any Associate;
+- Associates with Managers and Founders only;
+- Experts with Founders only.
 
-Associates don't chat with other Associates, nor Experts with Experts. A chat
+Associates don't chat with other Associates; Experts don't chat with Managers,
+Associates or other Experts. A chat
 that the rules no longer allow stays readable, with `canSend: false`.
 
 | Method | Path | Who | Notes |

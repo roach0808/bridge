@@ -25,8 +25,6 @@ describe('who can chat with whom', () => {
     ['m1', 'm2'],
     ['a1', 'm2'], // any manager, not only their own
     ['m2', 'a1'],
-    ['m1', 'e2'], // managers reach every expert
-    ['e3', 'm2'],
   ])('%s may chat with %s', async (a, b) => {
     const id = await open(await as(fx[a] as FixtureUser), fx[b] as FixtureUser);
     expect((await send(await as(fx[a] as FixtureUser), id, 'Hello')).status).toBe(201);
@@ -38,16 +36,18 @@ describe('who can chat with whom', () => {
     ['e1', 'e2'],
     ['a1', 'e1'],
     ['e1', 'a1'],
+    ['m1', 'e2'], // experts talk only to the founder
+    ['e3', 'm2'],
   ])('%s may not chat with %s', async (a, b) => {
     expectError(await (await as(fx[a] as FixtureUser)).post('/chat/conversations', { userId: (fx[b] as FixtureUser).id }), 403);
   });
 
   it('contacts follow the same rules', async () => {
     const nick = async (who: FixtureUser) => (await (await as(who)).get('/chat/contacts')).body.map((u: { nickname: string }) => u.nickname).sort();
-    expect(await nick(fx.e1)).toEqual(['Founder', 'ManagerOne', 'ManagerTwo']);
+    expect(await nick(fx.e1)).toEqual(['Founder']);
     expect(await nick(fx.a1)).toEqual(['Founder', 'ManagerOne', 'ManagerTwo']);
     expect(await nick(fx.m1)).toEqual([
-      'AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerTwo',
+      'AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerTwo',
     ]);
     expect(await nick(fx.founder)).toHaveLength(fx.users.length - 1);
   });
@@ -73,8 +73,8 @@ describe('who can chat with whom', () => {
     expectError(await send(m1, id, 'still there?'), 403);
   });
 
-  it('chats from before the rule changed (associate ↔ associate, expert ↔ expert) are read-only', async () => {
-    for (const [a, b] of [[fx.a1, fx.a3], [fx.e1, fx.e2]] as const) {
+  it('chats from before the rule changed (associate ↔ associate, expert ↔ expert, manager ↔ expert) are read-only', async () => {
+    for (const [a, b] of [[fx.a1, fx.a3], [fx.e1, fx.e2], [fx.m1, fx.e1]] as const) {
       const [userAId, userBId] = [a.id, b.id].sort() as [string, string];
       const c = await prisma.conversation.create({ data: { userAId, userBId, lastMessageAt: new Date() } });
       await prisma.chatMessage.create({ data: { conversationId: c.id, senderId: a.id, body: 'old message' } });

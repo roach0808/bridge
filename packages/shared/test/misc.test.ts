@@ -190,9 +190,9 @@ describe('canChat', () => {
     ['associate', 'manager', true],
     ['manager', 'associate', true],
     ['associate', 'expert', false],
-    ['manager', 'expert', true],
+    ['manager', 'expert', false],
     ['expert', 'associate', false],
-    ['expert', 'manager', true],
+    ['expert', 'manager', false],
   ])('%s ↔ %s → %s', (a, b, expected) => {
     expect(canChat(u('a', a), u('b', b))).toBe(expected);
     expect(canChat(u('b', b), u('a', a))).toBe(expected);

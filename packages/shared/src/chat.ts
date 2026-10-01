@@ -3,13 +3,14 @@ import type { Role } from './roles';
 /**
  * Who may hold a one-to-one chat with whom:
  * - the Founder with anyone;
- * - Managers with Managers, with any Associate and with any Expert.
- * Associates and Experts talk to Managers and the Founder, not to each other.
- * The rule is symmetric, and nobody chats with themselves.
+ * - Managers with Managers and with any Associate.
+ * Associates talk to Managers and the Founder, not to each other. Experts talk
+ * only to the Founder. The rule is symmetric, and nobody chats with themselves.
  */
 export function canChat(a: { id: string; role: Role }, b: { id: string; role: Role }): boolean {
   if (a.id === b.id) return false;
   if (a.role === 'founder' || b.role === 'founder') return true;
+  if (a.role === 'expert' || b.role === 'expert') return false;
   return a.role === 'manager' || b.role === 'manager';
 }
 
