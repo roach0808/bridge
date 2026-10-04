@@ -259,6 +259,8 @@ export interface CallPermissions {
   editMeeting: boolean;
   /** Founder only: the Expert's rate for this call, until the Expert is paid. */
   editExpertRate: boolean;
+  /** The Founder, or a Manager over the call: correct how long a finished call took, until the Expert is paid. */
+  editActualDuration: boolean;
 }
 
 export interface StatusHistoryDTO {

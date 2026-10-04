@@ -83,6 +83,7 @@ export function allowedTransitionsFor(actor: Pick<Actor, 'id' | 'role'>, call: C
  * - Associates may reassign the Expert on their own call only before it is
  *   scheduled; Managers and the Founder during the whole scheduling stage.
  * - Invoice fields belong to the Founder.
+ * - A finished call's real duration is corrected by the Founder or a Manager over it.
  * - Once paid to bank the shares are settled on the call's Associate, so it
  *   can no longer be handed to someone else.
  */
@@ -105,5 +106,8 @@ export function callPermissions(actor: Pick<Actor, 'id' | 'role'>, call: CallAcc
     editMeeting: ownsScheduling && (ACTIVE_STATUSES.includes(call.status) || actor.role === 'founder'),
     // The Expert's rate is fixed when the call finishes; the Founder may still correct it until the Expert is paid.
     editExpertRate: actor.role === 'founder' && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,
+    // The Expert reports the minutes when finishing; whoever oversees the call may correct them, until the
+    // Expert is paid for them.
+    editActualDuration: supervises && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,
   };
 }

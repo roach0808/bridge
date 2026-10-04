@@ -299,6 +299,13 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
         : forbidden('Only the Founder sets the Expert’s rate for a call, once it has taken place');
     }
   }
+  if (input.actualDurationMinutes !== undefined && !perms.editActualDuration) {
+    // The Expert's pay is these minutes at their rate: once paid, it waits for an unmark.
+    const blockedByPayment = callPermissions(actor, { ...current, expertPaidAt: null }).editActualDuration;
+    throw blockedByPayment
+      ? conflict('The Expert was already paid for this call; mark it unpaid before changing the duration')
+      : forbidden('Only the Founder or a Manager corrects how long a call took, once it has taken place');
+  }
   if (input.researchLink !== undefined && !perms.editResearchLink) {
     throw forbidden('Only the Founder sets the research data link');
   }
@@ -343,6 +350,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
           researchLink: input.researchLink,
           rateOverride: input.rateOverride === undefined ? undefined : input.rateOverride,
           expertRate: input.expertRate === undefined ? undefined : input.expertRate,
+          actualDurationMinutes: input.actualDurationMinutes,
         },
         include: callInclude,
       })

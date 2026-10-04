@@ -252,6 +252,47 @@ describe('marking people paid', () => {
     expect((await view(c.founder, call.id)).permissions.editExpertRate).toBe(false);
     expectError(await c.founder.patch(`/calls/${call.id}`, { expertRate: 10 }), 409);
   });
+
+  it('Managers correct how long a finished call took, until the Expert is paid for it', async () => {
+    const call = await finishedCall(fx.a1, 30);
+    expect((await view(c.m1, call.id)).permissions.editActualDuration).toBe(true);
+    // Every Manager oversees every Associate's call.
+    expect((await view(c.m2, call.id)).permissions.editActualDuration).toBe(true);
+    for (const who of ['a1', 'e1'] as const) {
+      expect((await view(c[who], call.id)).permissions.editActualDuration).toBe(false);
+      expectError(await c[who].patch(`/calls/${call.id}`, { actualDurationMinutes: 45 }), 403);
+    }
+
+    let res = await c.m1.patch(`/calls/${call.id}`, { actualDurationMinutes: 45 });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.actualDurationMinutes).toBe(45);
+    expect(res.body.expectedPrice).toBe(750); // 1000/h × 45 min
+    // The Expert's pay follows, and they are told.
+    expect((await view(c.e1, call.id)).payouts.expert).toMatchObject({ minutes: 45, amount: 150 });
+    expect(await prisma.notification.count({ where: { userId: fx.e1.id, type: 'call.updated' } })).toBe(1);
+
+    expectError(await c.m1.patch(`/calls/${call.id}`, { actualDurationMinutes: 0 }), 400);
+    expectError(await c.m1.patch(`/calls/${call.id}`, { actualDurationMinutes: 601 }), 400);
+    expectError(await c.m1.patch(`/calls/${call.id}`, { actualDurationMinutes: 12.5 }), 400);
+
+    // Still correctable while invoicing.
+    expect((await move(c.founder, call.id, 'invoice_submit')).status).toBe(200);
+    res = await c.founder.patch(`/calls/${call.id}`, { actualDurationMinutes: 40 });
+    expect(res.status, res.text).toBe(200);
+
+    await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [call.id] });
+    expect((await view(c.m1, call.id)).permissions.editActualDuration).toBe(false);
+    expectError(await c.m1.patch(`/calls/${call.id}`, { actualDurationMinutes: 60 }), 409);
+    expectError(await c.a1.patch(`/calls/${call.id}`, { actualDurationMinutes: 60 }), 403);
+    await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [call.id], paid: false });
+    expect((await c.m1.patch(`/calls/${call.id}`, { actualDurationMinutes: 60 })).status).toBe(200);
+  });
+
+  it('a call that has not finished has no duration to correct', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'research_ready', scheduledAt: nextSlot() });
+    expect((await view(c.m1, call.id)).permissions.editActualDuration).toBe(false);
+    expectError(await c.founder.patch(`/calls/${call.id}`, { actualDurationMinutes: 30 }), 403);
+  });
 });
 
 describe('the Finance tab', () => {

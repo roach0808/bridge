@@ -253,6 +253,15 @@ export const createCallSchema = z.object({
   meetingDetails: optionalText(2000),
 });
 
+export const MAX_ACTUAL_DURATION_MINUTES = 600;
+
+/** How long the call really took, in whole minutes. */
+const actualDurationMinutes = z.coerce
+  .number()
+  .int('Enter whole minutes')
+  .min(1, 'Enter how many minutes the call took')
+  .max(MAX_ACTUAL_DURATION_MINUTES, `At most ${MAX_ACTUAL_DURATION_MINUTES} minutes`);
+
 export const updateCallSchema = z
   .object({
     associateId: uuid.optional(),
@@ -279,10 +288,11 @@ export const updateCallSchema = z
     rateOverride: rate.nullable().optional(),
     /** Founder only: the Expert's hourly rate for this finished call, until the Expert is paid. */
     expertRate: rate.nullable().optional(),
+    /** The Founder or a Manager over the call: how long a finished call really took, until the Expert is paid. */
+    actualDurationMinutes: actualDurationMinutes.optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
-export const MAX_ACTUAL_DURATION_MINUTES = 600;
 
 /**
  * Moving to `ongoing` needs the Ninja link; moving to `finished` needs the
@@ -298,12 +308,7 @@ export const transitionSchema = z
     researchLink: webUrl('Enter a link starting with https://').optional(),
     /** Moving to `scheduled`: how to join the meeting, unless the call already says. */
     meetingDetails: optionalText(2000).optional(),
-    actualDurationMinutes: z.coerce
-      .number()
-      .int('Enter whole minutes')
-      .min(1, 'Enter how many minutes the call took')
-      .max(MAX_ACTUAL_DURATION_MINUTES, `At most ${MAX_ACTUAL_DURATION_MINUTES} minutes`)
-      .optional(),
+    actualDurationMinutes: actualDurationMinutes.optional(),
     rating: z.coerce.number().int().min(1, 'Rate from 1 to 5').max(5, 'Rate from 1 to 5').optional(),
     feedback: optionalText(2000).optional(),
     /** Required to move a call to `process_to_bank`: what actually reached the bank (USD). */

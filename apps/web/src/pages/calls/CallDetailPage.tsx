@@ -1187,8 +1187,49 @@ function PayoutsCard({ call, zone }: { call: CallDTO; zone: string }) {
   );
 }
 
+/** The Founder or a Manager over the call: how long a finished call took, correctable until the Expert is paid. */
+function ActualDurationEditor({ call }: { call: CallDTO }) {
+  const toast = useToast();
+  const update = useUpdateCall(call);
+  const current = call.actualDurationMinutes;
+  const text = (m: number | null) => (m === null ? '' : String(m));
+  const [value, setValue] = useState(text(current));
+  useEffect(() => setValue(text(current)), [current]);
+  const n = Number(value);
+  const valid = value.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= MAX_ACTUAL_DURATION_MINUTES;
+  return (
+    <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ mt: 0.75 }}>
+      <TextField
+        size="small"
+        label="Minutes"
+        type="number"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        error={value !== '' && !valid}
+        helperText={`Booked for ${call.durationMinutes} min`}
+        slotProps={{ htmlInput: { min: 1, max: MAX_ACTUAL_DURATION_MINUTES, step: 1 } }}
+        sx={{ width: 160 }}
+      />
+      <Button
+        size="small"
+        variant="outlined"
+        disabled={!valid || n === current || update.isPending}
+        onClick={() =>
+          update.mutate(
+            { actualDurationMinutes: n },
+            { onSuccess: () => toast.success('Duration saved'), onError: (e) => toast.error(errorMessage(e)) },
+          )
+        }
+        sx={{ mt: 0.5 }}
+      >
+        {update.isPending ? <CircularProgress size={16} /> : 'Save'}
+      </Button>
+    </Stack>
+  );
+}
+
 function CallReportCard({ call }: { call: CallDTO }) {
-  if (!call.ninjaLink && call.rating === null && call.actualDurationMinutes === null) return null;
+  if (!call.ninjaLink && call.rating === null && call.actualDurationMinutes === null && !call.permissions.editActualDuration) return null;
   return (
     <SectionCard title="Call">
       <Stack spacing={2}>
@@ -1207,7 +1248,11 @@ function CallReportCard({ call }: { call: CallDTO }) {
             </Button>
           </Field>
         )}
-        {call.actualDurationMinutes !== null && (
+        {call.permissions.editActualDuration ? (
+          <Field label="Actual duration">
+            <ActualDurationEditor call={call} />
+          </Field>
+        ) : call.actualDurationMinutes !== null && (
           <Field label="Actual duration">
             {call.actualDurationMinutes} minutes
             {call.actualDurationMinutes !== call.durationMinutes && (
