@@ -46,6 +46,7 @@ const TeamPage = lazyPage(() => import('@/pages/admin/TeamPage'));
 const UsersPage = lazyPage(() => import('@/pages/admin/UsersPage'));
 const AllChatsPage = lazyPage(() => import('@/pages/chat/AllChatsPage'));
 const AuditPage = lazyPage(() => import('@/pages/admin/AuditPage'));
+const BanksPage = lazyPage(() => import('@/pages/admin/BanksPage'));
 const InvoicingPage = lazyPage(() => import('@/pages/admin/InvoicingPage'));
 const StatsPage = lazyPage(() => import('@/pages/stats/StatsPage'));
 const NotificationsPage = lazyPage(() => import('@/pages/admin/NotificationsPage'));
@@ -126,6 +127,7 @@ export const router = createBrowserRouter([
           { path: 'platforms', element: <Page roles={['founder', 'manager']}><PlatformsPage /></Page> },
           { path: 'team', element: <Page roles={['manager']}><TeamPage /></Page> },
           { path: 'users', element: <Page roles={['founder']}><UsersPage /></Page> },
+          { path: 'banks', element: <Page roles={['founder']}><BanksPage /></Page> },
           { path: 'audit', element: <Page roles={['founder']}><AuditPage /></Page> },
           { path: 'notifications', element: <Page><NotificationsPage /></Page> },
           { path: 'settings', element: <Page><SettingsPage /></Page> },

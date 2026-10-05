@@ -1,10 +1,14 @@
 import type { CallStatus } from '@god/shared';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, clientsFor, expectError, makeCall, prisma, seedFixtures, type Client, type FixtureUser, type Fixtures } from './helpers';
+import { as, clientsFor, expectError, makeBank, makeCall, prisma, seedFixtures, type Client, type FixtureUser, type Fixtures } from './helpers';
 
 let fx: Fixtures;
+/** The approved Profile's bank, which invoices are submitted to. */
+let bankId: string;
 beforeEach(async () => {
   fx = await seedFixtures();
+  bankId = (await makeBank(fx)).id;
+  REQUIRED_EXTRAS.invoice_submit = { bankId };
 });
 afterAll(async () => {
   await prisma.$disconnect();
@@ -15,6 +19,7 @@ const REQUIRED_EXTRAS: Partial<Record<CallStatus, Record<string, unknown>>> = {
   ongoing: { ninjaLink: 'https://vdo.ninja/?room=test' },
   finished: { actualDurationMinutes: 50 },
   process_to_bank: { realIncome: 950 },
+  // invoice_submit: { bankId }, set once the bank exists (above).
 };
 
 const transition = (client: Client, callId: string, to: CallStatus, comment?: string) =>
@@ -459,6 +464,32 @@ describe('a finished call cannot be invoiced without a rate', () => {
     expect((await founder.patch(`/calls/${call.id}`, { rateOverride: 900 })).status).toBe(200);
     expect((await transition(founder, call.id, 'invoice_submit')).status).toBe(200);
     expect((await founder.get('/dashboard')).body.tasks.profilesNeedingRate).toEqual([]);
+  });
+});
+
+describe('an invoice is submitted to one of the Profile’s banks', () => {
+  it('needs an active bank of the call’s Profile, and the call keeps it', async () => {
+    const founder = await as(fx.founder);
+    await founder.put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { rate: 1000 });
+    const call = await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    const submit = (extra: Record<string, unknown>) => founder.post(`/calls/${call.id}/transition`, { to: 'invoice_submit', ...extra });
+
+    expectError(await submit({}), 400, 'validation_error');
+    const other = await makeBank(fx, { profileId: fx.pendingProfile.id, nickname: 'Not hers' });
+    expectError(await submit({ bankId: other.id }), 400, 'validation_error');
+    const closed = await makeBank(fx, { nickname: 'Closed', isActive: false });
+    expectError(await submit({ bankId: closed.id }), 409, 'bank_inactive');
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).status).toBe('finished');
+
+    const ok = await submit({ bankId });
+    expect(ok.status, ok.text).toBe(200);
+    expect(ok.body.bank).toEqual({ id: bankId, nickname: 'Chase 1', bankName: 'Chase', bankType: 'Checking', accountLast4: '6789', isActive: true });
+
+    // The Manager and the Associate see which bank; the Expert never does.
+    for (const who of ['m1', 'a1'] as const) expect((await (await as(fx[who])).get(`/calls/${call.id}`)).body.bank).toMatchObject({ nickname: 'Chase 1' });
+    const expertView = await (await as(fx.e1)).get(`/calls/${call.id}`);
+    expect(expertView.body.bank).toBeNull();
+    expect(expertView.text).not.toContain('Chase');
   });
 });
 

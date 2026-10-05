@@ -93,7 +93,11 @@ grouped under Managers; they are assigned per Call.
 | Set a Profile's rate on a platform | ✓ | | | |
 | Deactivate a Profile / see deactivated ones | ✓ | | | |
 | Delete a Profile | ✓ | | | |
-| See / edit a Profile's current address and banks | ✓ | | | |
+| See / edit a Profile's current address | ✓ | | | |
+| Add, edit, delete a Profile's banks; the Banks page | ✓ | | | |
+| See a Profile's banks (§6.9a) | every field | all but the password and where it is signed in (Profiles they can see) | same | nothing |
+| Reveal a bank's password (audited) | ✓ | | | |
+| Choose the bank an invoice is submitted to | ✓ | | | |
 | Upload own photo | ✓ | ✓ | ✓ | ✓ |
 | Upload a Profile photo | ✓ | | | |
 | Approve / reject a pending Profile | ✓ | | | |
@@ -110,7 +114,7 @@ grouped under Managers; they are assigned per Call.
 | See invoice statuses | ✓ | ✓ (every Associate's) | own | |
 | See a call's income and rate (expected price, real income) | ✓ | ✓ (every Associate's) | | |
 | See a Profile's platform rates | ✓ | ✓ | | |
-| Close or reopen a bank account | ✓ | | | |
+| Activate or deactivate a bank | ✓ | | | |
 | Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | | |
 | Set the Call's research data link, mark the research data ready | ✓ | | | |
 | Read the Call's research data link and Ninja link; see the "research data ready" step | ✓ | | | ✓ (assigned) |
@@ -316,6 +320,7 @@ A Profile's standing on each expert network platform. A missing row means
 | real_income | numeric(12,2), nullable | What reached the bank (USD), entered by the Founder when moving the call to `process_to_bank` (required then, check constraint). Never shown to Experts |
 | expert_rate | numeric(12,2), nullable | The Expert's `hourly_rate` when the call finished. Changing the Expert's rate later never changes it. The Founder may set it for one call (e.g. one that finished before the Expert had a rate) until the Expert is paid |
 | manager_share_percent, associate_share_percent | numeric(5,2), nullable | The Profile's Manager share and the Associate's share (a percent of the Manager's share) when the call was processed to bank (required then); 0 for the Associate when a Manager ran the call |
+| bank_id | uuid → ProfileBank, nullable | The bank the invoice was submitted to, chosen at `invoice_submit` (one of the Profile's active banks) |
 | payee_manager_id | uuid → User, nullable | The Manager paid for the call, fixed when it was processed to bank: the Associate's Manager, or the Manager who ran it |
 | expert_paid_at, manager_paid_at, associate_paid_at | timestamptz, nullable | When the Founder paid the Expert and the Manager, and when the Manager paid the Associate. Shares only once processed to bank; the Expert only with a rate (check constraints) |
 | created_by | uuid → User | |
@@ -438,22 +443,29 @@ Replacing or removing a picture deletes the old row, so storage never piles up.
 |---|---|---|
 | id | uuid | |
 | profile_id | uuid → Profile | Deleting the Profile deletes its banks |
-| bank_name | text | Required, never blank |
-| account_holder | text | Required, never blank |
-| account_number | text | Account number or IBAN. Required |
-| swift_bic, routing_number | text, nullable | |
-| country | text (ISO 3166-1 alpha-2), nullable | |
-| currency | text (ISO 4217), nullable | |
-| is_active | boolean, default true | A closed account stays on file but no longer counts: the Profile then needs another one |
-| notes | text, nullable | |
-| is_primary | boolean | Exactly one primary per Profile that has banks (partial unique index) |
+| nickname | text, nullable | What the Founder calls the account ("Chase main"); an invoice is submitted to a bank by it. Without one, the bank shows as its name and the account's last four digits |
+| bank_type | text | Required. Free text (checking, savings, Wise…); the types in use are suggested |
+| bank_name | text | Required |
+| bank_address | text, nullable | |
+| routing_number | text | Required |
+| account_number | text | Required |
+| swift_code | text, nullable | |
+| email | text, nullable | The online banking login |
+| password_enc | text, nullable | The online banking password, encrypted with AES-256-GCM (`BANK_ENCRYPTION_KEY`, §12.2) as `v1:iv:tag:data`. Never sent with the bank; the Founder reveals it on request |
+| sign_in_location | text, nullable | Where the account is signed in (a browser profile, a device). Founder only |
+| is_active | boolean, default true | A deactivated bank stays on file but can no longer be chosen for an invoice, and no longer counts: the Profile then needs another one |
 | created_by | uuid → User | |
 | created_at, updated_at | timestamptz | |
 
 A Profile may have any number of banks, including none. A Profile with at
 least one **booked** call (status `scheduled` or later) must have a bank; until
-it does, it appears in the Founder's pending tasks. Missing banks never block a
-transition. Bank details are payment data: only the Founder reads or edits them.
+it does, it appears in the Founder's pending tasks. Submitting an invoice needs
+one of the Profile's active banks (`calls.bank_id`); nothing else waits for one.
+The Founder sees every field; Managers and Associates see the banks of the
+Profiles they can see, without the password and where it is signed in; Experts
+see nothing of any bank. Banks added before 2026-10-05 have "Unknown" as their
+type and routing number until the Founder fills them in. A bank with invoices
+cannot be deleted, only deactivated.
 
 #### CallStatusHistory (audit)
 
@@ -1217,7 +1229,7 @@ requesting user so clients never guess. `payouts` is too (§3.1): `expert`
 { user, percent, amount, keeps, paidAt } and `associate` { user, percent,
 amount, paidAt } once paid to bank, each only for the viewers who may see it,
 and `canMark` lists the lines the viewer may mark. `bankReady` (Founder only)
-says whether the Profile has an open bank account. For Experts, `status` never shows an
+says whether the Profile has an open bank account, and `bank` names the bank the invoice was submitted to ({ id, nickname, bankName, bankType, accountLast4, isActive }; null for Experts). For Experts, `status` never shows an
 invoicing status and every money field is null (§2.3); `researchLink` and `ninjaLink` go only
 to the Founder and the call's Expert. Associates get the money fields null too,
 and see `research_ready` as `confirmed`.
@@ -1271,10 +1283,13 @@ Response: { from, to, expert, canEditBlocks, calls, busy, occurrences, rules }.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | /profiles/:id/banks | Founder | Primary first |
-| POST | /profiles/:id/banks | Founder | { bankName, accountHolder, accountNumber, swiftBic?, routingNumber?, country?, currency?, notes?, isActive?, isPrimary? }. The first bank becomes primary |
-| PATCH | /banks/:id | Founder | Any field; `isPrimary: true` moves the primary flag here; `isActive: false` marks the account closed (kept on file, no longer counts) |
-| DELETE | /banks/:id | Founder | If it was primary, the oldest remaining bank becomes primary |
+| GET | /profiles/:id/banks | Founder, Manager, Associate (Profiles they can see) | Active first. `hasPassword` and `signInLocation` are null for everyone but the Founder; 403 for Experts |
+| POST | /profiles/:id/banks | Founder | { nickname?, bankType, bankName, bankAddress?, routingNumber, accountNumber, swiftCode?, email?, password?, signInLocation?, isActive? } |
+| PATCH | /banks/:id | Founder | Any field. Leaving `password` out keeps it; `null` or "" removes it. `isActive: false` deactivates the bank |
+| DELETE | /banks/:id | Founder | 409 `bank_in_use` when invoices were submitted to it: deactivate it instead |
+| GET | /banks | Founder | Every bank of every Profile, with { profile: { id, name, isActive } }: the Banks page |
+| GET | /banks/types | Founder | The bank types in use, most used first |
+| GET | /banks/:id/password | Founder | { password } (null when none is saved). Recorded in the audit trail as `bank.password`. 409 `secret_unreadable` if the encryption key changed |
 | PUT | /me/photo | any user | { dataUrl } — a `data:image/(jpeg\|png\|webp);base64,…` URL, ≤ 400 KB; bytes must match the declared type |
 | DELETE | /me/photo | any user | |
 | PUT / DELETE | /profiles/:id/photo | Founder | Same body |
@@ -1462,7 +1477,7 @@ Periods are weeks (Monday start), two-week blocks (aligned on Monday 2026-01-05)
 | Method | Path | Who | Notes |
 |---|---|---|---|
 | GET | /stats/associates | Founder (all Associates, and Managers who ran calls), Manager (every Associate and themselves), Associate (self) | Per Associate and period: calls, finished calls, potential money and unpriced calls, plus totals. Potential money = rate × duration, the real duration once the Expert finished the call and the booked duration before; the rate is the call's special rate or the Profile's platform rate. Calls without a rate count as unpriced. Deactivated Associates appear only with calls in the range. Experts: 403. Associates get their call counts only: `showsMoney: false` and potential 0 |
-| GET | /stats/profiles | Founder | Every Profile including pending, rejected and deactivated: status, active, onboard date, email, primary bank (name, country, currency, count), calls, paid calls, expected income (finished calls), total income (sum of real income), last call already started. Audited as a sensitive read |
+| GET | /stats/profiles | Founder | Every Profile including pending, rejected and deactivated: status, active, onboard date, email, first active bank (name, type, currency, count), calls, paid calls, expected income (finished calls), total income (sum of real income), last call already started. Audited as a sensitive read |
 | GET | /stats/finance | Founder (everyone), Manager (every Associate's calls and their own), Associates and Experts 403 | Per period, and over the range per platform and per Profile: calls, finished calls, paid calls, expected (expected price of finished calls), paidExpected and real (calls with real income), gap = paidExpected − real, unpriced |
 
 Web: **Statistics** (Founder, Manager, Associate — call counts only for Associates, without the Finance tab) with Weekly / Bi-weekly / Monthly, the *By associate* and *Finance* tabs (Expected, Real income, Gap on paid calls, Not paid yet; tables by period, platform and Profile with expected-vs-real bars), each scoped to the calls the viewer can see. Founders also get the *By profile* table (filters All / Active / Deactivated / Pending / Rejected, sort, search).
@@ -1646,7 +1661,8 @@ Everyone sees whether the people they may chat with are at their screen.
 | Platforms | Founder, Manager | List + create/edit, sorted by priority |
 | Team | Manager | Own Associates, create (with their share), deactivate; each card shows the Associate's portion of the Manager's share, which the Manager edits |
 | Users | Founder | All users, create any role, with a **Pay** column (an Expert's hourly rate, an Associate's share) set in the create and edit dialogs; editing an Expert's rate can also price their finished calls that have none. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
-| Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Rows say "No bank yet" for a Profile with no open bank account, and submitting invoices warns about calls without a rate or without a bank (`bankReady`) |
+| Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Rows say "No bank yet" for a Profile with no open bank account. Submitting invoices asks, for each Profile, which of its active banks they are paid into, by nickname (the only one is chosen already; none offers **Add bank**) |
+| Banks | Founder | Every bank of every Profile in one table: nickname, Profile, type, bank name and address, routing, account and SWIFT numbers, the login (email, password behind **Show**, where it is signed in) and status, filtered by Profile, type, bank name and status (active ones by default) and searched by any field; add (choosing the Profile first), edit, activate or deactivate, delete. A Profile's banks also show in its details: every field for the Founder, who manages them there too, and all but the login secrets for Managers and Associates |
 | Statistics | Founder, Manager, Associate | §6.14. Not in the sidebar for now (since 2026-10-05); the page still opens at `/stats` |
 | Audit | Founder | §6.16, including the **Device** column (`US-desktop-01`) |
 | Notifications | all | List, mark read |
@@ -1757,6 +1773,7 @@ pnpm dev                      # api on :4000, web on :5173
 | DATABASE_URL | postgresql://god:god@localhost:5432/god |
 | TEST_DATABASE_URL | postgresql://god:god@localhost:5432/god_testsuite |
 | JWT_SECRET | 32+ random bytes |
+| BANK_ENCRYPTION_KEY | 32+ characters; encrypts bank passwords (AES-256-GCM). Set once and never change it: a different key cannot read the passwords already saved. Unset, a key is derived from JWT_SECRET (so changing JWT_SECRET would lose them) |
 | ACCESS_TOKEN_TTL | 15m |
 | REFRESH_TOKEN_TTL | never (default; or a duration such as 30d) |
 | CORS_ORIGINS | http://localhost:5173,http://192.168.0.10:5173 |
@@ -2005,6 +2022,7 @@ Container alternative:
 | 2026-10-05 | The Finance table has a **Status** column, filtered like the others. **Total income on invoice** is the invoice amount of every finished call on the tab, not only the ones already invoiced |
 | 2026-10-05 | **Statistics** is taken out of the sidebar until it is needed. The page, its address (`/stats`) and its API stay |
 | 2026-10-05 | The **Calendar** filters by **Experts, Profiles and Managers**, several values at a time. Ticking several Experts shows them side by side (all of them is the old All experts view); an Associate's call counts as their Manager's. `GET /calendar` and `/calendar/experts` name each call's Manager |
+| 2026-10-05 | **Banks** carry a nickname, type, bank name and address, routing, account and SWIFT numbers, the online banking email and password (encrypted, shown to the Founder on request and audited) and where the account is signed in; type, bank name, routing and account numbers are required. Account holder, country, currency, notes and "primary" are gone. Managers and Associates now read a Profile's banks, without the password and where it is signed in; Experts see none. The Founder has a **Banks** page, and **submitting an invoice names the bank** it is paid into, by nickname |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

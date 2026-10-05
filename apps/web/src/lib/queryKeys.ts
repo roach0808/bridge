@@ -61,5 +61,8 @@ export const qk = {
     finance: (period: string, count: number) => ['stats', 'finance', period, count] as const,
   },
   banks: (profileId: string) => ['banks', profileId] as const,
+  /** The Founder's bank page, and the bank types in use. */
+  allBanks: ['banks', 'all'] as const,
+  bankTypes: ['banks', 'types'] as const,
   avatars: (audience?: string) => ['avatars', audience ?? 'all'] as const,
 };

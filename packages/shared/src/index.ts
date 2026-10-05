@@ -13,3 +13,4 @@ export * from './presence';
 export * from './notificationText';
 export * from './payouts';
 export * from './tasks';
+export * from './banks';

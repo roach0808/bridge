@@ -431,7 +431,7 @@ function ProfilesTab() {
                           {r.bank.bankName}
                         </Typography>
                         <Muted>
-                          {[r.bank.country, r.bank.currency].filter(Boolean).join(' · ')}
+                          {r.bank.bankType}
                           {r.bank.count > 1 ? ` · ${r.bank.count} accounts` : ''}
                         </Muted>
                       </Box>

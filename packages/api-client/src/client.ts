@@ -10,6 +10,7 @@ import type {
   TodoStatus,
   BankDTO,
   BankInput,
+  BankListItem,
   AvatarAudience,
   AvatarDTO,
   BlockBodyInput,
@@ -180,7 +181,14 @@ export function createApiClient(options: ClientOptions) {
     },
 
     banks: {
+      /** A Profile's banks. Founder, Managers and Associates who can see the Profile; never Experts. */
       list: (profileId: string) => get<BankDTO[]>(`/profiles/${enc(profileId)}/banks`),
+      /** Founder: every bank of every Profile. */
+      all: () => get<BankListItem[]>('/banks'),
+      /** Founder: the bank types in use, most used first. */
+      types: () => get<string[]>('/banks/types'),
+      /** Founder: the saved password, recorded in the audit trail. */
+      password: (id: string) => get<{ password: string | null }>(`/banks/${enc(id)}/password`),
       create: (profileId: string, body: BankInput) => post<BankDTO>(`/profiles/${enc(profileId)}/banks`, body),
       update: (id: string, body: Partial<BankInput>) => patch<BankDTO>(`/banks/${enc(id)}`, body),
       remove: (id: string) => del<void>(`/banks/${enc(id)}`),

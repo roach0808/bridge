@@ -33,7 +33,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMe } from '@/auth/AuthProvider';
-import { BanksDialog } from '@/components/BanksDialog';
+import { ProfileBanks } from '@/components/BanksDialog';
 import { ErrorState, Field } from '@/components/common';
 import { UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
@@ -338,8 +338,8 @@ function PlatformRow({
 }
 
 export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
-  const isFounder = useMe().role === 'founder';
-  const [banksOpen, setBanksOpen] = useState(false);
+  const role = useMe().role;
+  const isFounder = role === 'founder';
   const dash = <Typography component="span" variant="body2" color="text.disabled">—</Typography>;
   return (
     <Stack spacing={2.5}>
@@ -391,16 +391,17 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
                 </Typography>
               )}
             </Field>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={1}>
-              <Field label="Bank details">
-                {p.bankCount ? `${p.bankCount} bank account${p.bankCount === 1 ? '' : 's'}` : 'None added'}
-              </Field>
-              <Button size="small" variant="outlined" onClick={() => setBanksOpen(true)}>
-                {p.bankCount ? 'View & edit' : 'Add bank'}
-              </Button>
-            </Stack>
           </Stack>
-          <BanksDialog profile={p} open={banksOpen} onClose={() => setBanksOpen(false)} startAdding={!p.bankCount} />
+        </Box>
+      )}
+
+      {/* Banks: the Founder manages them; Managers and Associates read them without the login secrets; never Experts. */}
+      {role !== 'expert' && (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+            Banks
+          </Typography>
+          <ProfileBanks profileId={p.id} />
         </Box>
       )}
 

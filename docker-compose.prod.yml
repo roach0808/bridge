@@ -24,6 +24,8 @@ services:
     environment:
       DATABASE_URL: postgresql://god:${POSTGRES_PASSWORD}@postgres:5432/god
       JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (32+ random bytes)}
+      # Encrypts bank passwords; keep it forever. Unset: derived from JWT_SECRET.
+      BANK_ENCRYPTION_KEY: ${BANK_ENCRYPTION_KEY:-}
       CORS_ORIGINS: ${PUBLIC_WEB_URL:-https://god.example.com}
       PUBLIC_API_URL: ${PUBLIC_WEB_URL:-https://god.example.com}
       COOKIE_SECURE: "true"

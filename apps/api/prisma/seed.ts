@@ -5,6 +5,7 @@
  */
 import { PrismaClient, type CallStatus } from '@prisma/client';
 import argon2 from 'argon2';
+import { encryptSecret } from '../src/banks/secret';
 import { DateTime } from 'luxon';
 import { DEFAULT_ASSOCIATE_SHARE_PERCENT, DEFAULT_MANAGER_SHARE_PERCENT, TRANSITIONS, TEAM_TIME_ZONE, edgeOwner, type Role } from '@god/shared';
 
@@ -182,6 +183,45 @@ async function main() {
     },
   });
 
+  // --- Banks -------------------------------------------------------------------
+  // The first two Profiles have banks; invoices below are submitted to their active one.
+  const bankFor = new Map<number, string>();
+  type SeedBank = {
+    nickname: string; bankType: string; bankName: string; routingNumber: string; accountNumber: string;
+    bankAddress?: string; swiftCode?: string; email?: string; signInLocation?: string;
+  };
+  const seedBanks: Array<{ profile: number; isActive?: boolean; data: SeedBank }> = [
+    {
+      profile: 0,
+      data: {
+        nickname: 'Chase main', bankType: 'Checking', bankName: 'JPMorgan Chase', bankAddress: '270 Park Ave, New York, NY 10017',
+        routingNumber: '021000021', accountNumber: '483920175546', swiftCode: 'CHASUS33', email: 'dana.banking@example.org',
+        signInLocation: 'AdsPower profile 3 (Chrome)',
+      },
+    },
+    { profile: 0, isActive: false, data: { nickname: 'Old BoA', bankType: 'Savings', bankName: 'Bank of America', routingNumber: '026009593', accountNumber: '009871234455' } },
+    {
+      profile: 1,
+      data: {
+        nickname: 'Mercury business', bankType: 'Business checking', bankName: 'Mercury (Choice Financial)', routingNumber: '091311229',
+        accountNumber: '202240117733', email: 'payments@example.org', signInLocation: 'Office laptop, Firefox',
+      },
+    },
+  ];
+  for (const b of seedBanks) {
+    const bank = await prisma.profileBank.create({
+      data: {
+        ...b.data,
+        profileId: profiles[b.profile]!.id,
+        isActive: b.isActive ?? true,
+        // Encrypted like any password entered in the app (BANK_ENCRYPTION_KEY, or JWT_SECRET).
+        passwordEnc: b.data.signInLocation ? encryptSecret('Seed-Bank-Pass-1') : null,
+        createdById: founder.id,
+      },
+    });
+    if (bank.isActive && !bankFor.has(b.profile)) bankFor.set(b.profile, bank.id);
+  }
+
   // --- Calls ------------------------------------------------------------------
   const today = DateTime.now().setZone(TEAM_TIME_ZONE).startOf('day');
   const at = (dayOffset: number, hour: number, minute = 0) =>
@@ -260,6 +300,8 @@ async function main() {
         // step has one, made up where the row does not name it.
         meetingDetails: c.meeting ?? (c.status === 'on_scheduling' ? null : defaultMeeting()),
         rateOverride: c.rateOverride,
+        // An invoice names the bank it is paid into.
+        bankId: ['invoice_submit', 'invoice_approve', 'process_to_bank'].includes(c.status) ? (bankFor.get(c.profile) ?? null) : null,
         ninjaLink: ['on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'on_rescheduling'].includes(c.status)
           ? null
           : `https://vdo.ninja/?room=god-${Math.random().toString(36).slice(2, 10)}`,

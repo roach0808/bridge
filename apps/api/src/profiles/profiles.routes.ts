@@ -48,7 +48,7 @@ const platformsFor = (actor: Pick<Actor, 'role'>): Promise<PlatformRef[] | null>
  * Founder, the author, and the author's Manager (§6.4). Experts see only the
  * profiles of calls they are assigned to.
  */
-function visibleProfilesWhere(actor: Actor): Prisma.ProfileWhereInput {
+export function visibleProfilesWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.ProfileWhereInput {
   // Deactivated Profiles are the Founder's business only.
   // Deleted Profiles are gone for everyone; only their past calls still name them.
   if (actor.role === 'founder') return { deletedAt: null };

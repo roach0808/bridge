@@ -1,6 +1,6 @@
 import { deflateSync } from 'node:zlib';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { anon, as, expectError, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
+import { anon, as, expectError, makeBank, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -11,14 +11,28 @@ afterAll(async () => {
 });
 
 const bankBody = (over: Record<string, unknown> = {}) => ({
+  nickname: 'Morgan main',
+  bankType: 'Checking',
   bankName: 'First Bank',
-  accountHolder: 'Morgan Expertise',
-  accountNumber: 'DE89370400440532013000',
-  swiftBic: 'COBADEFFXXX',
-  country: 'de',
-  currency: 'eur',
+  bankAddress: '270 Park Ave, New York, NY',
+  routingNumber: '021000021',
+  accountNumber: '000123456789',
+  swiftCode: 'CHASUS33',
+  email: 'morgan@example.org',
+  password: 'hunter2-secret',
+  signInLocation: 'AdsPower profile 7',
   ...over,
 });
+
+/** Audit entries are written just after the response: wait for them. */
+async function auditCount(action: string, expected: number) {
+  for (let i = 0; i < 60; i++) {
+    const n = await prisma.auditLog.count({ where: { action } });
+    if (n >= expected) return n;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return prisma.auditLog.count({ where: { action } });
+}
 
 /** A valid 1×1 PNG as a data URL. */
 function pngDataUrl() {
@@ -54,54 +68,99 @@ function pngDataUrl() {
 }
 
 describe('profile banks', () => {
-  it('only the Founder can list, add, edit and delete banks', async () => {
+  it('the Founder adds, edits and deletes banks; Managers and Associates read them without the secrets; Experts get nothing', async () => {
     const path = `/profiles/${fx.approvedProfile.id}/banks`;
-    for (const who of ['m1', 'a1', 'e1'] as const) {
-      const c = await as(fx[who]);
-      expectError(await c.get(path), 403);
-      expectError(await c.post(path, bankBody()), 403);
-    }
     const founder = await as(fx.founder);
+    for (const who of ['m1', 'a1', 'e1'] as const) expectError(await (await as(fx[who])).post(path, bankBody()), 403);
+
     const created = await founder.post(path, bankBody());
     expect(created.status, created.text).toBe(201);
-    expect(created.body).toMatchObject({ bankName: 'First Bank', country: 'DE', currency: 'EUR', isPrimary: true });
+    expect(created.body).toMatchObject({
+      nickname: 'Morgan main', bankType: 'Checking', bankName: 'First Bank', bankAddress: '270 Park Ave, New York, NY',
+      routingNumber: '021000021', accountNumber: '000123456789', swiftCode: 'CHASUS33', email: 'morgan@example.org',
+      hasPassword: true, signInLocation: 'AdsPower profile 7', isActive: true,
+    });
+    // The password never comes back with the bank, and is not stored as typed.
+    expect(created.text).not.toContain('hunter2-secret');
+    const row = await prisma.profileBank.findUniqueOrThrow({ where: { id: created.body.id } });
+    expect(row.passwordEnc).toMatch(/^v1:/);
+    expect(row.passwordEnc).not.toContain('hunter2');
 
-    const a1 = await as(fx.a1);
-    expectError(await a1.patch(`/banks/${created.body.id}`, { bankName: 'x' }), 403);
-    expectError(await a1.delete(`/banks/${created.body.id}`), 403);
+    // Managers and Associates who can see the Profile read everything but the login secrets.
+    for (const who of ['m1', 'a1'] as const) {
+      const res = await (await as(fx[who])).get(path);
+      expect(res.status, res.text).toBe(200);
+      expect(res.body).toEqual([expect.objectContaining({ accountNumber: '000123456789', email: 'morgan@example.org', hasPassword: null, signInLocation: null })]);
+      expect(res.text).not.toContain('AdsPower');
+      expectError(await (await as(fx[who])).get(`/banks/${created.body.id}/password`), 403);
+      expectError(await (await as(fx[who])).get('/banks'), 403);
+      expectError(await (await as(fx[who])).patch(`/banks/${created.body.id}`, { bankName: 'x' }), 403);
+      expectError(await (await as(fx[who])).delete(`/banks/${created.body.id}`), 403);
+    }
+    // Experts: not a single field.
+    const e1 = await as(fx.e1);
+    expectError(await e1.get(path), 403);
+    expectError(await e1.get('/banks'), 403);
+    expectError(await e1.get(`/banks/${created.body.id}/password`), 403);
+    // A Profile the Associate cannot see: its banks do not exist for them.
+    expectError(await (await as(fx.a1)).get(`/profiles/${fx.pendingProfileTeam2.id}/banks`), 404);
 
-    const updated = await founder.patch(`/banks/${created.body.id}`, { notes: 'Pay monthly' });
-    expect(updated.status).toBe(200);
-    expect(updated.body.notes).toBe('Pay monthly');
+    // The Founder reveals the password on purpose; it is in the audit trail.
+    const revealed = await founder.get(`/banks/${created.body.id}/password`);
+    expect(revealed.body).toEqual({ password: 'hunter2-secret' });
+    expect(await auditCount('bank.password', 1)).toBe(1);
+
+    // Leaving the password out keeps it; an empty one removes it.
+    let updated = await founder.patch(`/banks/${created.body.id}`, { nickname: 'Morgan old', isActive: false });
+    expect(updated.status, updated.text).toBe(200);
+    expect(updated.body).toMatchObject({ nickname: 'Morgan old', isActive: false, hasPassword: true });
+    expect((await founder.get(`/banks/${created.body.id}/password`)).body).toEqual({ password: 'hunter2-secret' });
+    updated = await founder.patch(`/banks/${created.body.id}`, { password: 'n3w', signInLocation: '' });
+    expect(updated.body).toMatchObject({ hasPassword: true, signInLocation: null });
+    expect((await founder.get(`/banks/${created.body.id}/password`)).body).toEqual({ password: 'n3w' });
+    updated = await founder.patch(`/banks/${created.body.id}`, { password: '' });
+    expect(updated.body.hasPassword).toBe(false);
+    expect((await founder.get(`/banks/${created.body.id}/password`)).body).toEqual({ password: null });
+
     expect((await founder.delete(`/banks/${created.body.id}`)).status).toBe(204);
     expect((await founder.get(path)).body).toEqual([]);
   });
 
-  it('validates required fields and codes', async () => {
+  it('requires type, bank name, routing and account numbers; the rest is optional', async () => {
     const founder = await as(fx.founder);
     const path = `/profiles/${fx.approvedProfile.id}/banks`;
-    expectError(await founder.post(path, bankBody({ bankName: '  ' })), 400, 'validation_error');
-    expectError(await founder.post(path, bankBody({ accountNumber: '' })), 400, 'validation_error');
-    expectError(await founder.post(path, bankBody({ currency: 'EURO' })), 400, 'validation_error');
+    for (const field of ['bankType', 'bankName', 'routingNumber', 'accountNumber']) {
+      expectError(await founder.post(path, bankBody({ [field]: '  ' })), 400, 'validation_error');
+    }
+    expectError(await founder.post(path, bankBody({ email: 'not-an-email' })), 400, 'validation_error');
+    const minimal = await founder.post(path, { bankType: 'Savings', bankName: 'Ally', routingNumber: '124003116', accountNumber: '42' });
+    expect(minimal.status, minimal.text).toBe(201);
+    expect(minimal.body).toMatchObject({ nickname: null, bankAddress: null, swiftCode: null, email: null, hasPassword: false, signInLocation: null, isActive: true });
+    expectError(await founder.patch(`/banks/${minimal.body.id}`, { routingNumber: '' }), 400, 'validation_error');
     expectError(await founder.post('/profiles/00000000-0000-4000-8000-000000000000/banks', bankBody()), 404);
   });
 
-  it('keeps exactly one primary bank', async () => {
+  it('the Founder’s bank page lists every bank with its Profile, and the types in use', async () => {
     const founder = await as(fx.founder);
-    const path = `/profiles/${fx.approvedProfile.id}/banks`;
-    const first = (await founder.post(path, bankBody({ bankName: 'One' }))).body;
-    const second = (await founder.post(path, bankBody({ bankName: 'Two', isPrimary: true }))).body;
-    let list = (await founder.get(path)).body as Array<{ id: string; isPrimary: boolean }>;
-    expect(list.filter((b) => b.isPrimary).map((b) => b.id)).toEqual([second.id]);
+    await founder.post(`/profiles/${fx.approvedProfile.id}/banks`, bankBody());
+    await founder.post(`/profiles/${fx.pendingProfile.id}/banks`, bankBody({ bankType: 'Wise', nickname: null }));
+    await founder.post(`/profiles/${fx.pendingProfile.id}/banks`, bankBody({ bankType: 'Checking', nickname: 'P2' }));
+    const res = await founder.get('/banks');
+    expect(res.status, res.text).toBe(200);
+    expect(res.body).toHaveLength(3);
+    expect(res.body[0]).toMatchObject({ profile: { id: expect.any(String), name: expect.any(String), isActive: true }, hasPassword: true, signInLocation: 'AdsPower profile 7' });
+    expect(res.text).not.toContain('hunter2');
+    expect((await founder.get('/banks/types')).body).toEqual(['Checking', 'Wise']);
+    expect(await auditCount('bank.read', 1)).toBe(1);
+  });
 
-    await founder.patch(`/banks/${first.id}`, { isPrimary: true });
-    list = (await founder.get(path)).body;
-    expect(list.filter((b) => b.isPrimary).map((b) => b.id)).toEqual([first.id]);
-
-    await founder.delete(`/banks/${first.id}`);
-    list = (await founder.get(path)).body;
-    expect(list).toHaveLength(1);
-    expect(list[0]!.isPrimary).toBe(true);
+  it('a bank with invoices cannot be deleted, only deactivated', async () => {
+    const bank = await makeBank(fx);
+    const call = await makeCall(fx, { associate: fx.a1, status: 'invoice_submit' });
+    await prisma.call.update({ where: { id: call.id }, data: { bankId: bank.id } });
+    const founder = await as(fx.founder);
+    expectError(await founder.delete(`/banks/${bank.id}`), 409, 'bank_in_use');
+    expect((await founder.patch(`/banks/${bank.id}`, { isActive: false })).body.isActive).toBe(false);
   });
 
   it('profiles report bankCount and needsBank to the Founder only', async () => {
@@ -118,7 +177,7 @@ describe('profile banks', () => {
     profile = (await founder.get(`/profiles/${fx.approvedProfile.id}`)).body;
     expect(profile).toMatchObject({ bankCount: 1, needsBank: false });
 
-    // A closed account stays on file but no longer counts: the Profile needs a bank again.
+    // A deactivated account stays on file but no longer counts: the Profile needs a bank again.
     const closed = await founder.patch(`/banks/${bank.id}`, { isActive: false });
     expect(closed.body.isActive).toBe(false);
     profile = (await founder.get(`/profiles/${fx.approvedProfile.id}`)).body;

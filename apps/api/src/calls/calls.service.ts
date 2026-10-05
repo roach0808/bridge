@@ -454,11 +454,26 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
       }
     }
 
+    // An invoice names the bank it is to be paid into: one of the Profile's open accounts.
+    if (to === 'invoice_submit' && (input.bankId || !current.bankId)) {
+      if (!input.bankId) {
+        throw badRequest('Choose the bank this invoice is paid into', {
+          issues: [{ path: 'bankId', message: `Choose one of ${current.profile.name}'s banks` }],
+        });
+      }
+      const bank = await tx.profileBank.findUnique({ where: { id: input.bankId }, select: { profileId: true, isActive: true } });
+      if (!bank || bank.profileId !== current.profileId) {
+        throw badRequest(`Choose one of ${current.profile.name}'s banks`, { issues: [{ path: 'bankId', message: 'Not a bank of this Profile' }] });
+      }
+      if (!bank.isActive) throw conflict('That bank is deactivated; choose an active one', 'bank_inactive');
+    }
+
     // The schema already requires these for `ongoing` / `finished`.
     const data: Prisma.CallUpdateInput = { status: to };
     if (to === 'research_ready') data.researchLink = researchLink;
     if (to === 'scheduled') data.meetingDetails = meetingDetails;
     if (to === 'ongoing') data.ninjaLink = input.ninjaLink;
+    if (to === 'invoice_submit' && input.bankId) data.bank = { connect: { id: input.bankId } };
     if (to === 'finished') {
       data.actualDurationMinutes = input.actualDurationMinutes;
       data.rating = input.rating;

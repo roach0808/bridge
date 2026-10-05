@@ -420,7 +420,7 @@ describe('DELETE /profiles/:id', () => {
   it('removes a profile without calls entirely, banks and addresses with it; founder only', async () => {
     const founder = await as(fx.founder);
     const created = (await founder.post('/profiles', { ...profileBody(), addresses: [{ label: 'Home', address: '1 Main St' }] })).body;
-    await founder.post(`/profiles/${created.id}/banks`, { bankName: 'First Bank', accountHolder: 'Morgan', accountNumber: 'DE89370400440532013000' });
+    await founder.post(`/profiles/${created.id}/banks`, { bankType: 'Checking', bankName: 'First Bank', routingNumber: '021000021', accountNumber: 'DE89370400440532013000' });
 
     expectError(await (await as(fx.m1)).delete(`/profiles/${created.id}`), 403);
     expect((await founder.delete(`/profiles/${created.id}`)).status).toBe(204);

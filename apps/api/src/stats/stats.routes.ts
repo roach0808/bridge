@@ -211,7 +211,7 @@ statsRouter.get('/stats/profiles', requireRole('founder'), async (_req, res) => 
         isActive: true,
         onboardedAt: true,
         email: true,
-        banks: { select: { bankName: true, country: true, currency: true }, orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        banks: { where: { isActive: true }, select: { bankName: true, bankType: true }, orderBy: { createdAt: 'asc' } },
       },
       orderBy: { name: 'asc' },
     }),

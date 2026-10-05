@@ -205,6 +205,8 @@ export interface CallDTO {
   payouts: CallPayouts;
   /** Founder only: the Profile has an open bank account to be paid into. Null for everyone else. */
   bankReady: boolean | null;
+  /** The bank the invoice was submitted to. Null for Experts, and before the invoice. */
+  bank: CallBankRef | null;
   createdBy: UserRef;
   createdAt: string;
   updatedAt: string;
@@ -453,22 +455,47 @@ export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
 
+/**
+ * One of a Profile's bank accounts. The Founder sees every field; Managers and
+ * Associates everything but the login secrets (`hasPassword` and
+ * `signInLocation` come back null); Experts never get a bank at all.
+ */
 export interface BankDTO {
   id: string;
   profileId: string;
+  nickname: string | null;
+  bankType: string;
   bankName: string;
-  accountHolder: string;
+  bankAddress: string | null;
+  routingNumber: string;
   accountNumber: string;
-  swiftBic: string | null;
-  routingNumber: string | null;
-  country: string | null;
-  currency: string | null;
-  notes: string | null;
-  /** False once the account is closed: kept on file, but the Profile needs another one. */
+  swiftCode: string | null;
+  /** The online banking login. */
+  email: string | null;
+  /** Founder only: whether a password is saved. It is read with its own audited request. */
+  hasPassword: boolean | null;
+  /** Founder only: where the account is signed in. */
+  signInLocation: string | null;
+  /** False once deactivated: kept on file, but it can no longer be chosen for an invoice. */
   isActive: boolean;
-  isPrimary: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+/** The Founder's bank list: every bank, with its Profile. */
+export interface BankListItem extends BankDTO {
+  profile: { id: string; name: string; isActive: boolean };
+}
+
+/** The bank an invoice was submitted to, as a call shows it. */
+export interface CallBankRef {
+  id: string;
+  nickname: string | null;
+  bankName: string;
+  bankType: string;
+  /** The last four digits of the account number. */
+  accountLast4: string;
+  isActive: boolean;
 }
 
 /** A finished call whose Profile has no rate on the platform it was booked through. */
@@ -650,7 +677,7 @@ export interface ProfileStatsRow {
   onboardedAt: string | null;
   email: string | null;
   /** The primary (or first) bank account, and how many there are. */
-  bank: { bankName: string; country: string | null; currency: string | null; count: number } | null;
+  bank: { bankName: string; bankType: string; count: number } | null;
   calls: number;
   paidCalls: number;
   /** Expected price of its finished calls. */

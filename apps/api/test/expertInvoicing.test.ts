@@ -72,7 +72,7 @@ describe('experts do not see invoicing', () => {
     const call = await invoicedCall();
     await (await as(fx.founder)).put(`/profiles/${fx.approvedProfile.id}/platforms/${fx.platform.id}`, { rate: 1500 });
     await prisma.profileBank.create({
-      data: { profileId: fx.approvedProfile.id, bankName: 'Bank', accountHolder: 'Dana', accountNumber: 'GB00', isPrimary: true, createdById: fx.founder.id },
+      data: { profileId: fx.approvedProfile.id, nickname: 'Dana main', bankType: 'Checking', bankName: 'Bank', routingNumber: '021000021', accountNumber: 'GB00', createdById: fx.founder.id },
     });
     const e1 = await as(fx.e1);
     const responses = [

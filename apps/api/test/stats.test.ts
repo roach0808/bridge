@@ -122,8 +122,8 @@ describe('statistics by profile', () => {
     });
     await prisma.profileBank.createMany({
       data: [
-        { profileId: fx.approvedProfile.id, bankName: 'Second Bank', accountHolder: 'Dana', accountNumber: '1', createdById: fx.founder.id },
-        { profileId: fx.approvedProfile.id, bankName: 'Main Bank', accountHolder: 'Dana', accountNumber: '2', isPrimary: true, currency: 'USD', createdById: fx.founder.id },
+        { profileId: fx.approvedProfile.id, bankType: 'Checking', bankName: 'Main Bank', routingNumber: '1', accountNumber: '1', createdById: fx.founder.id, createdAt: new Date('2026-01-01') },
+        { profileId: fx.approvedProfile.id, bankType: 'Savings', bankName: 'Second Bank', routingNumber: '2', accountNumber: '2', createdById: fx.founder.id, createdAt: new Date('2026-02-01') },
       ],
     });
     const paid = await makeCall(fx, { associate: fx.a1, status: 'process_to_bank', scheduledAt: '2026-05-01T14:00:00Z', realIncome: 580.5 });
@@ -139,7 +139,7 @@ describe('statistics by profile', () => {
       isActive: false,
       onboardedAt: '2026-03-02',
       email: 'dana@example.org',
-      bank: { bankName: 'Main Bank', currency: 'USD', count: 2 },
+      bank: { bankName: 'Main Bank', bankType: 'Checking', count: 2 },
       calls: 3,
       paidCalls: 2,
       expectedIncome: 1200,

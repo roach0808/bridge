@@ -8,7 +8,7 @@ export { PlatformDot };
 
 /**
  * What a profile still needs before it is fully set up. Only what the viewer
- * is allowed to see: Experts get nothing, bank details are the Founder's business.
+ * is allowed to see: Experts get nothing, and only the Founder is told a bank is missing.
  */
 export function pendingItems(p: ProfileDTO): string[] {
   const items: string[] = [];

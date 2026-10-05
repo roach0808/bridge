@@ -131,6 +131,22 @@ export async function seedFixtures(): Promise<Fixtures> {
   };
 }
 
+/** Adds an active bank to a Profile directly (the approved one by default). */
+export async function makeBank(fx: Fixtures, over: { profileId?: string; nickname?: string; isActive?: boolean } = {}) {
+  return prisma.profileBank.create({
+    data: {
+      profileId: over.profileId ?? fx.approvedProfile.id,
+      nickname: over.nickname ?? 'Chase 1',
+      bankType: 'Checking',
+      bankName: 'Chase',
+      routingNumber: '021000021',
+      accountNumber: '000123456789',
+      isActive: over.isActive ?? true,
+      createdById: fx.founder.id,
+    },
+  });
+}
+
 export interface MakeCallOptions {
   associate: FixtureUser;
   expert?: FixtureUser | null;

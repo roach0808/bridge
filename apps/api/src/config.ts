@@ -8,6 +8,12 @@ const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   DATABASE_URL: z.string().url(),
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must be at least 32 characters'),
+  /**
+   * Encrypts the bank passwords (AES-256-GCM). Any string of 32+ characters; keep it forever:
+   * a different key cannot read the passwords already saved. Generate with `openssl rand -base64 32`.
+   * Without it the key is derived from JWT_SECRET, so changing that would lose the passwords.
+   */
+  BANK_ENCRYPTION_KEY: z.preprocess((v) => (v === '' ? undefined : v), z.string().min(32, 'BANK_ENCRYPTION_KEY must be at least 32 characters').optional()),
   ACCESS_TOKEN_TTL: duration.default('15m'),
   /**
    * How long a signed-in session lasts. `never` (the default) means it lasts

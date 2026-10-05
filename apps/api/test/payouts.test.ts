@@ -1,6 +1,6 @@
 import type { CallDTO, CallStatus, FinanceCallsPage, PaymentStatsDTO } from '@god/shared';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, clientsFor, expectError, makeCall, prisma, seedFixtures, type Client, type Fixtures } from './helpers';
+import { as, clientsFor, expectError, makeBank, makeCall, prisma, seedFixtures, type Client, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 let c: Record<'founder' | 'm1' | 'm2' | 'a1' | 'a2' | 'e1' | 'e2', Client>;
@@ -15,13 +15,16 @@ beforeEach(async () => {
     data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 1000 },
   });
   c = await clientsFor(fx, ['founder', 'm1', 'm2', 'a1', 'a2', 'e1', 'e2']);
+  bankId = (await makeBank(fx)).id;
 });
+/** The Profile's bank, which invoices are submitted to. */
+let bankId: string;
 afterAll(async () => {
   await prisma.$disconnect();
 });
 
 const move = (client: Client, id: string, to: CallStatus, extra: Record<string, unknown> = {}) =>
-  client.post(`/calls/${id}/transition`, { to, ...extra });
+  client.post(`/calls/${id}/transition`, { to, ...(to === 'invoice_submit' ? { bankId } : {}), ...extra });
 
 /** Each fixture call gets its own day, so the Expert is never double-booked. */
 let day = 0;

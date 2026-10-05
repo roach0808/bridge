@@ -34,6 +34,7 @@ import { Link as RouterLink } from 'react-router';
 import { useAuth } from '@/auth/AuthProvider';
 import { ConfirmDialog, EmptyState, ErrorState, PageHeader } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
+import { BankPicker } from '@/components/BankPicker';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
@@ -112,7 +113,8 @@ export default function InvoicingPage() {
   const withoutRate = next === 'invoice_submit' ? eligible.filter((c) => c.expectedPrice === null) : [];
   // Money invoiced now has to be paid somewhere later, so flag Profiles with no open bank account.
   const withoutBank = next === 'invoice_submit' ? eligible.filter((c) => c.bankReady === false) : [];
-  const [bankWarning, setBankWarning] = useState(false);
+  // Submitting asks which bank each Profile's invoices are paid into.
+  const [choosingBanks, setChoosingBanks] = useState(false);
 
   const changeTab = (status: InvoiceStatus) => {
     setTab(status);
@@ -130,16 +132,20 @@ export default function InvoicingPage() {
   const allChecked = rows.length > 0 && selectedRows.length === rows.length;
   const someChecked = selectedRows.length > 0 && !allChecked;
 
-  const runMove = async (incomes?: Map<string, number>) => {
+  const runMove = async (incomes?: Map<string, number>, banks?: Map<string, string>) => {
     if (!next || eligible.length === 0) return;
-    const targets = incomes ? eligible.filter((c) => incomes.has(c.id)) : eligible;
+    const targets = incomes ? eligible.filter((c) => incomes.has(c.id)) : banks ? eligible.filter((c) => banks.has(c.profile.id)) : eligible;
     const skipped = selectedRows.length - targets.length;
     setMoving({ done: 0, total: targets.length });
     try {
       let done = 0;
       const results = await runWithConcurrency(targets, 3, async (c) => {
         try {
-          return await api.calls.transition(c.id, next, incomes ? { realIncome: incomes.get(c.id)! } : undefined);
+          return await api.calls.transition(
+            c.id,
+            next,
+            incomes ? { realIncome: incomes.get(c.id)! } : banks ? { bankId: banks.get(c.profile.id)! } : undefined,
+          );
         } finally {
           done++;
           setMoving({ done, total: targets.length });
@@ -175,7 +181,7 @@ export default function InvoicingPage() {
   };
 
   const requestMove = () => {
-    if (withoutBank.length > 0) setBankWarning(true);
+    if (next === 'invoice_submit') setChoosingBanks(true);
     else if (next === 'process_to_bank') setPaying(eligible);
     else void runMove();
   };
@@ -184,17 +190,13 @@ export default function InvoicingPage() {
     <Box>
       <PageHeader title="Invoicing" subtitle="Move finished calls through to payment, and record what reached the bank." />
 
-      <ConfirmDialog
-        open={bankWarning}
-        title="Invoice without bank details?"
-        description={`${withoutBank.length} of these calls ${withoutBank.length === 1 ? 'is' : 'are'} for a Profile with no open bank account (${[
-          ...new Set(withoutBank.map((c) => c.profile.name)),
-        ].join(', ')}). You can invoice now, but there will be nowhere to pay them until a bank account is added.`}
-        confirmLabel="Invoice anyway"
-        onClose={() => setBankWarning(false)}
-        onConfirm={() => {
-          setBankWarning(false);
-          void runMove();
+      <ChooseBanksDialog
+        open={choosingBanks}
+        calls={eligible}
+        onClose={() => setChoosingBanks(false)}
+        onConfirm={(banks) => {
+          setChoosingBanks(false);
+          void runMove(undefined, banks);
         }}
       />
 
@@ -623,6 +625,56 @@ function PayDialog({
           onClick={() => onConfirm(new Map((calls ?? []).map((c) => [c.id, parse(values[c.id])!])))}
         >
           Mark {calls?.length ?? 0} paid
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
+/**
+ * Submitting invoices: which bank each Profile's invoices are paid into, by
+ * nickname. A Profile with one active bank has it chosen already.
+ */
+function ChooseBanksDialog({
+  open,
+  calls,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  calls: CallDTO[];
+  onClose: () => void;
+  onConfirm: (banks: Map<string, string>) => void;
+}) {
+  const profiles = [...new Map(calls.map((c) => [c.profile.id, c.profile])).values()];
+  const [chosen, setChosen] = useState<Record<string, string>>({});
+  const count = (id: string) => calls.filter((c) => c.profile.id === id).length;
+  const ready = profiles.every((p) => chosen[p.id]);
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth slotProps={{ transition: { onEnter: () => setChosen({}) } }}>
+      <DialogTitle>Submit {calls.length} invoice{calls.length === 1 ? '' : 's'}</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+          Choose the bank each Profile is paid into.
+        </Typography>
+        <Stack spacing={2}>
+          {profiles.map((p) => (
+            <BankPicker
+              key={p.id}
+              profile={p}
+              label={`${p.name} · ${count(p.id)} call${count(p.id) === 1 ? '' : 's'}`}
+              value={chosen[p.id] ?? ''}
+              onChange={(id) => setChosen((c) => ({ ...c, [p.id]: id }))}
+            />
+          ))}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button color="inherit" onClick={onClose}>
+          Cancel
+        </Button>
+        <Button variant="contained" disabled={!ready} onClick={() => onConfirm(new Map(Object.entries(chosen)))}>
+          Submit
         </Button>
       </DialogActions>
     </Dialog>

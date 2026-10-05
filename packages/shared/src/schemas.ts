@@ -311,6 +311,8 @@ export const transitionSchema = z
     actualDurationMinutes: actualDurationMinutes.optional(),
     rating: z.coerce.number().int().min(1, 'Rate from 1 to 5').max(5, 'Rate from 1 to 5').optional(),
     feedback: optionalText(2000).optional(),
+    /** Moving to `invoice_submit`: one of the Profile's active banks. Required unless the call already has one. */
+    bankId: uuid.optional(),
     /** Required to move a call to `process_to_bank`: what actually reached the bank (USD). */
     realIncome: money.optional(),
   })
@@ -607,29 +609,38 @@ export const blockDeleteQuerySchema = z.object({
 
 // --- Banks & photos ------------------------------------------------------------
 
-const optionalCode = (len: 2 | 3, message: string) =>
+/** An optional bank field: trimmed, and null when empty. */
+const bankText = (max: number) =>
   z
     .string()
-    .trim()
-    .toUpperCase()
+    .max(max)
     .nullish()
-    .transform((v) => (v ? v : null))
-    .refine((v) => v === null || new RegExp(`^[A-Z]{${len}}$`).test(v), message);
+    .transform((v) => (v == null || v.trim() === '' ? null : v.trim()));
 
-export const bankSchema = z.object({
+const bankFields = {
+  /** What the Founder calls the account, e.g. "Chase 1"; invoices are submitted to it by this name. */
+  nickname: bankText(60),
+  /** Free text: checking, savings, Wise, business… */
+  bankType: trimmed('Bank type', 60),
   bankName: trimmed('Bank name', 160),
-  accountHolder: trimmed('Account holder', 160),
-  accountNumber: trimmed('Account number or IBAN', 64),
-  swiftBic: optionalText(20),
-  routingNumber: optionalText(40),
-  country: optionalCode(2, 'Use a two-letter country code'),
-  currency: optionalCode(3, 'Use a three-letter currency code'),
-  notes: optionalText(1000),
-  /** A closed account stays on file but no longer counts as a way to pay. */
-  isActive: z.boolean().default(true),
-  isPrimary: z.boolean().default(false),
-});
-export const updateBankSchema = bankSchema.partial();
+  bankAddress: bankText(300),
+  routingNumber: trimmed('Routing number', 40),
+  accountNumber: trimmed('Account number', 64),
+  swiftCode: bankText(20),
+  email: bankText(254).refine((v) => v === null || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), 'Enter an email address'),
+  /** The online banking password. On an edit, leave it out to keep it; send null or "" to remove it. */
+  password: z.string().max(200, 'Password is too long').nullish(),
+  signInLocation: bankText(300),
+  /** A deactivated account stays on file but can no longer be chosen for an invoice. */
+  isActive: z.boolean(),
+};
+
+export const bankSchema = z.object({ ...bankFields, isActive: bankFields.isActive.default(true) });
+/** Every field optional: only what is sent changes. */
+export const updateBankSchema = z
+  .object(bankFields)
+  .partial()
+  .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
 export const PHOTO_MAX_BYTES = 400 * 1024;
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;

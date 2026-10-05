@@ -1,3 +1,4 @@
+import AccountBalanceRounded from '@mui/icons-material/AccountBalanceRounded';
 import AccountTreeRounded from '@mui/icons-material/AccountTreeRounded';
 import CalendarMonthRounded from '@mui/icons-material/CalendarMonthRounded';
 import ChatRounded from '@mui/icons-material/ChatRounded';
@@ -36,6 +37,7 @@ export const NAV_ITEMS: NavItem[] = [
   // Statistics (/stats) is left out of the sidebar until it is needed; the page still works at its address.
   { to: '/invoicing', label: 'Invoicing', icon: ReceiptLongRounded, roles: ['founder'], section: 'work' },
   { to: '/profiles', label: 'Profiles', icon: AccountTreeRounded, roles: ALL, section: 'admin' },
+  { to: '/banks', label: 'Banks', icon: AccountBalanceRounded, roles: ['founder'], section: 'admin' },
   { to: '/platforms', label: 'Platforms', icon: HubRounded, roles: ['founder', 'manager'], section: 'admin' },
   { to: '/team', label: 'Team', icon: GroupsRounded, roles: ['manager'], section: 'admin' },
   { to: '/users', label: 'Users', icon: ManageAccountsRounded, roles: ['founder'], section: 'admin' },

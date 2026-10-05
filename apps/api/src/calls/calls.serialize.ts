@@ -37,6 +37,7 @@ export const callInclude = {
   associate: { select: { ...userRefSelect, managerId: true, sharePercent: true, manager: { select: userRefSelect } } },
   expert: { select: { ...userRefSelect, timeZone: true, hourlyRate: true } },
   payeeManager: { select: userRefSelect },
+  bank: { select: { id: true, nickname: true, bankName: true, bankType: true, accountNumber: true, isActive: true } },
   createdBy: { select: userRefSelect },
 } satisfies Prisma.CallInclude;
 
@@ -87,6 +88,18 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): Ca
     permissions: callPermissions(viewer, call),
     payouts: payoutsFor(call, viewer, price),
     bankReady: viewer.role === 'founder' ? _count.banks > 0 : null,
+    // Experts never see a bank (§2.3).
+    bank:
+      viewer.role === 'expert' || !call.bank
+        ? null
+        : {
+            id: call.bank.id,
+            nickname: call.bank.nickname,
+            bankName: call.bank.bankName,
+            bankType: call.bank.bankType,
+            accountLast4: call.bank.accountNumber.replace(/\s/g, '').slice(-4),
+            isActive: call.bank.isActive,
+          },
     createdBy: toUserRef(call.createdBy),
     createdAt: iso(call.createdAt),
     updatedAt: iso(call.updatedAt),

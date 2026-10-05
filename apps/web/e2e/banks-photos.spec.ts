@@ -83,14 +83,22 @@ test('the Founder adds a bank from the pending tasks and the task clears', async
   const row = page.locator('div', { has: page.getByText(target.name, { exact: true }) }).filter({ has: page.getByRole('button', { name: 'Add bank' }) }).last();
   await row.getByRole('button', { name: 'Add bank' }).click();
   const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('Nickname').fill('E2E main');
+  await dialog.getByLabel('Bank type').fill('Checking');
   await dialog.getByLabel('Bank name').fill('E2E Bank');
-  await dialog.getByLabel('Account number or IBAN').fill('GB29NWBK60161331926819');
+  await dialog.getByLabel('Routing number').fill('021000021');
+  await dialog.getByLabel('Account number').fill('000123456789');
+  await dialog.getByLabel('Password').fill('e2e-secret');
   await dialog.getByRole('button', { name: 'Add bank' }).click();
-  await expect(dialog.getByText('E2E Bank')).toBeVisible({ timeout: 20_000 });
+  await expect(dialog.getByText('E2E main')).toBeVisible({ timeout: 20_000 });
 
-  const banks = (await api.get(`/profiles/${target.id}/banks`)) as Array<{ id: string; bankName: string; isPrimary: boolean }>;
+  const banks = (await api.get(`/profiles/${target.id}/banks`)) as Array<{ id: string; bankName: string; hasPassword: boolean }>;
   expect(banks).toHaveLength(1);
-  expect(banks[0]).toMatchObject({ bankName: 'E2E Bank', isPrimary: true });
+  expect(banks[0]).toMatchObject({ bankName: 'E2E Bank', hasPassword: true });
+  // The password stays hidden until asked for.
+  await expect(dialog.getByText('e2e-secret')).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Show password' }).click();
+  await expect(dialog.getByText('e2e-secret')).toBeVisible();
   const after = (await api.get('/dashboard')).tasks.profilesNeedingBank as Array<{ profile: { id: string } }>;
   expect(after.some((p) => p.profile.id === target.id)).toBe(false);
 

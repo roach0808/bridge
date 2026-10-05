@@ -36,6 +36,7 @@ import {
 import { DateTimePicker } from '@mui/x-date-pickers/DateTimePicker';
 import { joinCallRoom } from '@god/api-client';
 import {
+  bankLabel,
   CALL_DURATIONS,
   MAX_PLATFORM_RATE,
   FEATURES,
@@ -61,6 +62,7 @@ import { ConfirmDialog, EmptyState, ErrorState, Field } from '@/components/commo
 import { ProfileDetailsDialog } from '@/components/ProfileDetails';
 import { RoleBadge, UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
+import { BankPicker } from '@/components/BankPicker';
 import { useToast } from '@/components/ToastProvider';
 import { api, socket } from '@/lib/api';
 import { errorMessage, fieldErrors, isApiError } from '@/lib/errors';
@@ -105,6 +107,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const [meetingDetails, setMeetingDetails] = useState('');
   const [actualMinutes, setActualMinutes] = useState('');
   const [income, setIncome] = useState('');
+  // Submitting the invoice names the Profile's bank it is paid into.
+  const [bankId, setBankId] = useState('');
 
   const open = (to: CallStatus) => {
     setTarget(to);
@@ -115,11 +119,10 @@ function TransitionBar({ call }: { call: CallDTO }) {
     setActualMinutes(String(call.durationMinutes));
     // Start from the expected price; the bank usually pays a little less.
     setIncome(call.expectedPrice === null ? '' : String(call.expectedPrice));
+    setBankId(call.bank?.isActive ? call.bank.id : '');
     transition.reset();
   };
 
-  // §6.10: an invoice for a Profile with no open bank account cannot be paid out.
-  const noBank = call.allowedTransitions.includes('invoice_submit') && call.bankReady === false;
 
   const transition = useMutation({
     mutationFn: ({ to, ...extra }: TransitionInput) => api.calls.transition(call.id, to, extra),
@@ -158,6 +161,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
         ? minutesValid
         : target === 'process_to_bank'
           ? incomeValid
+          : target === 'invoice_submit'
+            ? bankId !== ''
           : expertReschedule
           ? comment.trim() !== ''
           : true;
@@ -172,6 +177,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
       ...(target === 'scheduled' ? { meetingDetails: meetingDetails.trim() } : {}),
       ...(target === 'finished' ? { actualDurationMinutes: minutes } : {}),
       ...(target === 'process_to_bank' ? { realIncome: incomeValue } : {}),
+      ...(target === 'invoice_submit' ? { bankId } : {}),
     });
   };
 
@@ -297,19 +303,10 @@ function TransitionBar({ call }: { call: CallDTO }) {
                   call is told. To keep it and find another time, use “Needs rescheduling” instead.
                 </Alert>
               )}
-              {target === 'invoice_submit' && noBank && (
-                <Alert
-                  severity="warning"
-                  sx={{ mb: 2 }}
-                  action={
-                    <Button color="inherit" size="small" href={`/profiles/${call.profile.id}`} target="_blank" rel="noopener">
-                      Profile
-                    </Button>
-                  }
-                >
-                  <strong>{call.profile.name} has no bank account yet.</strong> The invoice can be submitted, but nothing
-                  can be paid out until bank details are added.
-                </Alert>
+              {target === 'invoice_submit' && (
+                <Box sx={{ mb: 2 }}>
+                  <BankPicker profile={call.profile} value={bankId} onChange={setBankId} error={errors.bankId} />
+                </Box>
               )}
               {expertReschedule && (
                 <Alert
@@ -1490,6 +1487,15 @@ export default function CallDetailPage() {
                 </Tooltip>
               </Field>
               <Field label="Platform">{call.platform.name}</Field>
+              {call.bank && (
+                <Field label="Invoice bank">
+                  {bankLabel(call.bank)}
+                  <Typography component="span" variant="body2" color="text.secondary">
+                    {' '}· {call.bank.bankType} ··{call.bank.accountLast4}
+                    {!call.bank.isActive && ' · deactivated'}
+                  </Typography>
+                </Field>
+              )}
               {income && (
                 <Box sx={{ gridColumn: '1 / -1' }}>
                   <Field label="Income">

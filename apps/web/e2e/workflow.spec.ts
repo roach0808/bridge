@@ -50,6 +50,8 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
       durationMinutes: 15,
       projectDetails: 'E2E workflow check',
       platformAssociateName: 'E2E contact',
+      // Nobody can join a call without a way in, so scheduling needs it.
+      meetingDetails: 'https://zoom.us/j/1234567890 — passcode 0000',
     },
   });
   expect(created.status()).toBe(201);
@@ -106,8 +108,18 @@ test('Associate schedules → Expert finishes → Founder invoices, observed liv
     data: { status: 'registered', rate: 1000 },
   });
   expect(rateSet.ok()).toBeTruthy();
+  // The invoice is submitted to one of the Profile's banks, chosen by its nickname.
+  const bankAdded = await founderApi.ctx.post(`${API}/profiles/${profiles[0].id}/banks`, {
+    headers: { Authorization: `Bearer ${founderApi.token}` },
+    data: { nickname: 'E2E invoice bank', bankType: 'Checking', bankName: 'E2E Bank', routingNumber: '021000021', accountNumber: '000999888777' },
+  });
+  expect(bankAdded.ok()).toBeTruthy();
   await founder.reload();
-  await transition(founder, 'Mark invoice submitted');
+  await transition(founder, 'Mark invoice submitted', async (dialog) => {
+    await dialog.getByRole('combobox', { name: /Bank/ }).click();
+    await founder.getByRole('option', { name: /E2E invoice bank/ }).click();
+  });
+  await expect(founder.getByText('E2E invoice bank')).toBeVisible();
   await expect(observed).toHaveAttribute('data-status', 'invoice_submit', { timeout: 5_000 });
   await transition(founder, 'Mark invoice approved');
   await expect(observed).toHaveAttribute('data-status', 'invoice_approve', { timeout: 5_000 });

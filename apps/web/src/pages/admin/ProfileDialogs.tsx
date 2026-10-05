@@ -289,7 +289,7 @@ export function useProfileForm({
         />
       </Box>
       {isFounder && (
-        <FormSection label="Private — Founder only" hint="Not shown to Managers, Associates or Experts. Bank details are managed from the profile's details.">
+        <FormSection label="Private — Founder only" hint="Not shown to Managers, Associates or Experts. Banks are managed in the profile's details, or on the Banks page.">
           <Stack spacing={1.5}>
             <TextField
               label="Onboard date"
