@@ -5,16 +5,34 @@ import { useMemo } from 'react';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 
-/** What the calendar is showing for a non-Expert viewer. */
-export type CalendarSubject = { type: 'mine' } | { type: 'all' } | { type: 'expert'; id: string };
+/**
+ * What the calendar is showing for a non-Expert viewer: every call they can see
+ * (no Expert ticked), one Expert's calendar, or several Experts side by side
+ * (`all` keeps every active Expert, including ones added later).
+ */
+export type CalendarSubject = { type: 'mine' } | { type: 'all' } | { type: 'expert'; id: string } | { type: 'experts'; ids: string[] };
 
+/** `?expert=` holds `all`, one id, or ids separated by commas. */
 export function parseSubject(value: string | null): CalendarSubject {
   if (value === 'all') return { type: 'all' };
-  if (value && value !== 'mine') return { type: 'expert', id: value };
+  const ids = [...new Set((value ?? '').split(',').filter((id) => id && id !== 'mine'))];
+  if (ids.length === 1) return { type: 'expert', id: ids[0]! };
+  if (ids.length > 1) return { type: 'experts', ids };
   return { type: 'mine' };
 }
 
-export const subjectParam = (s: CalendarSubject) => (s.type === 'expert' ? s.id : s.type === 'mine' ? null : 'all');
+export const subjectParam = (s: CalendarSubject) =>
+  s.type === 'expert' ? s.id : s.type === 'experts' ? s.ids.join(',') : s.type === 'mine' ? null : 'all';
+
+/** The Experts a subject names; null for every Expert. */
+export const subjectExpertIds = (s: CalendarSubject): string[] | null =>
+  s.type === 'all' ? null : s.type === 'expert' ? [s.id] : s.type === 'experts' ? s.ids : [];
+
+/** `?profile=` / `?manager=`: ids separated by commas. */
+export const parseIds = (value: string | null) => [...new Set((value ?? '').split(',').filter(Boolean))];
+
+/** A call with no Manager (the Founder runs it) is filtered as this. */
+export const NO_MANAGER = 'none';
 
 /** A single-Expert or "my calls" calendar. */
 export function useExpertCalendar(fromIso: string, toIso: string, expertId: string | undefined, enabled: boolean) {

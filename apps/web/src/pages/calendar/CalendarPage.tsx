@@ -2,11 +2,8 @@ import AddRounded from '@mui/icons-material/AddRounded';
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded';
-import GroupsRounded from '@mui/icons-material/GroupsRounded';
-import PersonRounded from '@mui/icons-material/PersonRounded';
 import VideoCallRounded from '@mui/icons-material/VideoCallRounded';
 import {
-  Autocomplete,
   Box,
   Button,
   CircularProgress,
@@ -24,17 +21,20 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { CalendarResponse, ExpertRef, ExpertsCalendarResponse, Occurrence } from '@god/shared';
+import type { CalendarCall, CalendarResponse, ExpertRef, ExpertsCalendarResponse, Occurrence } from '@god/shared';
+import { useQuery } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth } from '@/auth/AuthProvider';
 import { ErrorState, PageHeader } from '@/components/common';
-import { UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
+import { api } from '@/lib/api';
+import { qk } from '@/lib/queryKeys';
 import { TEAM_TIME_ZONE } from '@/lib/time';
 import { expertColor } from '@/theme/theme';
 import { BlockDialog, type BlockDialogState } from './BlockDialog';
+import { CalendarFilter, type FilterOption } from './CalendarFilter';
 import {
   atMinute,
   callDurationFor,
@@ -57,7 +57,10 @@ import { FreeExpertsPanel, type RangeSelection } from './FreeExpertsPanel';
 import { MonthGrid } from './MonthGrid';
 import { TimeGrid, type ExtraZone, type GridColumn, type GridSelection } from './TimeGrid';
 import {
+  NO_MANAGER,
+  parseIds,
   parseSubject,
+  subjectExpertIds,
   subjectParam,
   useExpertCalendar,
   useExpertDirectory,
@@ -69,8 +72,6 @@ import { ZoneClocks, type Clock } from './ZoneClocks';
 
 const GRID_HEIGHT_CSS = 'max(460px, calc(100vh - 330px))';
 const EMPTY_SOURCE = { calls: [], busy: [], occurrences: [] };
-
-type SubjectOption = { key: string; subject: CalendarSubject; expert?: ExpertRef; slot?: number };
 
 export default function CalendarPage() {
   const { user, zone } = useAuth();
@@ -95,6 +96,9 @@ export default function CalendarPage() {
 
   const anchor = useMemo(() => parseAnchor(params.get('date'), zone), [params, zone]);
   const subject: CalendarSubject = isExpert ? { type: 'mine' } : parseSubject(params.get('expert'));
+  // Experts see only their own calendar; Associates only their own calls, all under their own Manager.
+  const profileIds = useMemo(() => (isExpert ? [] : parseIds(params.get('profile'))), [isExpert, params]);
+  const managerIds = useMemo(() => (isFounder || user?.role === 'manager' ? parseIds(params.get('manager')) : []), [isFounder, user?.role, params]);
 
   const updateParams = useCallback(
     (patch: Record<string, string | null>) => {
@@ -123,7 +127,8 @@ export default function CalendarPage() {
   const range = useMemo(() => visibleRange(view, anchor), [view, anchor]);
 
   // ---- data --------------------------------------------------------------------
-  const allMode = subject.type === 'all';
+  // Several Experts (or all of them) side by side; one Expert, or none, is a single column.
+  const allMode = subject.type === 'all' || subject.type === 'experts';
   const directory = useExpertDirectory(!isExpert);
   const single = useExpertCalendar(
     range.fromIso,
@@ -145,22 +150,45 @@ export default function CalendarPage() {
 
   const notes = useMemo(() => new Map((singleData?.rules ?? []).map((r) => [r.id, r.note])), [singleData]);
 
+  /** The Expert columns ticked in the Experts filter, in their usual order. */
+  const expertParam = subjectParam(subject);
+  const shownExperts = useMemo(() => {
+    const ids = subjectExpertIds(parseSubject(expertParam));
+    return (expertsData?.experts ?? []).filter((c) => ids === null || ids.includes(c.expert.id));
+  }, [expertsData, expertParam]);
+
+  /** The Profiles and Managers filters narrow the calls; busy time and time off stay, they are about the Expert. */
+  const matches = useCallback(
+    (c: CalendarCall, skip?: 'profile' | 'manager') =>
+      (skip === 'profile' || !profileIds.length || profileIds.includes(c.profile.id)) &&
+      (skip === 'manager' || !managerIds.length || managerIds.includes(c.manager?.id ?? NO_MANAGER)),
+    [profileIds, managerIds],
+  );
+  const filtering = profileIds.length > 0 || managerIds.length > 0;
+
   const columns = useMemo<GridColumn[]>(() => {
     if (allMode) {
-      return (expertsData?.experts ?? []).map((c) => ({
+      return shownExperts.map((c) => ({
         key: c.expert.id,
-        source: c,
+        source: { ...c, calls: c.calls.filter((call) => matches(call)) },
         expert: c.expert,
         color: expertColor(c.slot),
       }));
     }
-    return [{ key: 'main', source: singleData ?? EMPTY_SOURCE }];
-  }, [allMode, expertsData, singleData]);
+    const source = singleData ?? EMPTY_SOURCE;
+    return [{ key: 'main', source: { ...source, calls: source.calls.filter((call) => matches(call)) } }];
+  }, [allMode, shownExperts, singleData, matches]);
+
+  /** Every call in view before the Profiles and Managers filters: what those filters offer and count. */
+  const callsInView = useMemo<CalendarCall[]>(
+    () => (allMode ? shownExperts.flatMap((c) => c.calls) : (singleData?.calls ?? [])),
+    [allMode, shownExperts, singleData],
+  );
 
   const isEmpty = allMode
-    ? Boolean(expertsData) && expertsData!.experts.every((c) => !c.calls.length && !c.busy.length && !c.occurrences.some((o) => o.kind === 'unavailable'))
+    ? Boolean(expertsData) && columns.every((c) => !c.source.calls.length && !c.source.busy.length && !c.source.occurrences.some((o) => o.kind === 'unavailable'))
     : Boolean(singleData) &&
-      !singleData!.calls.length &&
+      !columns[0]!.source.calls.length &&
       !singleData!.busy.length &&
       !singleData!.occurrences.some((o) => o.kind === 'unavailable');
 
@@ -281,33 +309,75 @@ export default function CalendarPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [anchor, view, zone, goTo, setView, dialog, freePanel, choice]);
 
-  // ---- subject selector ------------------------------------------------------------------
-  const subjectOptions = useMemo<SubjectOption[]>(
-    () => [
-      { key: 'mine', subject: { type: 'mine' } },
-      { key: 'all', subject: { type: 'all' } },
-      ...directory.experts.map((e) => ({
-        key: e.expert.id,
-        subject: { type: 'expert', id: e.expert.id } as CalendarSubject,
-        expert: e.expert,
-        slot: e.slot,
-      })),
-    ],
+  // ---- filters ----------------------------------------------------------------------
+  const setFilter = (key: 'expert' | 'profile' | 'manager', value: string | null) => {
+    clearSelection();
+    updateParams({ [key]: value });
+  };
+
+  const expertOptions = useMemo<FilterOption[]>(
+    () => directory.experts.map((e) => ({ id: e.expert.id, label: e.expert.nickname, detail: zoneLabel(e.expert.timeZone), color: expertColor(e.slot) })),
     [directory.experts],
   );
-  const subjectKey = subject.type === 'expert' ? subject.id : subject.type;
-  const subjectValue =
-    subjectOptions.find((o) => o.key === subjectKey) ??
-    (subject.type === 'expert'
-      ? { key: subject.id, subject, expert: selectedExpert ?? undefined, slot: selectedSlot }
-      : subjectOptions[0]!);
+  const tickedExperts = subjectExpertIds(subject) ?? expertOptions.map((o) => o.id);
+  const onExpertsChange = (ids: string[]) => {
+    const everyone = ids.length > 0 && expertOptions.length > 0 && expertOptions.every((o) => ids.includes(o.id));
+    setFilter('expert', everyone ? 'all' : ids.length === 1 ? ids[0]! : ids.length ? ids.join(',') : null);
+  };
+
+  /** "3 calls in view" for an option. */
+  const inView = (n: number) => (n ? `${n} call${n === 1 ? '' : 's'} in view` : 'No calls in view');
+
+  const profilesQuery = useQuery({
+    queryKey: qk.profiles.list({}),
+    queryFn: () => api.profiles.list(),
+    enabled: !isExpert,
+    staleTime: 5 * 60_000,
+  });
+  const profileOptions = useMemo<FilterOption[]>(() => {
+    const counts = new Map<string, number>();
+    for (const c of callsInView) if (matches(c, 'profile')) counts.set(c.profile.id, (counts.get(c.profile.id) ?? 0) + 1);
+    const names = new Map((profilesQuery.data ?? []).map((p) => [p.id, p.name]));
+    for (const c of callsInView) if (!names.has(c.profile.id)) names.set(c.profile.id, c.profile.name);
+    // The Profiles with calls in view first, then the rest by name.
+    return [...names.entries()]
+      .map(([id, name]) => ({ id, label: name, count: counts.get(id) ?? 0 }))
+      .sort((a, b) => Number(b.count > 0) - Number(a.count > 0) || a.label.localeCompare(b.label))
+      .map(({ id, label, count }) => ({ id, label, detail: inView(count) }));
+  }, [profilesQuery.data, callsInView, matches]);
+
+  // Managers can only list Associates and Experts, so the Managers come from the calls themselves;
+  // the Founder also gets every Manager. Names seen once are kept for a filter that outlives its range.
+  const managersQuery = useQuery({
+    queryKey: qk.users.list({ role: 'manager' }),
+    queryFn: () => api.users.list({ role: 'manager' }),
+    enabled: isFounder,
+    staleTime: 5 * 60_000,
+  });
+  const managerNames = useRef(new Map<string, string>());
+  const managerOptions = useMemo<FilterOption[]>(() => {
+    const names = managerNames.current;
+    for (const m of managersQuery.data ?? []) names.set(m.id, m.nickname);
+    if (user?.role === 'manager') names.set(user.id, user.nickname);
+    const counts = new Map<string, number>();
+    for (const c of callsInView) {
+      const id = c.manager?.id ?? NO_MANAGER;
+      if (c.manager) names.set(c.manager.id, c.manager.nickname);
+      if (matches(c, 'manager')) counts.set(id, (counts.get(id) ?? 0) + 1);
+    }
+    const options = [...names.entries()]
+      .map(([id, name]) => ({ id, label: name, count: counts.get(id) ?? 0 }))
+      .sort((a, b) => Number(b.count > 0) - Number(a.count > 0) || a.label.localeCompare(b.label));
+    if (counts.has(NO_MANAGER) || managerIds.includes(NO_MANAGER)) options.push({ id: NO_MANAGER, label: 'No Manager (the Founder’s)', count: counts.get(NO_MANAGER) ?? 0 });
+    return options.map(({ id, label, count }) => ({ id, label, detail: inView(count) }));
+  }, [managersQuery.data, callsInView, matches, user, managerIds]);
 
   const subtitle = isExpert
     ? canEditBlocks
       ? 'Your calls and time off. Drag on the grid to add time off.'
       : 'Your calls and time off.'
     : allMode
-      ? 'Every Expert side by side. Drag across a time to see who is free.'
+      ? 'Experts side by side. Drag across a time to see who is free.'
       : subject.type === 'expert'
         ? 'Drag across a time to start a call with this Expert.'
         : 'Calls you can see across all Experts.';
@@ -387,58 +457,6 @@ export default function CalendarPage() {
           </Stack>
 
           <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-            {!isExpert && (
-              <Autocomplete<SubjectOption, false, true>
-                size="small"
-                disableClearable
-                options={subjectOptions}
-                value={subjectValue}
-                loading={directory.isLoading}
-                isOptionEqualToValue={(a, b) => a.key === b.key}
-                getOptionLabel={(o) => (o.subject.type === 'mine' ? 'My calls' : o.subject.type === 'all' ? 'All experts' : (o.expert?.nickname ?? 'Expert'))}
-                groupBy={(o) => (o.expert ? 'Experts' : 'Views')}
-                onChange={(_, o) => {
-                  clearSelection();
-                  updateParams({ expert: subjectParam(o.subject) });
-                }}
-                renderOption={({ key, ...props }, o) => (
-                  <Box component="li" key={key} {...props} sx={{ gap: 1.25 }}>
-                    <SubjectIcon option={o} />
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="body2" fontWeight={500} noWrap>
-                        {o.subject.type === 'mine' ? 'My calls' : o.subject.type === 'all' ? 'All experts' : o.expert?.nickname}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap component="div">
-                        {o.subject.type === 'mine'
-                          ? 'Calls visible to you'
-                          : o.subject.type === 'all'
-                            ? 'Side-by-side availability'
-                            : o.expert
-                              ? zoneLabel(o.expert.timeZone)
-                              : ''}
-                      </Typography>
-                    </Box>
-                  </Box>
-                )}
-                renderInput={(p) => (
-                  <TextField
-                    {...p}
-                    label="Showing"
-                    slotProps={{
-                      input: {
-                        ...p.InputProps,
-                        startAdornment: (
-                          <Box sx={{ display: 'flex', alignItems: 'center', pl: 0.5 }}>
-                            <SubjectIcon option={subjectValue} small />
-                          </Box>
-                        ),
-                      },
-                    }}
-                  />
-                )}
-                sx={{ width: { xs: '100%', sm: 240 } }}
-              />
-            )}
             <ToggleButtonGroup
               exclusive
               size="small"
@@ -459,6 +477,51 @@ export default function CalendarPage() {
           </Stack>
         </Stack>
 
+        {/* ---------------- filters ---------------- */}
+        {!isExpert && (
+          <Stack
+            direction={{ xs: 'column', sm: 'row' }}
+            spacing={1}
+            alignItems={{ xs: 'stretch', sm: 'center' }}
+            flexWrap="wrap"
+            useFlexGap
+            sx={(t) => ({ px: { xs: 1.5, sm: 2 }, py: 1.25, borderBottom: `1px solid ${pal(t).divider}` })}
+          >
+            <CalendarFilter
+              label="Experts"
+              emptyText="All my calls"
+              allLabel="All experts"
+              options={expertOptions}
+              selected={tickedExperts}
+              loading={directory.isLoading}
+              onChange={onExpertsChange}
+            />
+            <CalendarFilter
+              label="Profiles"
+              emptyText="Every Profile"
+              options={profileOptions}
+              selected={profileIds}
+              loading={profilesQuery.isLoading}
+              onChange={(ids) => setFilter('profile', ids.length ? ids.join(',') : null)}
+            />
+            {(isFounder || user?.role === 'manager') && (
+              <CalendarFilter
+                label="Managers"
+                emptyText="Every Manager"
+                options={managerOptions}
+                selected={managerIds}
+                loading={managersQuery.isLoading}
+                onChange={(ids) => setFilter('manager', ids.length ? ids.join(',') : null)}
+              />
+            )}
+            {(filtering || subject.type !== 'mine') && (
+              <Button size="small" color="inherit" onClick={() => { clearSelection(); updateParams({ expert: null, profile: null, manager: null }); }}>
+                Clear filters
+              </Button>
+            )}
+          </Stack>
+        )}
+
         {/* ---------------- clocks / legend ---------------- */}
         <Stack
           direction={{ xs: 'column', md: 'row' }}
@@ -467,7 +530,7 @@ export default function CalendarPage() {
           sx={(t) => ({ px: { xs: 1.5, sm: 2 }, py: 1, borderBottom: `1px solid ${pal(t).divider}` })}
         >
           <ZoneClocks clocks={clocks} clientZone={clientZone} onClientZoneChange={setClientZone} />
-          {allMode && expertsData && <ExpertLegend experts={expertsData.experts.map((c) => ({ expert: c.expert, slot: c.slot }))} />}
+          {allMode && expertsData && <ExpertLegend experts={shownExperts.map((c) => ({ expert: c.expert, slot: c.slot }))} />}
         </Stack>
 
         <Box sx={{ position: 'relative' }}>
@@ -540,8 +603,8 @@ export default function CalendarPage() {
             </Box>
           )}
 
-          {allMode && expertsData && expertsData.experts.length === 0 && (
-            <Hint>No active Experts yet.</Hint>
+          {allMode && expertsData && shownExperts.length === 0 && (
+            <Hint>{expertsData.experts.length ? 'None of the Experts ticked is active.' : 'No active Experts yet.'}</Hint>
           )}
         </Box>
 
@@ -556,7 +619,9 @@ export default function CalendarPage() {
         >
           <Typography variant="caption" color="text.secondary">
             {isEmpty
-              ? allMode
+              ? filtering
+                ? 'No calls match these filters in this range.'
+                : allMode
                 ? 'Nothing booked in this range — every Expert is free.'
                 : isExpert
                   ? 'Nothing scheduled in this range.' + (canEditBlocks ? ' Drag on the grid to add time off.' : '')
@@ -585,7 +650,7 @@ export default function CalendarPage() {
       {freePanel && expertsData && (
         <FreeExpertsPanel
           selection={freePanel}
-          experts={expertsData.experts}
+          experts={shownExperts}
           zone={zone}
           canSchedule={!isExpert}
           onClose={clearSelection}
@@ -635,36 +700,6 @@ export default function CalendarPage() {
           </MenuItem>
         )}
       </Menu>
-    </Box>
-  );
-}
-
-function SubjectIcon({ option, small }: { option: SubjectOption; small?: boolean }) {
-  const size = small ? 22 : 28;
-  if (option.expert) {
-    return (
-      <UserAvatar
-        avatarId={option.expert.avatarId} photoId={option.expert.photoId}
-        label={option.expert.nickname}
-        size={size}
-      />
-    );
-  }
-  const Icon = option.subject.type === 'all' ? GroupsRounded : PersonRounded;
-  return (
-    <Box
-      sx={(t) => ({
-        width: size,
-        height: size,
-        borderRadius: '50%',
-        display: 'grid',
-        placeItems: 'center',
-        bgcolor: t.alpha(pal(t).text.primary, 0.06),
-        color: 'text.secondary',
-        flexShrink: 0,
-      })}
-    >
-      <Icon sx={{ fontSize: small ? 14 : 17 }} />
     </Box>
   );
 }

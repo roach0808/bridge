@@ -43,7 +43,7 @@ const calendarCallSelect = {
   expertId: true,
   platform: { select: { id: true, name: true } },
   profile: { select: { id: true, name: true, avatarId: true, photoId: true } },
-  associate: { select: userRefSelect },
+  associate: { select: { ...userRefSelect, manager: { select: userRefSelect } } },
   expert: { select: userRefSelect },
 } satisfies Prisma.CallSelect;
 
@@ -58,6 +58,8 @@ const toCalendarCall = (c: CalendarCallRow, viewer: Pick<Actor, 'role'>): Calend
   platform: c.platform,
   profile: c.profile,
   associate: toUserRef(c.associate),
+  // An Associate's call is their Manager's call; a Manager may run one themselves.
+  manager: c.associate.role === 'manager' ? toUserRef(c.associate) : c.associate.manager ? toUserRef(c.associate.manager) : null,
   expert: c.expert ? toUserRef(c.expert) : null,
 });
 
@@ -106,7 +108,7 @@ async function buildExpertCalendars(
     prisma.call.findMany({
       // A cancelled call is off the calendar: its slot is free again.
       where: { expertId: { in: expertIds }, status: { not: 'cancelled' }, ...overlaps(from, to) },
-      select: { ...calendarCallSelect, associateId: true, associate: { select: { ...userRefSelect, managerId: true } } },
+      select: calendarCallSelect,
       orderBy: { scheduledAt: 'asc' },
     }),
     loadBlocks(expertIds, from, to),

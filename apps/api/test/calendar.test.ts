@@ -33,6 +33,23 @@ const ids = (arr: Array<{ id: string }>) => arr.map((c) => c.id).sort();
 const calendarOf = (client: Client, expertId?: string, range = RANGE) => client.get('/calendar', { ...range, ...(expertId ? { expertId } : {}) });
 
 describe('GET /calendar privacy', () => {
+  it('names each call’s Manager: the Associate’s Manager, or the Manager running it', async () => {
+    const w = await seedExpertWeek();
+    const own = await makeCall(fx, { associate: fx.m1, expert: fx.e1, status: 'scheduled', scheduledAt: '2027-02-03T09:00:00Z' });
+    const res = await calendarOf(await as(fx.founder), fx.e1.id);
+    expect(res.status, res.text).toBe(200);
+    const managerOf = (id: string) => res.body.calls.find((c: { id: string }) => c.id === id)?.manager?.id;
+    expect(managerOf(w.c1.id)).toBe(fx.m1.id); // a1's call
+    expect(managerOf(w.c2.id)).toBe(fx.m2.id); // a3's call
+    expect(managerOf(own.id)).toBe(fx.m1.id); // run by m1 themselves
+    // The same on the side-by-side calendar, and on "my calls".
+    const all = await (await as(fx.founder)).get('/calendar/experts', RANGE);
+    const column = all.body.experts.find((c: { expert: { id: string } }) => c.expert.id === fx.e1.id);
+    expect(column.calls.find((c: { id: string }) => c.id === w.c2.id).manager).toMatchObject({ id: fx.m2.id, nickname: 'ManagerTwo', role: 'manager' });
+    const mine = await calendarOf(await as(fx.a1));
+    expect(mine.body.calls.every((c: { manager: { id: string } }) => c.manager.id === fx.m1.id)).toBe(true);
+  });
+
   it('associate: own calls in full, other associates’ blocking calls only as busy time', async () => {
     const w = await seedExpertWeek();
     const res = await calendarOf(await as(fx.a1), fx.e1.id);

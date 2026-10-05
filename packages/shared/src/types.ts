@@ -379,6 +379,8 @@ export interface CalendarCall {
   platform: { id: string; name: string };
   profile: { id: string; name: string; avatarId: string; photoId: string | null };
   associate: UserRef;
+  /** The call's Manager: the Associate's Manager, or the Manager running it themselves. Null for a call the Founder runs. */
+  manager: UserRef | null;
   expert: UserRef | null;
 }
 
