@@ -28,12 +28,13 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import { PAYEE_LABELS, type CallDTO, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
+import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, type CallDTO, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { ConfirmDialog, EmptyState, ErrorState, LoadingRows } from '@/components/common';
+import { STATUS_COLORS } from '@/components/StatusChip';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
@@ -157,8 +158,8 @@ export function FinanceTab() {
                 ))}
               </Stack>
             ) : (
-              <TableSurface minWidth={me.role === 'founder' || me.role === 'manager' ? 1040 : 720}>
-                <Table size="small" sx={{ '& th, & td': { px: 1.25 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
+              <TableSurface minWidth={me.role === 'founder' || me.role === 'manager' ? 1100 : 800}>
+                <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
                   <TableHead>
                     <TableRow>
                       {canSelect && (
@@ -277,8 +278,8 @@ function PersonPay({ name, children }: { name: string | null; children?: ReactNo
 function columnsFor(role: Role, zone: string): Column[] {
   const when = (c: CallDTO) => inZone(c.scheduledAt, zone);
   const base: Column[] = [
-    { key: 'profile', label: 'Profile', width: 130, value: (c) => c.profile.name, render: (c) => <Typography variant="body2" fontWeight={550} noWrap>{c.profile.name}</Typography> },
-    { key: 'platform', label: 'Platform', width: 130, value: (c) => c.platform.name, render: (c) => c.platform.name },
+    { key: 'profile', label: 'Profile', width: 110, value: (c) => c.profile.name, render: (c) => <Typography variant="body2" fontWeight={550}>{c.profile.name}</Typography> },
+    { key: 'platform', label: 'Platform', width: 100, value: (c) => c.platform.name, render: (c) => c.platform.name },
     {
       key: 'time',
       label: 'Time',
@@ -287,6 +288,20 @@ function columnsFor(role: Role, zone: string): Column[] {
       value: (c) => when(c).toFormat('MM/dd/yyyy'),
       sort: (c) => -when(c).startOf('day').toMillis(),
       render: (c) => <Num>{when(c).toFormat('MM/dd hh:mm a')}</Num>,
+    },
+    {
+      key: 'status',
+      label: 'Status',
+      width: 100,
+      value: (c) => STATUS_LABELS[c.status],
+      sort: (c) => CALL_STATUSES.indexOf(c.status),
+      // A dot and words that may wrap: a pill would push the money columns off the page.
+      render: (c) => (
+        <Stack direction="row" spacing={0.75} alignItems="baseline">
+          <Box component="span" sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: STATUS_COLORS[c.status], flexShrink: 0, position: 'relative', top: -1 }} />
+          <Typography variant="body2">{STATUS_LABELS[c.status]}</Typography>
+        </Stack>
+      ),
     },
   ];
   const duration: Column = {
@@ -528,9 +543,6 @@ function ColumnFilter({
 
 // --- Totals --------------------------------------------------------------------
 
-/** Statuses whose invoice is out and not paid yet. */
-const ON_INVOICE = new Set(['invoice_submit', 'invoice_approve']);
-
 const sumOf = (rows: CallDTO[], pick: (c: CallDTO) => number | null | undefined) => rows.reduce((t, c) => t + (pick(c) ?? 0), 0);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -539,9 +551,9 @@ function Totals({ rows, role }: { rows: CallDTO[]; role: Role }) {
   const tiles: Array<{ label: string; value: string; footer: string }> = [];
 
   if (role === 'founder' || role === 'manager') {
-    const invoiced = rows.filter((c) => ON_INVOICE.has(c.status));
+    // Every call on the tab has finished: the invoice amount of all of them, whatever their invoice stage.
     const banked = rows.filter((c) => c.realIncome !== null);
-    tiles.push({ label: 'Total income on invoice', value: formatUsd(sumOf(invoiced, (c) => c.expectedPrice)), footer: `${plural(invoiced.length, 'invoice')} waiting for the bank` });
+    tiles.push({ label: 'Total income on invoice', value: formatUsd(sumOf(rows, (c) => c.expectedPrice)), footer: `from ${plural(rows.length, 'finished call')}` });
     tiles.push({ label: 'Real income', value: formatUsd(sumOf(banked, (c) => c.realIncome)), footer: `from ${plural(banked.length, 'call')} paid to bank` });
   }
   if (role === 'founder') {
