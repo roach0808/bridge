@@ -19,6 +19,13 @@ const trimmed = (label: string, max = 5000) =>
     .min(1, `${label} is required`)
     .max(max, `${label} is too long`);
 
+/** Required, but as long as it needs to be: only the request size (2 MB) bounds it. */
+const longText = (label: string) =>
+  z
+    .string({ required_error: `${label} is required` })
+    .trim()
+    .min(1, `${label} is required`);
+
 const optionalText = (max = 10000) =>
   z
     .string()
@@ -246,7 +253,7 @@ export const createCallSchema = z.object({
   expertId: uuid.nullish(),
   scheduledAt: isoDateTime,
   durationMinutes,
-  projectDetails: trimmed('Project details'),
+  projectDetails: longText('Project details'),
   platformAssociateName: trimmed('Platform associate', 160),
   notes: optionalText(),
   /** How to join the platform's meeting: link, passcode… */
@@ -269,7 +276,7 @@ export const updateCallSchema = z
     platformId: uuid.optional(),
     scheduledAt: isoDateTime.optional(),
     durationMinutes: durationMinutes.optional(),
-    projectDetails: trimmed('Project details').optional(),
+    projectDetails: longText('Project details').optional(),
     platformAssociateName: trimmed('Platform associate', 160).optional(),
     notes: optionalText().optional(),
     /** Whoever runs the call, their Manager or the Founder: how to join the platform's meeting. */

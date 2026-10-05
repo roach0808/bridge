@@ -136,6 +136,19 @@ describe('POST /calls', () => {
     expect(await prisma.call.count()).toBe(0);
   });
 
+  it('project details have no length limit, but cannot be blank', async () => {
+    const a1 = await as(fx.a1);
+    const brief = 'Market sizing for industrial pumps. '.repeat(3000); // ~108,000 characters
+    const created = await a1.post('/calls', body({ projectDetails: brief }));
+    expect(created.status, created.text).toBe(201);
+    expect(created.body.projectDetails).toBe(brief.trim());
+    const longer = brief + 'And one more paragraph.';
+    const edited = await a1.patch(`/calls/${created.body.id}`, { projectDetails: longer });
+    expect(edited.status, edited.text).toBe(200);
+    expect(edited.body.projectDetails).toBe(longer);
+    expectError(await a1.post('/calls', body({ projectDetails: '   ' })), 400, 'validation_error');
+  });
+
   it.each([[20], [0], [90]])('duration %s is 400', async (durationMinutes) => {
     expectError(await (await as(fx.a1)).post('/calls', body({ durationMinutes })), 400, 'validation_error');
   });
