@@ -54,8 +54,8 @@ import type {
   FinanceCallsPage,
   FinanceCallsQuery,
   MarkPayoutsInput,
-  CurrentCycleDTO,
-  PayCycleDTO,
+  PaymentStatsDTO,
+  PaymentStatsQuery,
 } from '@god/shared';
 import { HttpClient, type ClientOptions, type Query } from './http';
 
@@ -307,12 +307,8 @@ export function createApiClient(options: ClientOptions) {
       calls: (query?: FinanceCallsQuery) => get<FinanceCallsPage>('/finance/calls', query as Query),
       /** Marks one person's pay on several calls as paid (or not paid after all). */
       markPaid: (input: MarkPayoutsInput) => post<{ updated: number }>('/finance/payouts', input),
-      /** Founder: the open payment cycle and what closing it would pay. */
-      currentCycle: () => get<CurrentCycleDTO>('/finance/cycle'),
-      /** Founder: pays everyone owed and closes the month. */
-      closeCycle: (label: string) => post<PayCycleDTO>('/finance/cycles', { label }),
-      /** Closed months: all of them for the Founder, the caller's own payments for anyone else. */
-      cycles: () => get<PayCycleDTO[]>('/finance/cycles'),
+      /** What came in and went out, week by week, month by month or year by year. Non-founders: their own pay. */
+      records: (query?: PaymentStatsQuery) => get<PaymentStatsDTO>('/finance/records', query as Query),
     },
 
     stats: {

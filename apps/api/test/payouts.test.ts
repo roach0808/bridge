@@ -1,4 +1,4 @@
-import type { CallDTO, CallStatus, FinanceCallsPage } from '@god/shared';
+import type { CallDTO, CallStatus, FinanceCallsPage, PaymentStatsDTO } from '@god/shared';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { as, clientsFor, expectError, makeCall, prisma, seedFixtures, type Client, type Fixtures } from './helpers';
 
@@ -341,69 +341,60 @@ describe('the Finance tab', () => {
   });
 });
 
-describe('monthly payment cycles', () => {
-  it('closing the month pays everyone the Founder owes, keeps the record, and starts the next cycle from zero', async () => {
+describe('the Payment records', () => {
+  it('add up what came in and went out, period by period, and each person sees their own pay', async () => {
     const banked = await bankedCall(fx.a1, 1000); // e1: 100 · m1: 150 (a1: 75)
-    await finishedCall(fx.a2, 60); // e1: 200; not paid to bank yet (expected $1,000)
-    await prisma.user.update({ where: { id: fx.e2.id }, data: { hourlyRate: null } });
-    await finishedCall(fx.a2, 30, fx.e2); // e2 has no rate: cannot be paid yet
-    // The Expert of the paid call was paid during the month.
-    await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [banked.id] });
-
-    let current = (await c.founder.get('/finance/cycle')).body;
-    expect(current).toMatchObject({
-      startedAt: null,
-      income: 1000,
-      paid: { experts: 100, managers: 0, associates: 0 },
-      balance: 900,
-      expectedPipeline: 1500,
-      unpricedExpertCalls: 1,
-    });
-    expect(current.toPay.map((l: { user: { id: string }; kind: string; amount: number }) => [l.user.id, l.kind, l.amount])).toEqual([
-      [fx.e1.id, 'expert', 200],
-      [fx.m1.id, 'manager', 150],
-    ]);
-    expect(current.suggestedLabel).toMatch(/^[A-Z][a-z]+ \d{4}$/);
-
-    // Only the Founder closes it, and sees the open cycle.
-    expectError(await c.m1.get('/finance/cycle'), 403);
-    expectError(await c.m1.post('/finance/cycles', { label: 'September 2026' }), 403);
-
-    const closed = await c.founder.post('/finance/cycles', { label: 'September 2026' });
-    expect(closed.status, closed.text).toBe(201);
-    expect(closed.body).toMatchObject({
-      label: 'September 2026',
-      startedAt: null,
-      totals: { income: 1000, paidExperts: 300, paidManagers: 150, paidAssociates: 0, balance: 550 },
-    });
-    expect(closed.body.lines.map((l: { user: { id: string }; amount: number; calls: number }) => [l.user.id, l.amount, l.calls])).toEqual([
-      [fx.e1.id, 300, 2],
-      [fx.m1.id, 150, 1],
-    ]);
-    // Everyone paid on the day hears about it, with the month.
-    const told = await prisma.notification.findMany({ where: { type: 'call.paid' }, select: { userId: true, payload: true } });
-    expect(told.filter((n) => JSON.stringify(n.payload).includes('September 2026')).map((n) => n.userId).sort()).toEqual([fx.e1.id, fx.m1.id].sort());
-
-    // A new cycle: nothing in, nothing out, nothing owed (the unpriced call waits for its rate).
-    current = (await c.founder.get('/finance/cycle')).body;
-    expect(current).toMatchObject({ income: 0, paid: { experts: 0, managers: 0 }, balance: 0, toPay: [], unpricedExpertCalls: 1 });
-    expect(current.startedAt).toBe(closed.body.closedAt);
-
-    // A payment inside a closed month stays in it; closing twice in a row is refused.
-    expectError(await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [banked.id], paid: false }), 409, 'payout_closed');
-    expectError(await c.founder.post('/finance/cycles', { label: 'Again' }), 409);
-
-    // The Manager's payment to the Associate afterwards belongs to the new cycle.
+    const finished = await finishedCall(fx.a2, 60); // e1: 200; not paid to bank yet
+    await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [banked.id, finished.id] });
+    await c.founder.post('/finance/payouts', { payee: 'manager', callIds: [banked.id] });
     expect((await c.m1.post('/finance/payouts', { payee: 'associate', callIds: [banked.id] })).status).toBe(200);
-    expect((await c.founder.get('/finance/cycle')).body.paid.associates).toBe(75);
 
-    // The record: everything for the Founder; each person only their own line.
-    const all = (await c.founder.get('/finance/cycles')).body;
-    expect(all).toHaveLength(1);
-    const mine = (await c.m1.get('/finance/cycles')).body;
-    expect(mine).toEqual([expect.objectContaining({ label: 'September 2026', totals: null, lines: [expect.objectContaining({ kind: 'manager', amount: 150 })] })]);
-    expect((await c.e1.get('/finance/cycles')).body[0].lines).toEqual([expect.objectContaining({ kind: 'expert', amount: 300 })]);
-    expect((await c.a1.get('/finance/cycles')).body).toEqual([]);
+    const get = async (client: Client, query: Record<string, unknown> = {}) => {
+      const res = await client.get('/finance/records', query);
+      expect(res.status, res.text).toBe(200);
+      return res.body as PaymentStatsDTO;
+    };
+
+    const founder = await get(c.founder, { period: 'month', count: 3 });
+    expect(founder.period).toBe('month');
+    expect(founder.periods).toHaveLength(3);
+    const now = Date.now();
+    const current = founder.periods[2]!;
+    expect(Date.parse(current.start)).toBeLessThanOrEqual(now);
+    expect(Date.parse(current.end)).toBeGreaterThan(now);
+    expect(current).toMatchObject({ income: 1000, paidExperts: 300, paidManagers: 150, paidAssociates: 75, balance: 550 });
+    expect(current.people.map((l) => [l.user.id, l.kind, l.amount, l.calls])).toEqual([
+      [fx.e1.id, 'expert', 300, 2],
+      [fx.m1.id, 'manager', 150, 1],
+      [fx.a1.id, 'associate', 75, 1],
+    ]);
+    expect(founder.periods[0]).toMatchObject({ income: 0, paidExperts: 0, paidManagers: 0, balance: 0, people: [] });
+    expect(founder.total).toMatchObject({ income: 1000, paidExperts: 300, paidManagers: 150, balance: 550 });
+
+    // Anyone else: what they were paid themselves, and never the income.
+    const m1 = await get(c.m1, { period: 'month', count: 3 });
+    expect(m1.total).toMatchObject({ income: null, balance: null, paidExperts: 0, paidManagers: 150, paidAssociates: 0 });
+    expect(m1.total.people.map((l) => l.user.id)).toEqual([fx.m1.id]);
+    expect((await get(c.e1)).total).toMatchObject({ income: null, paidExperts: 300, paidManagers: 0 });
+    expect((await get(c.a1)).total).toMatchObject({ income: null, paidAssociates: 75, paidManagers: 0 });
+    expect((await get(c.e2)).total).toMatchObject({ paidExperts: 0, people: [] });
+
+    // A payment counts in the period it was made: one from two years ago is in the years, not the months.
+    await prisma.call.update({ where: { id: finished.id }, data: { expertPaidAt: new Date(now - 2 * 366 * 86_400_000) } });
+    expect((await get(c.founder, { period: 'month', count: 3 })).total.paidExperts).toBe(100);
+    const years = await get(c.founder, { period: 'year', count: 5 });
+    expect(years.total.paidExperts).toBe(300);
+    expect(years.periods.filter((p) => p.paidExperts > 0)).toHaveLength(2);
+    expect((await get(c.founder, { period: 'week', count: 8 })).periods).toHaveLength(8);
+    // Twelve months unless asked otherwise.
+    expect((await get(c.founder)).periods).toHaveLength(12);
+
+    expectError(await c.founder.get('/finance/records', { period: 'day' }), 400);
+    expectError(await c.founder.get('/finance/records', { count: 0 }), 400);
+
+    // Nothing is locked into a closed month any more: a mistaken payment can be undone.
+    expect((await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [banked.id], paid: false })).status).toBe(200);
+    expect((await c.founder.get('/finance/cycles')).status).toBe(404);
   });
 });
 

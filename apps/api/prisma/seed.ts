@@ -275,7 +275,6 @@ async function main() {
               bankedAt: DateTime.fromJSDate(c.when).plus({ days: 2 }).toJSDate(),
               payeeManagerId: c.associate.managerId,
               // The Founder has paid the Expert and the Manager; the Manager still owes the Associate.
-              // Paid when the first payment cycle closed (below).
               expertPaidAt: firstPayday,
               managerPaidAt: firstPayday,
             }
@@ -300,25 +299,6 @@ async function main() {
     }
   }
 
-  // --- The first payment cycle, closed by the Founder -------------------------------
-  // The paid call above brought in $942.50: ember was paid $180 (60 min at $180/h) and
-  // atlas 15% ($141.38), who still owes pixel half of it.
-  await prisma.payCycle.create({
-    data: {
-      label: 'Early September 2026',
-      startedAt: null,
-      closedAt: firstPayday,
-      closedById: founder.id,
-      income: 942.5,
-      paidExperts: 180,
-      paidManagers: 141.38,
-      paidAssociates: 0,
-      lines: [
-        { userId: ember.id, kind: 'expert', amount: 180, calls: 1 },
-        { userId: atlas.id, kind: 'manager', amount: 141.38, calls: 1 },
-      ],
-    },
-  });
 
   // --- Schedule blocks ----------------------------------------------------------
   const blocksFor = async (expert: typeof ember) => {

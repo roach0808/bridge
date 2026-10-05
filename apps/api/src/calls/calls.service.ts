@@ -469,7 +469,7 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     }
     if (to === 'process_to_bank') {
       // The bank never pays exactly the expected price: record what actually arrived, and when
-      // (it counts in the payment cycle it arrived in).
+      // (it counts in the period it arrived in on the Payment records tab).
       data.realIncome = input.realIncome;
       data.bankedAt = new Date();
       // The shares are settled now: the Profile's Manager share, and the Associate's percent of it.

@@ -749,6 +749,8 @@ model ChatReaction {
 
 /// A monthly payment cycle the Founder closed by paying everyone they owed. Kept as it was:
 /// `lines` holds who was paid how much ({ userId, kind, amount, calls }).
+/// No longer used by the app (2026-10-05): the Payment records tab is worked out from the
+/// paid dates on the calls. The table stays so the months already closed are not lost.
 model PayCycle {
   id             String    @id @default(uuid()) @db.Uuid
   label          String

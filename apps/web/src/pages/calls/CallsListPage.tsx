@@ -59,7 +59,7 @@ import { countdown, formatRange, inZone, relativeTime, soon, whenAndLength, zone
 import { CallCard } from './CallCard';
 import { CancelCallDialog } from './CancelCallDialog';
 import { FinanceTab } from './FinanceTab';
-import { PaymentHistory } from './PaymentHistory';
+import { PaymentRecords } from './PaymentRecords';
 
 /** The first tab: calls still on their way, and the ones called off. Once a call has taken place it moves to Finance. */
 const TAB_STATUSES: readonly CallStatus[] = [...ACTIVE_STATUSES, 'cancelled'];
@@ -131,9 +131,9 @@ export default function CallsListPage() {
         title="Calls"
         subtitle={
           tab === 'finance'
-            ? 'The calls that took place: who is paid what, and what is paid.'
+            ? 'What is still to pay on the calls that took place.'
             : tab === 'records'
-              ? 'Every month that was paid out, kept as it was.'
+              ? 'What came in and what was paid, week by week, month by month or year by year.'
               : 'Calls being scheduled and run.'
         }
         actions={
@@ -149,7 +149,7 @@ export default function CallsListPage() {
         <Tab value="finance" label="Finance" />
         <Tab value="records" label="Payment records" />
       </Tabs>
-      {tab === 'finance' ? <FinanceTab /> : tab === 'records' ? <PaymentHistory /> : <ActiveCallsTab />}
+      {tab === 'finance' ? <FinanceTab /> : tab === 'records' ? <PaymentRecords /> : <ActiveCallsTab />}
     </>
   );
 }

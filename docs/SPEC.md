@@ -121,8 +121,7 @@ grouped under Managers; they are assigned per Call.
 | Correct a finished Call's actual duration, until the Expert is paid for it | ✓ | ✓ (every Associate's + own) | | |
 | Set an Associate's share (of the Manager's share) | ✓ | ✓ (own team) | | |
 | See own pay (§3.1 "Who is paid what") | ✓ (everyone's) | own share and the Associate's part they pass on | their Manager's share and their own part | own pay |
-| Pay everyone and close the monthly payment cycle | ✓ | | | |
-| See the monthly payment records | ✓ (all) | own lines | own lines | own lines |
+| See the payment records (§6.5a, by week, month or year) | ✓ (all) | own pay | own pay | own pay |
 | Mark the Expert or the Manager paid for a call | ✓ | | | |
 | Mark the Associate paid for a call | ✓ | ✓ (calls they are paid for) | | |
 | Hand a Profile to another Associate | ✓ (anyone) | ✓ (between themselves and their own team) | | |
@@ -309,7 +308,7 @@ A Profile's standing on each expert network platform. A missing row means
 | ninja_link | text, nullable | Meeting link the Expert must add when starting the call. Sent only to the Founder and the Expert |
 | gpt_link | text, nullable | The research data link (`researchLink` in the API), set by the Founder. Sent only to the Founder and the Expert. Required to mark the research data ready |
 | meeting_details | text, nullable | How to join the platform's meeting (link, passcode, dial-in), ≤ 2000 characters. Added by whoever runs the call, their Manager or the Founder; read by everyone on the call |
-| banked_at | timestamptz, nullable | When the call was processed to bank: its real income counts in the payment cycle it arrived in |
+| banked_at | timestamptz, nullable | When the call was processed to bank: its real income counts in the period it arrived in on the Payment records tab |
 | rate_override | numeric(12,2), nullable | A special rate (USD per hour) for this Call only; falls back to the Profile's platform rate. Never sent to Experts |
 | actual_duration_minutes | integer, nullable | Entered by the Expert when finishing; the booked `duration_minutes` (and the calendar slot) stay unchanged |
 | rating | integer 1–5, nullable | From an earlier finish form that asked "How did the call go?". No longer asked for; kept for old calls |
@@ -355,29 +354,17 @@ pass on; the Associate their Manager's share (without its percent) and their
 own part. The Founder marks the Expert and the Manager paid; the Manager marks
 the Associate paid (the Founder may too). Each payee is notified (`call.paid`).
 
-**[Implementation] Monthly payment cycles.** Everyone is paid once a month.
-On payment day (usually in the first or second week) the Founder presses
-**Pay everyone & close the month** (`POST /finance/cycles`): everything the
-Founder owes — Experts' pay for calls that took place with a rate, Managers'
-shares of calls paid to bank — is marked paid at that moment, each person is
-told, and the cycle is kept as a `pay_cycles` row: its name, the window it
-covers, the income that reached the bank in it, what was paid to Experts and to
-Managers (and by Managers to Associates) and the balance, plus one line per
-person. The next cycle starts from zero. A payment inside a closed cycle cannot
-be marked unpaid (409 `payout_closed`).
+**[Implementation] Payment records.** There is no monthly closing: the Founder
+marks each payment on the Finance tab when it is made, and any payment can be
+marked unpaid again if it did not happen. The Payment records tab adds up, per
+week, month or year in team time, the income that reached the bank (`banked_at`)
+and every payment made (`expert_paid_at`, `manager_paid_at`, `associate_paid_at`),
+each in the period it happened.
 
-#### PayCycle
+#### PayCycle (retired)
 
-| Field | Type | Notes |
-|---|---|---|
-| id | uuid | |
-| label | text | e.g. "September 2026" (suggested: the previous month until the 15th) |
-| started_at | timestamptz, nullable | The previous cycle's `closed_at`; null for the first |
-| closed_at | timestamptz, unique | When the Founder paid everyone |
-| closed_by | uuid → User | |
-| income, paid_experts, paid_managers, paid_associates | numeric(14,2) | Real income banked in the window, and what was paid in it |
-| lines | jsonb | [{ userId, kind: expert \| manager \| associate, amount, calls }] |
-| created_at | timestamptz | |
+Monthly payment cycles were removed on 2026-10-05. The `pay_cycles` table is kept
+so the months already closed are not lost, but nothing reads or writes it.
 
 #### Avatar (catalog, reference data)
 
@@ -1150,11 +1137,9 @@ A call can only be created with an approved profile (409
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | /finance/calls | all | The caller's own financial dashboard: calls from `finished` on that pay them or that they pay out of — everything for the Founder; for a Manager the calls they are paid for and their own and their team's calls still on the way to the bank; an Associate their own calls; an Expert the calls they took. Query: paid = all \| unpaid \| paid, from, to, q, page, pageSize (≤ 200, default 50). Returns a page of Calls (with `payouts`) and `summary` (income, expert, manager, associate, keeps), which counts every matching call whatever the paid filter |
-| GET | /finance/cycle | Founder | The open payment cycle: { startedAt, income, paid: { experts, managers, associates }, balance, expectedPipeline, toPay: [{ user, kind, amount, calls }], unpricedExpertCalls, suggestedLabel } |
-| POST | /finance/cycles | Founder | { label }. Pays everyone the Founder owes and closes the cycle (§3.1 "Monthly payment cycles"); 201 with the record. 409 when a cycle was closed less than 10 minutes ago |
-| GET | /finance/cycles | all | Closed cycles, newest first: { id, label, startedAt, closedAt, closedBy, totals, lines }. The Founder gets everything; anyone else only the cycles they were paid in, with only their own lines and `totals: null` |
-| POST | /finance/payouts | Founder; Manager for `associate` | { payee: expert \| manager \| associate, callIds (1–500), paid = true }. Marks that person's pay as paid (or, with `paid: false`, not paid after all) on every call. All or nothing: 409 `payout_unavailable` when one of the calls has nothing to mark for the caller (not finished, no rate, not paid to bank, not the Manager paid for it). Returns { updated }; each newly paid person gets one `call.paid` notification per batch. 409 `payout_closed` when unmarking a payment made in a closed cycle |
+| GET | /finance/calls | all | The calls from `finished` on that pay the caller or that they pay out of — everything for the Founder; for a Manager the calls they are paid for and their own and their team's calls still on the way to the bank; an Associate their own calls; an Expert the calls they took. Query: paid = all \| unpaid \| paid, from, to, q, page, pageSize (≤ 1000, default 50). The Finance tab asks for `paid=unpaid` and the whole list, and filters its columns in the browser. Returns a page of Calls (with `payouts`) and `summary` (income, expert, manager, associate, keeps), which counts every matching call whatever the paid filter |
+| GET | /finance/records | all | Query: period = week \| month (default) \| year, count (1–60, default 12). The last `count` periods in team time, oldest first, and the whole stretch: { period, periods: [{ start, end, income, paidExperts, paidManagers, paidAssociates, balance, people: [{ user, kind, amount, calls }] }], total }. The Founder gets everything; anyone else only what they were paid themselves, with `income` and `balance` null |
+| POST | /finance/payouts | Founder; Manager for `associate` | { payee: expert \| manager \| associate, callIds (1–500), paid = true }. Marks that person's pay as paid (or, with `paid: false`, not paid after all) on every call. All or nothing: 409 `payout_unavailable` when one of the calls has nothing to mark for the caller (not finished, no rate, not paid to bank, not the Manager paid for it). Returns { updated }; each newly paid person gets one `call.paid` notification per batch. |
 
 "Unpaid" means something the viewer pays or is paid is still open on the call,
 now or once the bank pays: for the Founder the Expert or the Manager, for a
@@ -1649,7 +1634,7 @@ Everyone sees whether the people they may chat with are at their screen.
 |---|---|---|
 | Login | all | Email + password, and "Sign in with Google" when the API has a Google client ID |
 | Dashboard | all | **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder: **Pending tasks** (finished calls to invoice, calls to prepare research data for (confirmed ones waiting for “Research data ready”, and booked ones without a link), Profiles that need a bank, with an Add bank shortcut, and Profiles that need a rate), the **database size**, and **Backups** (the last nightly dump with its size and row count, Run now, and Download per kept dump). Manager: team counts per stage |
-| Calls | all | Three tabs. **In progress**: the calls still on their way (being scheduled or running; cancelled ones on request), a table with filters (status, associate, expert, date range, search) and live updates, filters in the URL; **When** reads in plain words ("in 13 hours" over "Tomorrow 11 AM · 45 min"); a **Research data** column for the Founder and the Expert (Open, or "Not added yet" on a booked call); and a Cancel button on every call the viewer may cancel. **Finance**: each person's own financial dashboard over the calls that took place (§6.5a). The Founder's panel shows **this payment cycle** (income received, paid out, current balance, and what is still expected), what is owed to Experts and to Managers, and **Pay everyone & close the month** (a dialog lists who is paid what, and the cycle's name); a Manager sees income, their share (received, owed, expected), what they owe their Associates and what they keep; an Associate their Manager's share of their calls and their own part — never the income; an Expert their pay to date. One row per call with its income (Founder and Managers: expected and real), and each visible payee's amount — "exp." until the bank has paid — with a paid mark. The Founder and Managers select rows and press **Paid to expert / manager / associate**; the menu undoes a payment that did not happen (not in a closed cycle). **Payment records**: every closed cycle, newest first — for the Founder its income, what was paid to Experts and Managers, the balance and who was paid what; for everyone else what they were paid |
+| Calls | all | Three tabs. **In progress**: the calls still on their way (being scheduled or running; cancelled ones on request), a table with filters (status, associate, expert, date range, search) and live updates, filters in the URL; **When** reads in plain words ("in 13 hours" over "Tomorrow 11 AM · 45 min"); a **Research data** column for the Founder and the Expert (Open, or "Not added yet" on a booked call); and a Cancel button on every call the viewer may cancel. **Finance**: what is still to pay on the calls that took place (§6.5a); a call leaves the tab once everyone on it has been paid. The Founder and Managers see one row per call: **Profile, Platform, Time** (MM/DD hh:mm AM), **Rate** (the call's special rate when it has one, else the Profile's rate on the platform), **Duration** (the real one), **Invoice amount** (rate × duration), **Real income**, **Expert** and **Manager** — names only, no avatars; the Founder also sees what each of the two is paid, with a paid mark ("exp." until the bank has paid), a Manager their own share and their Associate's part still to pass on. An Associate sees their Manager's share and their part; an Expert their rate and pay. Every column has a filter that ticks any number of its values (the time by day), each listing the values the other filters leave. Above the table, totals for the rows shown: for the Founder and Managers **Total income on invoice** (calls invoiced, not yet paid to bank) and **Real income**; for the Founder **To pay Experts** and **To pay Managers**; for a Manager their share to receive; for an Associate their part to come; for an Expert their pay to come. A warning lists the calls without a rate — which Profile on which platform, or which Expert — each opening its call. The Founder and Managers select rows and press **Paid to expert / manager / associate**; the menu undoes a payment that did not happen. **Payment records**: statistics by **week, month or year** (the last 12 weeks, 12 months or 5 years): for the Founder the income received, what was paid to Experts and to Managers and the balance, as tiles, a chart of money in and out per period, a table per period that opens on who was paid, and who was paid over the whole stretch; for everyone else what they were paid |
 | Call detail | participants | Header with "View profile details", the platform, when it is in plain words, and — once finished, for the Founder and Managers — its income as a pill with both figures (Expected and Real). The Details card has **Income** ("Expected $1,000/h × 33 min = $550", "Real $540" or "waiting for bank") and **Meeting details** (link, passcode…; whoever runs the call, their Manager or the Founder edits it in place; everyone on the call reads it, links clickable). A **Delete call** button for the Founder, the status bar (Experts: without Invoicing; Associates and Managers: without the research step), transition buttons from `allowedTransitions` — the Founder's **Research data ready** asks for the research data link — and a quiet **Cancel call** button while the call has not started; a warning before **Invoice submitted** when the Profile has no open bank account; assignment controls; status history; a Call card (Ninja link, Founder and Expert only); a **Research data** card (the Founder adds the link, the Expert opens it; first on the page while the call is being prepared); a **Payouts** card (each visible payee's amount, expected until the bank pays, and whether it is paid, with Mark paid for whoever pays; the Founder corrects the Expert's rate for the call there); and a **Rate** card for the Founder and Managers. Starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason |
 | New Call | Founder, Manager, Associate | Required fields are marked with *. In this order: Profile (approved and active only, no inline create); Project (platform, platform associate, project details, meeting details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. A Manager runs the call themselves by default, or picks any Associate. Past times are refused. Saving asks for confirmation when the time is today, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Every call block carries a status badge (SCHEDULING, SCHEDULED, CONFIRMED, RESCHEDULING, ONGOING, DONE, INVOICED, APPROVED, PAID) next to its colour; others' calls still being scheduled show as "Being scheduled"; past slots cannot start a call. Experts drag to add time off; others drag to start a call. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. An "All experts" view (not for Experts) splits each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each |
@@ -1841,9 +1826,9 @@ run, to be corrected on the Platforms page.
   paid what (rates fixed at finish, shares at payment, who sees which line,
   marking paid, the Finance tab's scope and totals); Profiles looked after by
   an Associate; handing tasks on; the research step hidden from Associates and
-  Managers (status, history, filters, notifications); meeting details; monthly
-  payment cycles (closing pays everyone owed, records the month, starts from
-  zero, locks its payments); Associates' shares as a portion of the Manager's,
+  Managers (status, history, filters, notifications); meeting details; the
+  payment records by week, month and year (who sees what, payments counted in
+  the period they were made); Associates' shares as a portion of the Manager's,
   set by their own Manager; who may set platform statuses.
 - CI runs `pnpm typecheck` across every package (including test files), then
   the shared and API tests against a Postgres service, then both builds.
@@ -1958,7 +1943,6 @@ Container alternative:
 | Payout | One person's pay for a call: the Expert's (rate × real duration) or a share of the real income |
 | Research data | The research the Expert reads to prepare for a call; a link the Founder adds (`researchLink`) before marking the step "Research data ready" |
 | Meeting details | How to join the platform's meeting (link, passcode…), on the call for everyone on it |
-| Payment cycle | The month between two payment days; closing it pays everyone the Founder owes and keeps the month on record |
 | Confirmed | The Expert has confirmed they are available for the scheduled time |
 | Ninja link | The VDO.Ninja meeting link the Expert adds when a call starts |
 | Platform status | A Profile's standing on an expert network platform: not registered, registered or banned |
@@ -2017,6 +2001,7 @@ Container alternative:
 | 2026-09-26 | **Managers and Associates edit Profiles**, not only their own unapproved submissions. An approved Profile stays approved when they correct it; a pending or rejected one still goes back for review. Experts still only read, and the onboard date and Manager share are still the Founder's |
 | 2026-09-26 | Tasks carry an **urgency** score, 0–100, from how much of their time has gone — `100 × (1 − (daysLeft ÷ totalDays)²)` — and the table opens sorted by it, most pressing first |
 | 2026-10-04 | **Managers correct the actual duration** of a finished call, as the Founder can: from Finished through Processed to bank, until the Expert is paid for it (unmarking the payment opens it again). The expected price and the Expert's pay follow, and the Expert is told |
+| 2026-10-05 | **The Finance tab shows what is still to pay**, in one row per call with Profile, Platform, Time, Rate, Duration, Invoice amount, Real income, Expert and Manager (no avatars, no Associate's part for the Founder), every column filtered by ticking values; above it only what is to pay: income on invoice, real income, to pay Experts, to pay Managers, and the calls without a rate by Profile and platform. **Payment cycles are gone**: no closing of the month, any payment can be undone, and the `pay_cycles` table is kept but unused. **Payment records** became statistics by week, month or year: money in and out, a chart, and who was paid |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

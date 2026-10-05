@@ -352,11 +352,19 @@ export const financeCallsQuerySchema = z.object({
   to: isoDateTime.optional(),
   q: z.string().trim().optional(),
   page: z.coerce.number().int().min(1).default(1),
-  pageSize: z.coerce.number().int().min(1).max(200).default(50),
+  /** Large enough for the whole list: the Finance tab filters its columns in the browser. */
+  pageSize: z.coerce.number().int().min(1).max(1000).default(50),
 });
 
-/** Closes the open payment cycle: everyone the Founder owes is paid, and the month is kept on record. */
-export const closeCycleSchema = z.object({ label: trimmed('Name', 60) });
+export const PAYMENT_PERIODS = ['week', 'month', 'year'] as const;
+export type PaymentPeriodKind = (typeof PAYMENT_PERIODS)[number];
+
+/** The Payment records tab: what came in and went out, period by period. */
+export const paymentStatsQuerySchema = z.object({
+  period: z.enum(PAYMENT_PERIODS).default('month'),
+  /** How many periods, ending with the current one. */
+  count: z.coerce.number().int().min(1).max(60).default(12),
+});
 
 /** Marks one payee paid (or not paid after all) on several calls at once. */
 export const markPayoutsSchema = z.object({
@@ -646,7 +654,7 @@ export type UpdateCallInput = z.input<typeof updateCallSchema>;
 export type TransitionInput = z.input<typeof transitionSchema>;
 export type FinanceCallsQuery = z.input<typeof financeCallsQuerySchema>;
 export type MarkPayoutsInput = z.input<typeof markPayoutsSchema>;
-export type CloseCycleInput = z.input<typeof closeCycleSchema>;
+export type PaymentStatsQuery = z.input<typeof paymentStatsQuerySchema>;
 export type ListCallsQuery = z.input<typeof listCallsQuerySchema>;
 export type BlockBodyInput = z.input<typeof blockBodySchema>;
 export type BlockPatchInput = z.input<typeof blockPatchSchema>;

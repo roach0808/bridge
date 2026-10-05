@@ -5,7 +5,7 @@ import type { BlockRule, Occurrence } from './scheduleBlocks';
 import type { ChatMessageKind, TodoImportance, TodoStatus, TodoUrgency } from './chat';
 import type { Payee } from './payouts';
 import type { PresenceStatus } from './presence';
-import type { PlatformRegistration } from './schemas';
+import type { PaymentPeriodKind, PlatformRegistration } from './schemas';
 
 /** The only identity ever exposed about another user (§2.2). */
 export interface UserRef {
@@ -704,8 +704,8 @@ export interface FinanceSummary {
   keeps: number | null;
 }
 
-/** What one person was paid (or is owed) in a payment cycle. */
-export interface PayCycleLine {
+/** What one person was paid over a stretch of time. */
+export interface PayLine {
   user: UserRef;
   /** Paid by the Founder: Experts and Managers. Associates are paid by their Manager. */
   kind: Payee;
@@ -713,39 +713,28 @@ export interface PayCycleLine {
   calls: number;
 }
 
-/**
- * A monthly payment cycle the Founder closed (§6.5a): what came in and went out
- * between `startedAt` and `closedAt`, kept as it was. Non-founders get only
- * their own lines and no totals.
- */
-export interface PayCycleDTO {
-  id: string;
-  label: string;
-  startedAt: string | null;
-  closedAt: string;
-  closedBy: UserRef;
-  totals: { income: number; paidExperts: number; paidManagers: number; paidAssociates: number; balance: number } | null;
-  lines: PayCycleLine[];
+/** Money that moved in one period: income that reached the bank, and every payment made. */
+export interface PaymentFigures {
+  /** Real income of calls paid to bank. Founder only; null for anyone else. */
+  income: number | null;
+  paidExperts: number;
+  paidManagers: number;
+  /** Paid by the Managers out of their shares. */
+  paidAssociates: number;
+  /** Income − what the Founder paid out (Experts and Managers). Founder only. */
+  balance: number | null;
+  /** Who was paid, largest first: everyone for the Founder, the caller alone for anyone else. */
+  people: PayLine[];
 }
 
-/** Founder: the cycle still open, and what closing it now would pay. */
-export interface CurrentCycleDTO {
-  /** The end of the last closed cycle; null before the first one. */
-  startedAt: string | null;
-  /** Real income of calls paid to bank in this cycle. */
-  income: number;
-  /** Paid out in this cycle so far. */
-  paid: { experts: number; managers: number; associates: number };
-  /** Income − what the Founder paid out (Experts and Managers). */
-  balance: number;
-  /** Expected income of calls that took place but have not reached the bank. */
-  expectedPipeline: number;
-  /** Everyone the Founder still owes, as closing the cycle would pay them. */
-  toPay: PayCycleLine[];
-  /** Finished calls whose Expert has no rate yet: they cannot be paid until one is set. */
-  unpricedExpertCalls: number;
-  /** Suggested name for the cycle, e.g. "September 2026". */
-  suggestedLabel: string;
+/**
+ * The Payment records tab (§6.5a): the money of the last `count` weeks, months or
+ * years in team time, oldest first, and the whole stretch together.
+ */
+export interface PaymentStatsDTO {
+  period: PaymentPeriodKind;
+  periods: Array<PaymentFigures & { start: string; end: string }>;
+  total: PaymentFigures;
 }
 
 export interface FinanceCallsPage extends Paginated<CallDTO> {

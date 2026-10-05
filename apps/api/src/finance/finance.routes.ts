@@ -2,36 +2,35 @@ import {
   FINANCE_STATUSES,
   PAYEE_LABELS,
   TEAM_TIME_ZONE,
-  closeCycleSchema,
   financeCallsQuerySchema,
   markPayoutsSchema,
+  paymentStatsQuerySchema,
   type CallDTO,
-  type CurrentCycleDTO,
   type FinanceCallsPage,
   type FinanceSummary,
-  type PayCycleDTO,
-  type PayCycleLine,
+  type PayLine,
   type Payee,
+  type PaymentFigures,
+  type PaymentStatsDTO,
 } from '@god/shared';
 import type { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { DateTime } from 'luxon';
-import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
+import { actorOf, requireAuth, type Actor } from '../auth/middleware';
 import { broadcastCall } from '../calls/calls.service';
 import { callInclude, toCallDTO } from '../calls/calls.serialize';
 import { canViewCall } from '../calls/calls.access';
 import { prisma } from '../db';
 import { conflict, forbidden, notFound } from '../errors';
-import { iso, isoOrNull, parseBody, parseQuery } from '../http';
+import { iso, parseBody, parseQuery } from '../http';
 import { deliverAll, notify, type Deliver } from '../notifications/notify';
-import { toUserRef, userRefSelect } from '../serializers';
 
 /**
  * The money side of the Calls page (§6.5a): every call that took place, with
  * who is paid what for it, as one person's own financial dashboard. The Founder
  * pays the Expert and the Manager and marks it here; the Manager does the same
- * for the Associate's part. Once a month the Founder pays everyone they owe and
- * closes the payment cycle, which is kept on record.
+ * for the Associate's part. The Payment records tab adds up what was paid, week
+ * by week, month by month or year by year.
  */
 export const financeRouter = Router();
 financeRouter.use('/finance', requireAuth);
@@ -223,14 +222,6 @@ financeRouter.post('/finance/payouts', async (req, res) => {
 
     // Only the calls whose state really changes; a second click changes nothing.
     const changed = lines.filter(({ call }) => (call[field] !== null) !== paid);
-    // A payment made in a month that is closed stays in that month's record.
-    const last = paid ? null : await lastCycle(tx);
-    const locked = last && changed.find(({ call }) => call[field] !== null && call[field]! <= last.closedAt);
-    if (locked) {
-      throw conflict(`The payment for the call with ${locked.call.profile.name} belongs to a closed payment cycle`, 'payout_closed', {
-        callId: locked.call.id,
-      });
-    }
     if (changed.length) {
       await tx.call.updateMany({
         where: { id: { in: changed.map(({ call }) => call.id) } },
@@ -271,22 +262,12 @@ financeRouter.post('/finance/payouts', async (req, res) => {
   res.json({ updated: changed.length });
 });
 
-// --- Payment cycles ----------------------------------------------------------------------
+// --- Payment records ---------------------------------------------------------------------
 
 type Viewer = Pick<Actor, 'id' | 'role'>;
-const FOUNDER_VIEW = (actor: Viewer): Viewer => ({ id: actor.id, role: 'founder' });
-
-async function lastCycle(db: Prisma.TransactionClient | typeof prisma = prisma) {
-  return db.payCycle.findFirst({ orderBy: { closedAt: 'desc' }, select: { closedAt: true } });
-}
-
-/** "September 2026" early in October; the current month from mid-month on. */
-function suggestedLabel(now = DateTime.now().setZone(TEAM_TIME_ZONE)): string {
-  return (now.day <= 15 ? now.minus({ months: 1 }) : now).toFormat('LLLL yyyy');
-}
 
 /** Adds a payment to one person's line. */
-function addLine(lines: Map<string, PayCycleLine>, user: PayCycleLine['user'], kind: Payee, amount: number) {
+function addLine(lines: Map<string, PayLine>, user: PayLine['user'], kind: Payee, amount: number) {
   const key = `${kind}:${user.id}`;
   const line = lines.get(key) ?? { user, kind, amount: 0, calls: 0 };
   line.amount = round(line.amount + amount);
@@ -294,211 +275,87 @@ function addLine(lines: Map<string, PayCycleLine>, user: PayCycleLine['user'], k
   lines.set(key, line);
 }
 
-const byAmount = (a: PayCycleLine, b: PayCycleLine) => b.amount - a.amount || a.user.nickname.localeCompare(b.user.nickname);
+const byAmount = (a: PayLine, b: PayLine) => b.amount - a.amount || a.user.nickname.localeCompare(b.user.nickname);
 
-/** Everyone the Founder owes now: Experts for calls with a known pay, Managers for calls paid to bank. */
-async function outstanding(db: Prisma.TransactionClient | typeof prisma, founder: Viewer) {
-  const calls = await db.call.findMany({
-    where: {
-      status: { in: [...FINANCE_STATUSES] },
-      OR: [{ expertPaidAt: null }, { status: 'process_to_bank', managerPaidAt: null, payeeManagerId: { not: null } }],
-    },
-    include: callInclude,
-  });
-  const lines = new Map<string, PayCycleLine>();
-  const expertCalls: string[] = [];
-  const managerCalls: string[] = [];
-  let unpricedExpertCalls = 0;
-  for (const call of calls) {
-    const { payouts } = toCallDTO(call, founder);
-    const e = payouts.expert;
-    if (e && !e.paidAt) {
-      if (e.amount === null) unpricedExpertCalls++;
-      else {
-        addLine(lines, e.user, 'expert', e.amount);
-        expertCalls.push(call.id);
-      }
-    }
-    const m = payouts.manager;
-    if (m?.settled && m.user && m.amount !== null && !m.paidAt) {
-      addLine(lines, m.user, 'manager', m.amount);
-      managerCalls.push(call.id);
-    }
+/** One period's money, filled call by call. */
+class Bucket {
+  income = 0;
+  paid = { experts: 0, managers: 0, associates: 0 };
+  lines = new Map<string, PayLine>();
+
+  figures(viewer: Viewer): PaymentFigures {
+    const founder = viewer.role === 'founder';
+    const people = [...this.lines.values()].filter((l) => founder || l.user.id === viewer.id).sort(byAmount);
+    // Anyone but the Founder sees only what they were paid themselves.
+    const own = (kind: Payee) => round(people.filter((l) => l.kind === kind).reduce((t, l) => t + l.amount, 0));
+    return {
+      income: founder ? round(this.income) : null,
+      paidExperts: founder ? round(this.paid.experts) : own('expert'),
+      paidManagers: founder ? round(this.paid.managers) : own('manager'),
+      paidAssociates: founder ? round(this.paid.associates) : own('associate'),
+      // The Founder pays Experts and Managers; Associates are paid out of the Managers' shares.
+      balance: founder ? round(this.income - this.paid.experts - this.paid.managers) : null,
+      people,
+    };
   }
-  return { lines: [...lines.values()].sort(byAmount), expertCalls, managerCalls, unpricedExpertCalls };
 }
 
-/** What came in and went out in (since, until]: income that reached the bank, and every payment made. */
-async function windowTotals(db: Prisma.TransactionClient | typeof prisma, founder: Viewer, since: Date | null, until: Date) {
-  const range = { ...(since ? { gt: since } : {}), lte: until };
-  const calls = await db.call.findMany({
+/**
+ * What came in (income that reached the bank) and went out (every payment made),
+ * in each of the last `count` weeks, months or years in team time. Each payment
+ * counts in the period it was made, whatever the call's date.
+ */
+financeRouter.get('/finance/records', async (req, res) => {
+  const actor = actorOf(req);
+  const { period, count } = parseQuery(paymentStatsQuerySchema, req);
+  const now = DateTime.now().setZone(TEAM_TIME_ZONE);
+  const first = now.startOf(period).minus({ [`${period}s`]: count - 1 });
+  const bounds = Array.from({ length: count + 1 }, (_, i) => first.plus({ [`${period}s`]: i }).toJSDate());
+  const since = bounds[0]!;
+  const until = bounds[count]!;
+
+  const range = { gte: since, lt: until };
+  const calls = await prisma.call.findMany({
     where: {
       OR: [{ bankedAt: range }, { expertPaidAt: range }, { managerPaidAt: range }, { associatePaidAt: range }],
     },
     include: callInclude,
   });
-  const inWindow = (d: Date | null) => d !== null && (!since || d > since) && d <= until;
-  const lines = new Map<string, PayCycleLine>();
-  let income = 0;
-  const paid = { experts: 0, managers: 0, associates: 0 };
+
+  const buckets = Array.from({ length: count }, () => new Bucket());
+  const total = new Bucket();
+  const bucketOf = (d: Date | null) => {
+    if (!d || d < since || d >= until) return null;
+    // Few periods: a linear scan is plenty.
+    const i = bounds.findIndex((b, k) => k < count && d >= b && d < bounds[k + 1]!);
+    return i < 0 ? null : buckets[i]!;
+  };
+  // Amounts are worked out as the Founder sees them; each viewer then gets their own share of the picture.
+  const founder: Viewer = { id: actor.id, role: 'founder' };
   for (const call of calls) {
     const { payouts } = toCallDTO(call, founder);
-    if (inWindow(call.bankedAt) && call.realIncome !== null) income += Number(call.realIncome);
-    if (inWindow(call.expertPaidAt) && payouts.expert?.amount != null) {
-      paid.experts += payouts.expert.amount;
-      addLine(lines, payouts.expert.user, 'expert', payouts.expert.amount);
+    const pay = (at: Date | null, kind: Payee, line: { user: PayLine['user'] | null; amount: number | null } | null) => {
+      const bucket = bucketOf(at);
+      if (!bucket || !line?.user || line.amount === null) return;
+      for (const b of [bucket, total]) {
+        b.paid[`${kind}s` as const] += line.amount;
+        addLine(b.lines, line.user, kind, line.amount);
+      }
+    };
+    const banked = bucketOf(call.bankedAt);
+    if (banked && call.realIncome !== null) {
+      banked.income += Number(call.realIncome);
+      total.income += Number(call.realIncome);
     }
-    if (inWindow(call.managerPaidAt) && payouts.manager?.user && payouts.manager.amount !== null) {
-      paid.managers += payouts.manager.amount;
-      addLine(lines, payouts.manager.user, 'manager', payouts.manager.amount);
-    }
-    if (inWindow(call.associatePaidAt) && payouts.associate?.amount != null) {
-      paid.associates += payouts.associate.amount;
-      addLine(lines, payouts.associate.user, 'associate', payouts.associate.amount);
-    }
+    pay(call.expertPaidAt, 'expert', payouts.expert);
+    pay(call.managerPaidAt, 'manager', payouts.manager);
+    pay(call.associatePaidAt, 'associate', payouts.associate);
   }
-  return {
-    income: round(income),
-    paid: { experts: round(paid.experts), managers: round(paid.managers), associates: round(paid.associates) },
-    // The Founder pays Experts and Managers; Associates are paid out of the Managers' shares.
-    balance: round(income - paid.experts - paid.managers),
-    lines: [...lines.values()].sort(byAmount),
-  };
-}
 
-/** Founder: the cycle still open — this month's income, what went out, and what closing it would pay. */
-financeRouter.get('/finance/cycle', requireRole('founder'), async (req, res) => {
-  const founder = FOUNDER_VIEW(actorOf(req));
-  const last = await lastCycle();
-  const [totals, owed, pipeline] = await Promise.all([
-    windowTotals(prisma, founder, last?.closedAt ?? null, new Date()),
-    outstanding(prisma, founder),
-    prisma.call.findMany({ where: { status: { in: ['finished', 'invoice_submit', 'invoice_approve'] } }, include: callInclude }),
-  ]);
-  const body: CurrentCycleDTO = {
-    startedAt: isoOrNull(last?.closedAt ?? null),
-    income: totals.income,
-    paid: totals.paid,
-    balance: totals.balance,
-    expectedPipeline: round(pipeline.reduce((t, c) => t + (toCallDTO(c, founder).expectedPrice ?? 0), 0)),
-    toPay: owed.lines,
-    unpricedExpertCalls: owed.unpricedExpertCalls,
-    suggestedLabel: suggestedLabel(),
+  const body: PaymentStatsDTO = {
+    period,
+    periods: buckets.map((b, i) => ({ start: iso(bounds[i]!), end: iso(bounds[i + 1]!), ...b.figures(actor) })),
+    total: total.figures(actor),
   };
   res.json(body);
-});
-
-/** Stored lines point at users by id; the reader gets them as people. */
-interface StoredLine {
-  userId: string;
-  kind: Payee;
-  amount: number;
-  calls: number;
-}
-
-/**
- * Founder: pays everyone the Founder owes (Experts, and Managers for calls paid to
- * bank) and closes the month. What came in and went out is kept on record; the next
- * cycle starts from zero. Associates are still paid by their Managers.
- */
-financeRouter.post('/finance/cycles', requireRole('founder'), async (req, res) => {
-  const actor = actorOf(req);
-  const founder = FOUNDER_VIEW(actor);
-  const { label } = parseBody(closeCycleSchema, req);
-
-  const { cycle, changed, delivers } = await prisma.$transaction(async (tx) => {
-    // One close at a time.
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext('pay_cycles'))`;
-    const last = await lastCycle(tx);
-    const closedAt = new Date();
-    if (last && closedAt.getTime() - last.closedAt.getTime() < 10 * 60_000) {
-      throw conflict('A payment cycle was closed a few minutes ago');
-    }
-    const owed = await outstanding(tx, founder);
-    if (owed.expertCalls.length) {
-      await tx.call.updateMany({ where: { id: { in: owed.expertCalls }, expertPaidAt: null }, data: { expertPaidAt: closedAt } });
-    }
-    if (owed.managerCalls.length) {
-      await tx.call.updateMany({ where: { id: { in: owed.managerCalls }, managerPaidAt: null }, data: { managerPaidAt: closedAt } });
-    }
-    const totals = await windowTotals(tx, founder, last?.closedAt ?? null, closedAt);
-    const stored: StoredLine[] = totals.lines.map((l) => ({ userId: l.user.id, kind: l.kind, amount: l.amount, calls: l.calls }));
-    const cycle = await tx.payCycle.create({
-      data: {
-        label,
-        startedAt: last?.closedAt ?? null,
-        closedAt,
-        closedById: actor.id,
-        income: totals.income,
-        paidExperts: totals.paid.experts,
-        paidManagers: totals.paid.managers,
-        paidAssociates: totals.paid.associates,
-        lines: stored as unknown as Prisma.InputJsonValue,
-      },
-    });
-    // Everyone paid now hears about it once, with the month's name.
-    const delivers: Deliver[] = [];
-    for (const line of owed.lines) {
-      if (line.user.id === actor.id) continue;
-      delivers.push(
-        await notify(tx, [line.user.id], 'call.paid', {
-          actor: { nickname: actor.nickname, role: actor.role },
-          summary: `${usd(line.amount)} for ${line.calls} call${line.calls === 1 ? '' : 's'} — ${label}`,
-        }),
-      );
-    }
-    return { cycle, changed: [...new Set([...owed.expertCalls, ...owed.managerCalls])], delivers };
-  });
-
-  deliverAll(delivers);
-  for (const id of changed) void broadcastCall(id);
-  res.status(201).json((await cyclesFor(actor, cycle.id))[0]);
-});
-
-/** Closed cycles, newest first: the Founder sees everything; anyone else only what they were paid. */
-async function cyclesFor(actor: Viewer, only?: string): Promise<PayCycleDTO[]> {
-  const rows = await prisma.payCycle.findMany({
-    where: only ? { id: only } : {},
-    include: { closedBy: { select: userRefSelect } },
-    orderBy: { closedAt: 'desc' },
-  });
-  const founder = actor.role === 'founder';
-  const ids = [...new Set(rows.flatMap((r) => (r.lines as unknown as StoredLine[]).map((l) => l.userId)))];
-  const users = new Map(
-    (await prisma.user.findMany({ where: { id: { in: ids } }, select: userRefSelect })).map((u) => [u.id, toUserRef(u)]),
-  );
-  return rows
-    .map((r) => {
-      const lines = (r.lines as unknown as StoredLine[])
-        .filter((l) => founder || l.userId === actor.id)
-        .flatMap((l) => {
-          const user = users.get(l.userId);
-          return user ? [{ user, kind: l.kind, amount: l.amount, calls: l.calls }] : [];
-        });
-      const income = Number(r.income);
-      const paidExperts = Number(r.paidExperts);
-      const paidManagers = Number(r.paidManagers);
-      return {
-        id: r.id,
-        label: r.label,
-        startedAt: isoOrNull(r.startedAt),
-        closedAt: iso(r.closedAt),
-        closedBy: toUserRef(r.closedBy),
-        totals: founder
-          ? {
-              income,
-              paidExperts,
-              paidManagers,
-              paidAssociates: Number(r.paidAssociates),
-              balance: round(income - paidExperts - paidManagers),
-            }
-          : null,
-        lines,
-      };
-    })
-    .filter((c) => founder || c.lines.length > 0);
-}
-
-financeRouter.get('/finance/cycles', async (req, res) => {
-  res.json(await cyclesFor(actorOf(req)));
 });

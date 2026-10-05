@@ -6,7 +6,7 @@
  *   unless the Founder set another), once the bank has paid.
  * The Associate's percent is a portion of the Manager's share, which the
  * Manager passes on: with 15% and 50%, the Associate gets 7.5% of the income
- * and the Manager keeps 7.5%. Everyone is paid once a month (payment cycles).
+ * and the Manager keeps 7.5%. The Founder marks each payment on the Finance tab.
  */
 export const PAYEES = ['expert', 'manager', 'associate'] as const;
 export type Payee = (typeof PAYEES)[number];
