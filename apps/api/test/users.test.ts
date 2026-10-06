@@ -220,7 +220,8 @@ describe('DELETE /users/:id', () => {
     expectError(await founder.delete(`/users/${fx.a1.id}`), 409);
     expectError(await founder.delete(`/users/${fx.e1.id}`), 409);
     expectError(await (await as(fx.m1)).delete(`/users/${fx.a1.id}`), 403);
-    expectError(await founder.delete(`/users/${fx.founder.id.replace(/.$/, '0')}`), 404);
+    // An id nobody has (changing the Founder's last digit could give back their own).
+    expectError(await founder.delete('/users/00000000-0000-4000-8000-000000000000'), 404);
   });
 
   it('a Manager can be deleted once their Associates have moved', async () => {
