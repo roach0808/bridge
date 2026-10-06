@@ -561,6 +561,9 @@ model ChatMessage {
   replyToId      String?         @map("reply_to_id") @db.Uuid
   /// A picture sent with the message (the body is then an optional caption).
   imageId        String?         @unique @map("image_id") @db.Uuid
+  /// One of the set scheduling sentences ({ key, params }), the only kind of message
+  /// between an Expert and the team; `body` holds it written out in the sender's zone.
+  scheduling     Json?
   /// Set when the sender deleted the message; its text and picture are erased.
   deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(3)
   createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)

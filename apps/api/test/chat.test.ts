@@ -34,20 +34,16 @@ describe('who can chat with whom', () => {
   it.each<[keyof Fixtures, keyof Fixtures]>([
     ['a1', 'a3'],
     ['e1', 'e2'],
-    ['a1', 'e1'],
-    ['e1', 'a1'],
-    ['m1', 'e2'], // experts talk only to the founder
-    ['e3', 'm2'],
   ])('%s may not chat with %s', async (a, b) => {
     expectError(await (await as(fx[a] as FixtureUser)).post('/chat/conversations', { userId: (fx[b] as FixtureUser).id }), 403);
   });
 
   it('contacts follow the same rules', async () => {
     const nick = async (who: FixtureUser) => (await (await as(who)).get('/chat/contacts')).body.map((u: { nickname: string }) => u.nickname).sort();
-    expect(await nick(fx.e1)).toEqual(['Founder']);
-    expect(await nick(fx.a1)).toEqual(['Founder', 'ManagerOne', 'ManagerTwo']);
+    expect(await nick(fx.e1)).toEqual(['AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerOne', 'ManagerTwo']);
+    expect(await nick(fx.a1)).toEqual(['ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerOne', 'ManagerTwo']);
     expect(await nick(fx.m1)).toEqual([
-      'AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerTwo',
+      'AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerTwo',
     ]);
     expect(await nick(fx.founder)).toHaveLength(fx.users.length - 1);
   });
@@ -73,8 +69,8 @@ describe('who can chat with whom', () => {
     expectError(await send(m1, id, 'still there?'), 403);
   });
 
-  it('chats from before the rule changed (associate ↔ associate, expert ↔ expert, manager ↔ expert) are read-only', async () => {
-    for (const [a, b] of [[fx.a1, fx.a3], [fx.e1, fx.e2], [fx.m1, fx.e1]] as const) {
+  it('chats from before the rule changed (associate ↔ associate, expert ↔ expert) are read-only', async () => {
+    for (const [a, b] of [[fx.a1, fx.a3], [fx.e1, fx.e2]] as const) {
       const [userAId, userBId] = [a.id, b.id].sort() as [string, string];
       const c = await prisma.conversation.create({ data: { userAId, userBId, lastMessageAt: new Date() } });
       await prisma.chatMessage.create({ data: { conversationId: c.id, senderId: a.id, body: 'old message' } });
@@ -83,6 +79,84 @@ describe('who can chat with whom', () => {
       expect((await client.get(`/chat/conversations/${c.id}/messages`)).body.items).toHaveLength(1);
       expectError(await send(client, c.id, 'hello again'), 403);
     }
+  });
+});
+
+describe('scheduling chats between an Expert and the team', () => {
+  const schedule = (client: Client, conversationId: string, scheduling: { key: string; params?: Record<string, unknown> }) =>
+    client.post(`/chat/conversations/${conversationId}/messages`, { scheduling });
+
+  it.each<[keyof Fixtures, keyof Fixtures]>([
+    ['m1', 'e2'],
+    ['e3', 'm2'],
+    ['a1', 'e1'],
+    ['e1', 'a1'],
+  ])('%s and %s chat in set sentences only', async (a, b) => {
+    const ca = await as(fx[a] as FixtureUser);
+    const id = await open(ca, fx[b] as FixtureUser);
+    expect((await ca.get(`/chat/conversations/${id}`)).body).toMatchObject({ mode: 'scheduling', canSend: true });
+    expectError(await send(ca, id, 'call me on +1 555 0100'), 403);
+    expect((await schedule(ca, id, { key: 'ok_thanks' })).status).toBe(201);
+    expect((await schedule(await as(fx[b] as FixtureUser), id, { key: 'received' })).status).toBe(201);
+  });
+
+  it('no pictures, and each side sends only its own sentences', async () => {
+    const m1 = await as(fx.m1);
+    const e1 = await as(fx.e1);
+    const id = await open(m1, fx.e1);
+    const picture = { dataUrl: 'data:image/png;base64,iVBORw0KGgo=', width: 1, height: 1 };
+    expectError(await m1.post(`/chat/conversations/${id}/messages`, { image: picture }), 403);
+    // Text or a picture alongside a sentence is refused outright.
+    expectError(await m1.post(`/chat/conversations/${id}/messages`, { body: 'hi', scheduling: { key: 'ok_thanks' } }), 400, 'validation_error');
+    expectError(await schedule(m1, id, { key: 'confirmed' }), 403); // the Expert's to say
+    expectError(await schedule(e1, id, { key: 'call_scheduled', params: { at: '2026-10-07T18:00:00Z' } }), 403); // the team's
+    expect((await schedule(e1, id, { key: 'confirmed' })).status).toBe(201);
+  });
+
+  it('every blank must be filled with one of its choices, and nothing else', async () => {
+    const m1 = await as(fx.m1);
+    const id = await open(m1, fx.e1);
+    for (const scheduling of [
+      { key: 'no_such_sentence' },
+      { key: 'ask_available', params: { at: '2026-10-07T18:00:00Z' } }, // no duration
+      { key: 'ask_available', params: { at: '2026-10-07T18:00:00Z', duration: 20 } },
+      { key: 'call_scheduled', params: { at: 'tomorrow at six' } },
+      { key: 'call_scheduled', params: { at: '2026-10-07T18:00:00Z', note: 'my number is…' } },
+      { key: 'client_late', params: { late: 30 } },
+    ]) {
+      expectError(await schedule(m1, id, scheduling), 400, 'validation_error');
+    }
+    expect(await prisma.chatMessage.count()).toBe(0);
+  });
+
+  it('times are kept as instants and written out in each reader’s zone', async () => {
+    const m1 = await as(fx.m1);
+    const id = await open(m1, fx.e1);
+    const res = await schedule(m1, id, { key: 'ask_available', params: { duration: 30, at: '2026-10-07T18:00:00.000Z' } });
+    expect(res.status, res.text).toBe(201);
+    // The body is the sentence as the Manager reads it, on team time.
+    expect(res.body.body).toBe('Are you available for a 30-minute call on Wed, Oct 7 at 2 PM EDT?');
+    expect(res.body.scheduling).toEqual({ key: 'ask_available', params: { duration: 30, at: '2026-10-07T18:00:00.000Z' } });
+    // The Expert in Seoul gets the same message, with the instant to read on their own clock.
+    const items = (await (await as(fx.e1)).get(`/chat/conversations/${id}/messages`)).body.items;
+    expect(items[0]).toMatchObject({ scheduling: res.body.scheduling, kind: 'text' });
+  });
+
+  it('a deleted sentence leaves nothing behind', async () => {
+    const e1 = await as(fx.e1);
+    const id = await open(e1, fx.m1);
+    const sent = await schedule(e1, id, { key: 'running_late', params: { late: 10 } });
+    expect(sent.body.body).toBe('I’ll be 10 minutes late.');
+    const deleted = await e1.delete(`/chat/messages/${sent.body.id}`);
+    expect(deleted.body).toMatchObject({ deleted: true, body: '', scheduling: null });
+  });
+
+  it('chats with the Founder stay free, and take no set sentences', async () => {
+    const founder = await as(fx.founder);
+    const id = await open(founder, fx.e1);
+    expect((await founder.get(`/chat/conversations/${id}`)).body.mode).toBe('free');
+    expect((await send(await as(fx.e1), id, 'Anything at all')).status).toBe(201);
+    expectError(await schedule(founder, id, { key: 'ok_thanks' }), 400);
   });
 });
 

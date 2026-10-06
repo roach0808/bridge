@@ -11,7 +11,7 @@ import { UserAvatar } from '@/components/identity';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { inZone, relativeTime } from '@/lib/time';
-import { ChatImage } from './chatExtras';
+import { ChatImage, messageText } from './chatExtras';
 
 const PAGE_SIZE = 40;
 const PANEL_HEIGHT = { xs: 'calc(100dvh - 200px)', md: 'calc(100vh - 220px)' };
@@ -190,7 +190,7 @@ function Line({ message: m, zone }: { message: ChatMessageDTO; zone: string }) {
           <>
             {m.body && (
               <Typography variant="body2" sx={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                {m.body}
+                {messageText(m, zone)}
               </Typography>
             )}
             {m.image && (

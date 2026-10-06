@@ -6,6 +6,8 @@ import {
   associateShareOf,
   shareOf,
   canChat,
+  chatModeOf,
+  type ChatMode,
   canGiveTask,
   isSelfTask,
   supervisesWork,
@@ -189,13 +191,23 @@ describe('canChat', () => {
     ['expert', 'expert', false],
     ['associate', 'manager', true],
     ['manager', 'associate', true],
-    ['associate', 'expert', false],
-    ['manager', 'expert', false],
-    ['expert', 'associate', false],
-    ['expert', 'manager', false],
+    ['associate', 'expert', true],
+    ['manager', 'expert', true],
+    ['expert', 'associate', true],
+    ['expert', 'manager', true],
   ])('%s ↔ %s → %s', (a, b, expected) => {
     expect(canChat(u('a', a), u('b', b))).toBe(expected);
     expect(canChat(u('b', b), u('a', a))).toBe(expected);
+  });
+  it.each<[Role, Role, ChatMode | null]>([
+    ['founder', 'expert', 'free'],
+    ['manager', 'associate', 'free'],
+    ['manager', 'expert', 'scheduling'],
+    ['associate', 'expert', 'scheduling'],
+    ['expert', 'expert', null],
+  ])('%s ↔ %s chat as %s', (a, b, mode) => {
+    expect(chatModeOf(u('a', a), u('b', b))).toBe(mode);
+    expect(chatModeOf(u('b', b), u('a', a))).toBe(mode);
   });
   it('nobody chats with themselves', () => {
     expect(canChat(u('a', 'founder'), u('a', 'founder'))).toBe(false);

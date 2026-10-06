@@ -41,6 +41,7 @@ import {
   type ChatMessageDTO,
   type ConversationDTO,
   type ChatMessagePage,
+  type SchedulingMessage,
   type UserRef,
 } from '@god/shared';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -60,7 +61,8 @@ import { shrinkChatImage } from '@/lib/image';
 import { inZone } from '@/lib/time';
 import { usePresence } from '@/realtime/PresenceProvider';
 import { appendChatMessage, replaceChatMessage } from '@/realtime/RealtimeProvider';
-import { ChatImage, EmojiPickerPopover, QuickReactionBar, ReactionChips, useReact } from './chatExtras';
+import { ChatImage, EmojiPickerPopover, QuickReactionBar, ReactionChips, messageText, useReact } from './chatExtras';
+import { SchedulingComposer } from './SchedulingComposer';
 import { SearchField, useIsPhone } from '../admin/adminShared';
 import { TODO_COLORS, TodoDoneDialog, TodoPill, useRefreshTodos } from '../todos/todoShared';
 
@@ -120,7 +122,10 @@ function NewChatDialog({ open, onClose, onPick }: { open: boolean; onClose: () =
             <ErrorState error={contacts.error} onRetry={() => void contacts.refetch()} />
           </Box>
         ) : filtered.length === 0 ? (
-          <EmptyState title="Nobody found" description="Everyone can chat with the Founder. Managers chat with Managers and Associates; Associates with Managers." />
+          <EmptyState
+            title="Nobody found"
+            description="Everyone can chat with the Founder. Managers chat with Managers and Associates; Associates with Managers. Experts chat with Managers and Associates in set messages, to schedule calls."
+          />
         ) : (
           <List dense disablePadding>
             {ROLES.map((role) => {
@@ -546,7 +551,7 @@ function MessageBubble({
             {!isDone && !m.deleted && (
               <>
                 {m.image && <ChatImage image={m.image} />}
-                {m.body && <Box sx={m.image ? { px: 1, pt: 0.75, pb: 0.25 } : undefined}>{m.body}</Box>}
+                {m.body && <Box sx={m.image ? { px: 1, pt: 0.75, pb: 0.25 } : undefined}>{messageText(m, zone)}</Box>}
               </>
             )}
           </Box>
@@ -679,20 +684,28 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId, unread]);
 
+  const onSent = (message: ChatMessageDTO) => {
+    if (hasPreviousPage) jumpToLatest();
+    else appendChatMessage(queryClient, message);
+    stickToBottom.current = true;
+    void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+  };
   const send = useMutation({
     mutationFn: ({ body, image }: { body: string; image: Attachment | null }) =>
       api.chat.send(conversationId, body, image ? { dataUrl: image.dataUrl, width: image.width, height: image.height } : undefined),
-    onSuccess: (message) => {
-      if (hasPreviousPage) jumpToLatest();
-      else appendChatMessage(queryClient, message);
-      stickToBottom.current = true;
-      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
-    },
+    onSuccess: onSent,
     onError: (err, { body, image }) => {
       setDraft(body);
       setAttachment(image);
       toast.error(errorMessage(err));
     },
+  });
+
+  // Between an Expert and the team: one of the set sentences.
+  const sendScheduling = useMutation({
+    mutationFn: (message: SchedulingMessage) => api.chat.sendScheduling(conversationId, message),
+    onSuccess: onSent,
+    onError: (err) => toast.error(errorMessage(err)),
   });
 
   // A picture waiting to be sent: pasted, dropped, or chosen with the attach button.
@@ -754,6 +767,8 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   };
 
   const c = conversation.data;
+  // Pictures and free text are for free chats only.
+  const free = c?.mode !== 'scheduling';
   const lastMine = [...messages].reverse().find((m) => m.sender.id === me.id);
   const seenMine = Boolean(lastMine && c?.otherLastReadAt && c.otherLastReadAt >= lastMine.createdAt);
   let lastDay = '';
@@ -770,7 +785,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
     <Card
       sx={{ height: PANEL_HEIGHT, minHeight: 420, display: 'flex', flexDirection: 'column', position: 'relative' }}
       onDragOver={(e) => {
-        if (c?.canSend && [...e.dataTransfer.types].includes('Files')) {
+        if (c?.canSend && free && [...e.dataTransfer.types].includes('Files')) {
           e.preventDefault();
           setDragging(true);
         }
@@ -779,7 +794,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
       }}
       onDrop={(e) => {
-        if (!c?.canSend) return;
+        if (!c?.canSend || !free) return;
         e.preventDefault();
         setDragging(false);
         void attach([...e.dataTransfer.files].find((f) => f.type.startsWith('image/')));
@@ -853,7 +868,11 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
           <EmptyState
             icon={<ChatBubbleOutlineRounded />}
             title={`Say hello to ${c.other.nickname}`}
-            description={me.role === 'founder' || me.role === 'manager' ? 'Tip: open a message’s menu to give it as a task.' : undefined}
+            description={
+              !free ? 'Choose a scheduling message below to start.'
+              : me.role === 'founder' || me.role === 'manager' ? 'Tip: open a message’s menu to give it as a task.'
+              : undefined
+            }
           />
         ) : (
           messages.map((m) => {
@@ -906,6 +925,8 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
             {c.other.nickname} is no longer active, so this chat is read-only.
           </Typography>
         </Box>
+      ) : c && !free ? (
+        <SchedulingComposer key={conversationId} role={me.role} zone={zone} sending={sendScheduling.isPending} onSend={(m) => sendScheduling.mutateAsync(m)} />
       ) : (
         <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
           {(attachment || preparing) && (

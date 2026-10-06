@@ -3,15 +3,25 @@ import type { Role } from './roles';
 /**
  * Who may hold a one-to-one chat with whom:
  * - the Founder with anyone;
- * - Managers with Managers and with any Associate.
- * Associates talk to Managers and the Founder, not to each other. Experts talk
- * only to the Founder. The rule is symmetric, and nobody chats with themselves.
+ * - Managers with Managers and with any Associate;
+ * - Experts with Managers and Associates, but only to schedule calls (see
+ *   scheduling.ts): every message is one of the set sentences.
+ * Associates don't chat with each other, nor Experts with Experts. The rule is
+ * symmetric, and nobody chats with themselves.
  */
+export type ChatMode = 'free' | 'scheduling';
+
+/** How two people may chat, or null when they may not. */
+export function chatModeOf(a: { id: string; role: Role }, b: { id: string; role: Role }): ChatMode | null {
+  if (a.id === b.id) return null;
+  if (a.role === 'founder' || b.role === 'founder') return 'free';
+  if (a.role === 'expert' && b.role === 'expert') return null;
+  if (a.role === 'expert' || b.role === 'expert') return 'scheduling';
+  return a.role === 'manager' || b.role === 'manager' ? 'free' : null;
+}
+
 export function canChat(a: { id: string; role: Role }, b: { id: string; role: Role }): boolean {
-  if (a.id === b.id) return false;
-  if (a.role === 'founder' || b.role === 'founder') return true;
-  if (a.role === 'expert' || b.role === 'expert') return false;
-  return a.role === 'manager' || b.role === 'manager';
+  return chatModeOf(a, b) !== null;
 }
 
 export const CHAT_MESSAGE_KINDS = ['text', 'todo_done'] as const;

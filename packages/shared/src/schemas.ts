@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
+import { schedulingMessageSchema } from './scheduling';
 import { PAYEES } from './payouts';
 import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, TODO_IMPORTANCES, TODO_STATUSES, TODO_URGENCIES } from './chat';
 import { ROLES } from './roles';
@@ -405,8 +406,14 @@ export const chatMessageSchema = z
         height: z.number().int().min(1).max(CHAT_IMAGE_MAX_SIDE),
       })
       .optional(),
+    /** One of the set sentences: the only kind of message between an Expert and the team (scheduling.ts). */
+    scheduling: schedulingMessageSchema.optional(),
   })
-  .refine((m) => m.body !== '' || m.image, { message: 'Message is required', path: ['body'] });
+  .refine((m) => m.body !== '' || m.image || m.scheduling, { message: 'Message is required', path: ['body'] })
+  .refine((m) => !m.scheduling || (m.body === '' && !m.image), {
+    message: 'A scheduling message goes on its own, without text or a picture',
+    path: ['scheduling'],
+  });
 /** One emoji; sending one you already reacted with takes it back. */
 export const chatReactionSchema = z.object({
   emoji: z

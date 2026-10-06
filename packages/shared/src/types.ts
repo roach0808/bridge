@@ -2,7 +2,8 @@ import type { AvatarAudience, AvatarStyle } from './avatars';
 import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
 import type { BlockRule, Occurrence } from './scheduleBlocks';
-import type { ChatMessageKind, TodoImportance, TodoStatus, TodoUrgency } from './chat';
+import type { ChatMessageKind, ChatMode, TodoImportance, TodoStatus, TodoUrgency } from './chat';
+import type { SchedulingMessage } from './scheduling';
 import type { Payee } from './payouts';
 import type { PresenceStatus } from './presence';
 import type { PaymentPeriodKind, PlatformRegistration } from './schemas';
@@ -570,6 +571,11 @@ export interface ChatMessageDTO {
   deleted: boolean;
   /** Grouped by emoji, in the order they were first used. */
   reactions: Array<{ emoji: string; userIds: string[] }>;
+  /**
+   * Set when the message is one of the set scheduling sentences. Readers write it
+   * out in their own zone; `body` holds it as the sender read it.
+   */
+  scheduling: SchedulingMessage | null;
   createdAt: string;
 }
 
@@ -584,6 +590,8 @@ export interface ConversationDTO {
   otherLastReadAt: string | null;
   /** Both people are active and still allowed to chat. */
   canSend: boolean;
+  /** `scheduling`: an Expert and the team, who send only the set sentences (scheduling.ts). */
+  mode: ChatMode;
   /** The caller may turn messages in this chat into tasks for the other person. */
   canGiveTask: boolean;
   createdAt: string;

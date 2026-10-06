@@ -134,7 +134,7 @@ grouped under Managers; they are assigned per Call.
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
 | Delete own chat message; react; send pictures | ✓ | ✓ | ✓ | ✓ |
 | Clear a chat's whole history | the two people in it | same | same | same |
-| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates | Founders, Managers | Founders |
+| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates; Experts in set scheduling messages | Founders, Managers; Experts in set scheduling messages | Founders; Managers and Associates in set scheduling messages |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
 | View a Call's status history | ✓ | ✓ (every Associate's + own) | own | assigned (without invoicing steps) |
 | View the audit trail (§6.16) | ✓ | | | |
@@ -1334,21 +1334,35 @@ One-to-one chats. Who may chat with whom (`canChat` in
 
 - a Founder with anyone;
 - a Manager with Managers and with any Associate;
-- Associates with Managers and Founders only;
-- Experts with Founders only.
+- Associates with Managers and Founders;
+- Experts with Founders, and with Managers and Associates only to schedule calls.
 
-Associates don't chat with other Associates; Experts don't chat with Managers,
-Associates or other Experts. A chat
+Associates don't chat with other Associates, nor Experts with Experts. A chat
 that the rules no longer allow stays readable, with `canSend: false`.
+
+**Scheduling chats.** Between an Expert and a Manager or Associate
+(`chatModeOf` → `scheduling`; the conversation carries `mode`), every message is
+one of the set sentences in `packages/shared/src/scheduling.ts`: finding a time,
+confirming, rescheduling, cancelling, on the day, and short replies. Some are the
+Expert's to send, some the team's, some either side's. Their blanks are filled
+from fixed choices only — a date and time, one to three times, a window within a
+week, a day, a span of days within a month, a call length (15/30/45/60 min),
+5/10/15 minutes late, or a reason (schedule conflict, illness, travel,
+emergency). Free text and pictures are refused (403), as is a sentence for the
+other side; a blank that is missing, extra or not one of its choices is a 400.
+The message stores `scheduling: { key, params }` with times as instants, and
+each reader sees them in their own zone (`displayZoneFor`); `body` holds the
+sentence as the sender read it, and is what a push notification falls back on.
+Chats with the Founder stay free and take no set sentences (400).
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
 | GET | /chat/contacts | all | Active users the caller may chat with |
-| GET | /chat/conversations | all | The caller's chats with at least one message, newest first: { id, other (+ isActive), lastMessage (with `hasImage`, `deleted`), unreadCount, openTodoCount, otherLastReadAt, canSend, canGiveTask } |
+| GET | /chat/conversations | all | The caller's chats with at least one message, newest first: { id, other (+ isActive), lastMessage (with `hasImage`, `deleted`), unreadCount, openTodoCount, otherLastReadAt, canSend, mode (`free` or `scheduling`), canGiveTask } |
 | POST | /chat/conversations | all | { userId }. Opens or creates the chat (201). 403 when the rules don't allow it |
 | GET | /chat/conversations/:id | the two people | 404 for anyone else |
-| GET | /chat/conversations/:id/messages | the two people | Pages of `limit` (≤ 100) messages, oldest → newest: the latest without cursors, older ones with `cursor` (a page's `nextCursor`), newer ones with `after` (a page's `newerCursor`, while `hasNewer`). Each message: { id, sender, body, kind, replyTo, todo, image, deleted, reactions: [{ emoji, userIds }], createdAt } |
-| POST | /chat/conversations/:id/messages | the two people | { body }. 403 when the other person is inactive or no longer allowed (`canSend: false`) |
+| GET | /chat/conversations/:id/messages | the two people | Pages of `limit` (≤ 100) messages, oldest → newest: the latest without cursors, older ones with `cursor` (a page's `nextCursor`), newer ones with `after` (a page's `newerCursor`, while `hasNewer`). Each message: { id, sender, body, kind, replyTo, todo, image, deleted, reactions: [{ emoji, userIds }], scheduling, createdAt } |
+| POST | /chat/conversations/:id/messages | the two people | { body }, or in a scheduling chat { scheduling: { key, params } } (see above). 403 when the other person is inactive or no longer allowed (`canSend: false`) |
 | POST | /chat/conversations/:id/read | the two people | Marks the chat read (204) |
 | POST | /chat/conversations/:id/messages (pictures) | the two people | **[Implementation]** { body, image?: { dataUrl, width, height } }. The browser shrinks a picture to at most 1600 px and 1 MB (JPEG, PNG or WebP; the bytes are checked); the body is then an optional caption. Pictures live in `chat_images` |
 | GET | /chat/images/:id | the two people | The picture bytes (`Cache-Control: private`) |

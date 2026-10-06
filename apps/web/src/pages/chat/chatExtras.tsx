@@ -2,7 +2,7 @@ import AddReactionOutlined from '@mui/icons-material/AddReactionOutlined';
 import BrokenImageOutlined from '@mui/icons-material/BrokenImageOutlined';
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import { Box, ButtonBase, CircularProgress, Dialog, IconButton, Popover, Skeleton, Stack, Tooltip, useColorScheme } from '@mui/material';
-import { QUICK_REACTIONS, type ChatMessageDTO, type ConversationDTO } from '@god/shared';
+import { QUICK_REACTIONS, renderSchedulingMessage, type ChatMessageDTO, type ConversationDTO } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { lazy, Suspense, useEffect, useState } from 'react';
 import { useMe } from '@/auth/AuthProvider';
@@ -11,6 +11,9 @@ import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { replaceChatMessage } from '@/realtime/RealtimeProvider';
+
+/** What a message says: a scheduling sentence is written out in the reader's zone. */
+export const messageText = (m: ChatMessageDTO, zone: string) => (m.scheduling ? (renderSchedulingMessage(m.scheduling, zone) ?? m.body) : m.body);
 
 // The picker and its emoji data only load the first time someone opens it.
 const EmojiPicker = lazy(() => import('emoji-picker-react'));

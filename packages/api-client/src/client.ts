@@ -5,6 +5,7 @@ import type {
   ChatMessagePage,
   ConversationDTO,
   ObservedChatDTO,
+  SchedulingMessage,
   DbDumpDTO,
   TodoDTO,
   TodoStatus,
@@ -266,6 +267,9 @@ export function createApiClient(options: ClientOptions) {
       /** Text, a picture (already shrunk by the browser) with an optional caption, or both. */
       send: (id: string, body: string, image?: { dataUrl: string; width: number; height: number }) =>
         post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, image ? { body, image } : { body }),
+      /** One of the set sentences: the only kind of message between an Expert and the team. */
+      sendScheduling: (id: string, scheduling: SchedulingMessage) =>
+        post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { scheduling }),
       /** Deletes your own message for both people. */
       deleteMessage: (messageId: string) => del<ChatMessageDTO>(`/chat/messages/${enc(messageId)}`),
       /** Adds your reaction, or takes it back if you had already reacted with that emoji. */

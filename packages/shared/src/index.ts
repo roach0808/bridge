@@ -9,6 +9,7 @@ export * from './types';
 export * from './errors';
 export * from './features';
 export * from './chat';
+export * from './scheduling';
 export * from './presence';
 export * from './notificationText';
 export * from './payouts';

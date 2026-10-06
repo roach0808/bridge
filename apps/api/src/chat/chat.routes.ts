@@ -1,7 +1,12 @@
 import {
   ACTIVE_TODO_STATUSES,
   canChat,
+  chatModeOf,
+  displayZoneFor,
   isActiveTodo,
+  renderSchedulingMessage,
+  SCHEDULING_TEMPLATES,
+  schedulingSideOf,
   CHAT_IMAGE_MAX_BYTES,
   COMPLETED_TASK_DAYS,
   canGiveTask,
@@ -26,6 +31,7 @@ import {
   type ConversationDTO,
   type ObservedChatDTO,
   type Role,
+  type SchedulingMessage,
   type ServerToClientEvents,
   type TodoDTO,
   type TodoImportance,
@@ -53,7 +59,7 @@ chatRouter.use(['/chat', '/todos'], requireAuth);
 
 // --- Loading & serializing -----------------------------------------------------
 
-const participantSelect = { ...userRefSelect, isActive: true, managerId: true } satisfies Prisma.UserSelect;
+const participantSelect = { ...userRefSelect, isActive: true, managerId: true, timeZone: true } satisfies Prisma.UserSelect;
 
 const conversationInclude = {
   userA: { select: participantSelect },
@@ -116,6 +122,7 @@ const toMessageDTO = (m: MessageRow): ChatMessageDTO => ({
   image: m.image,
   deleted: m.deletedAt !== null,
   reactions: groupReactions(m.reactions),
+  scheduling: m.scheduling as SchedulingMessage | null,
   createdAt: iso(m.createdAt),
 });
 
@@ -173,6 +180,10 @@ const otherLastReadAt = (c: ConversationRow, userId: string) => (c.userAId === u
 /** Both people are active and their roles still allow a chat. */
 const canSendIn = (c: ConversationRow) =>
   c.userA.isActive && c.userB.isActive && canChat({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role });
+
+/** An Expert and the team only schedule calls; every other chat is free. */
+const modeOf = (c: ConversationRow) =>
+  chatModeOf({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role }) ?? 'free';
 
 async function loadConversation(actor: Actor, id: string | null): Promise<ConversationRow> {
   if (!id) throw notFound('Conversation');
@@ -235,6 +246,7 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
       openTodoCount: openTodos.find((t) => t.conversationId === c.id)?._count._all ?? 0,
       otherLastReadAt: isoOrNull(otherLastReadAt(c, userId)),
       canSend: canSendIn(c),
+      mode: modeOf(c),
       canGiveTask: canSendIn(c) && canGiveTask(meIn(c, userId), asTaker(other)),
       createdAt: iso(c.createdAt),
     };
@@ -432,7 +444,17 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   const actor = actorOf(req);
   const c = await loadConversation(actor, idParam(req));
   if (!canSendIn(c)) throw forbidden('This chat is closed: the other person is no longer available');
-  const { body, image } = parseBody(chatMessageSchema, req);
+  const { body: text, image, scheduling } = parseBody(chatMessageSchema, req);
+  const other = otherOf(c, actor.id);
+  if (modeOf(c) === 'scheduling') {
+    if (!scheduling) throw forbidden('Between an Expert and the team, only the scheduling messages can be sent');
+    const from = SCHEDULING_TEMPLATES[scheduling.key].from;
+    if (from !== 'both' && from !== schedulingSideOf(actor.role)) throw forbidden('That message is for the other side to send');
+  } else if (scheduling) {
+    throw badRequest('Scheduling messages are only for chats between an Expert and the team');
+  }
+  // A scheduling message is kept as the sender reads it; each reader sees it in their own zone.
+  const body = scheduling ? renderSchedulingMessage(scheduling, displayZoneFor(actor))! : text;
   const upload = image ? decodeImageDataUrl(image.dataUrl, CHAT_IMAGE_MAX_BYTES) : null;
   const now = new Date();
   const message = await prisma.$transaction(async (tx) => {
@@ -452,7 +474,14 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
           })
         : null;
     const m = await tx.chatMessage.create({
-      data: { conversationId: c.id, senderId: actor.id, body, imageId: stored?.id ?? null, createdAt: now },
+      data: {
+        conversationId: c.id,
+        senderId: actor.id,
+        body,
+        imageId: stored?.id ?? null,
+        ...(scheduling ? { scheduling: { key: scheduling.key, params: scheduling.params } as Prisma.InputJsonObject } : {}),
+        createdAt: now,
+      },
       include: messageInclude,
     });
     // Sending counts as reading everything before it.
@@ -464,9 +493,11 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   });
   const dto = toMessageDTO(message);
   emitToBoth(c, 'chat:message', dto);
-  void sendWebPush([otherOf(c, actor.id).id], {
+  // The notification reads in the recipient's zone.
+  const shown = scheduling ? (renderSchedulingMessage(scheduling, displayZoneFor({ role: other.role as Role, timeZone: other.timeZone })) ?? body) : body;
+  void sendWebPush([other.id], {
     title: actor.nickname,
-    body: image ? `📷 Photo${body ? `: ${body.length > 160 ? `${body.slice(0, 157)}…` : body}` : ''}` : body.length > 180 ? `${body.slice(0, 177)}…` : body,
+    body: image ? `📷 Photo${shown ? `: ${shown.length > 160 ? `${shown.slice(0, 157)}…` : shown}` : ''}` : shown.length > 180 ? `${shown.slice(0, 177)}…` : shown,
     url: `/chat/${c.id}`,
     // One notification per chat: a newer message replaces the older one.
     tag: `chat:${c.id}`,
@@ -568,7 +599,7 @@ chatRouter.delete('/chat/messages/:id', async (req, res) => {
     await tx.chatReaction.deleteMany({ where: { messageId: m.id } });
     const message = await tx.chatMessage.update({
       where: { id: m.id },
-      data: { body: '', imageId: null, deletedAt: new Date() },
+      data: { body: '', imageId: null, scheduling: Prisma.DbNull, deletedAt: new Date() },
       include: messageInclude,
     });
     // The picture goes too, right away.
