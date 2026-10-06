@@ -561,7 +561,7 @@ export interface ChatMessageDTO {
   conversationId: string;
   sender: UserRef;
   body: string;
-  /** `todo_done` is the reply posted when the assignee marks a to-do done. */
+  /** `todo_done` is the reply posted when the assignee marks a to-do done; `ring` a ring (its body is "Rang"). */
   kind: ChatMessageKind;
   replyTo: { id: string; body: string; sender: UserRef; deleted: boolean; hasImage: boolean } | null;
   todo: TodoSummary | null;
@@ -835,7 +835,29 @@ export interface WebPushPayload {
   /** Notifications with the same tag replace each other (e.g. one per chat). */
   tag: string;
   /** `test` always shows, even while the app is open and focused. */
-  kind: 'chat' | 'notification' | 'test';
+  kind: 'chat' | 'notification' | 'ring' | 'test';
+}
+
+/** Someone ringing the other person in a chat (RING_SECONDS); its id is the ring message's. */
+export interface ChatRingDTO {
+  id: string;
+  conversationId: string;
+  from: UserRef;
+  to: UserRef;
+  startedAt: string;
+  endsAt: string;
+}
+
+/**
+ * How a ring stopped: the one rung `closed` it or `opened` the chat, the ringer
+ * `cancelled` it, or nobody did anything before it ran out (`missed`).
+ */
+export type ChatRingEndReason = 'closed' | 'opened' | 'cancelled' | 'missed';
+
+export interface ChatRingEndedEvent {
+  id: string;
+  conversationId: string;
+  reason: ChatRingEndReason;
 }
 
 // --- Socket events (§7) -----------------------------------------------------
@@ -855,6 +877,9 @@ export interface ServerToClientEvents {
   'chat:message-updated': (message: ChatMessageDTO) => void;
   /** Every message in a chat was erased by one of the two people. */
   'chat:cleared': (event: { conversationId: string }) => void;
+  /** Sent to both people: the one rung hears it, the ringer's other tabs show it ringing. */
+  'chat:ring': (ring: ChatRingDTO) => void;
+  'chat:ring-ended': (event: ChatRingEndedEvent) => void;
   'presence:update': (presence: PresenceDTO[]) => void;
   'user:typing': (payload: { callId: string; userId: string; nickname: string }) => void;
   'session:revoked': () => void;

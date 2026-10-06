@@ -119,7 +119,7 @@ function ChatList({ chats, activeId, onOpen }: { chats: ObservedChatDTO[]; activ
 }
 
 const preview = (m: NonNullable<ObservedChatDTO['lastMessage']>) =>
-  m.deleted ? 'Message deleted' : m.body || (m.hasImage ? 'Picture' : '');
+  m.deleted ? 'Message deleted' : m.kind === 'ring' ? '🔔 Rang' : m.body || (m.hasImage ? 'Picture' : '');
 
 /** One chat, oldest at the top, with "Load older" above it. Read only. */
 function Transcript({ chat }: { chat: ObservedChatDTO }) {

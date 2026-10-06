@@ -1,108 +1,161 @@
 import AddRounded from '@mui/icons-material/AddRounded';
+import CheckRounded from '@mui/icons-material/CheckRounded';
 import CloseRounded from '@mui/icons-material/CloseRounded';
-import EventNoteRounded from '@mui/icons-material/EventNoteRounded';
+import SearchRounded from '@mui/icons-material/SearchRounded';
 import SendRounded from '@mui/icons-material/SendRounded';
-import { Box, Button, IconButton, ListSubheader, Menu, MenuItem, Stack, TextField, ToggleButton, ToggleButtonGroup, Typography } from '@mui/material';
+import {
+  Autocomplete,
+  Box,
+  Button,
+  IconButton,
+  InputAdornment,
+  MenuItem,
+  Stack,
+  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
+  Typography,
+} from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
-import { TimePicker } from '@mui/x-date-pickers/TimePicker';
 import {
   CALL_DURATIONS,
   SCHEDULING_GROUP_LABELS,
-  SCHEDULING_GROUPS,
   SCHEDULING_LATE_MINUTES,
   SCHEDULING_MAX_SLOTS,
   SCHEDULING_REASON_LABELS,
   SCHEDULING_REASONS,
   SCHEDULING_TEMPLATES,
+  findTypedDay,
+  findTypedTime,
+  formatSchedulingMoment,
+  parseTypedTime,
   renderSchedulingMessage,
   schedulingMessageSchema,
   schedulingSideOf,
-  schedulingTemplatesFor,
+  suggestSchedulingTemplates,
+  typedInstant,
   type Role,
   type SchedulingMessage,
+  type SchedulingReason,
   type SchedulingSlotType,
   type SchedulingSlotValue,
   type SchedulingTemplate,
   type SchedulingTemplateKey,
 } from '@god/shared';
-import type { DateTime } from 'luxon';
+import { DateTime } from 'luxon';
 import { useState } from 'react';
 import { zoneAbbr } from '@/lib/time';
 
 /**
  * Between an Expert and the team, a message is one of the set sentences
- * (scheduling.ts in @god/shared): pick one, fill its blanks from the pickers,
- * check how it reads, send. Times are picked on the sender's clock; the other
- * person reads them on theirs.
+ * (scheduling.ts in @god/shared). Type what you want to say and the matching
+ * sentences come up; pick one, fill its blanks, check how it reads, send. Times
+ * are typed ("3pm", "3:30 PM ET") on the sender's clock unless they name a zone;
+ * the other person reads them on theirs. Yes and No go in one tap.
  */
 
-/** A day and a time of day. */
+/** A day and a typed time of day. */
 interface When {
   date: DateTime | null;
-  time: DateTime | null;
+  time: string;
 }
-type Draft =
-  | When
-  | When[]
-  | { date: DateTime | null; start: DateTime | null; end: DateTime | null }
-  | { from: DateTime | null; to: DateTime | null }
-  | DateTime
-  | number
-  | string
-  | null;
+interface Span {
+  date: DateTime | null;
+  start: string;
+  end: string;
+}
+type Draft = When | When[] | Span | { from: DateTime | null; to: DateTime | null } | DateTime | number | string | null;
 
-const noWhen: When = { date: null, time: null };
+/** What was typed in the search box that can fill a blank: a time, a day, minutes, a reason. */
+interface Hints {
+  time: string;
+  day: DateTime | null;
+  minutes: number | null;
+  reason: SchedulingReason | '';
+}
 
-function emptyDraft(type: SchedulingSlotType): Draft {
+const REASON_WORDS: Record<SchedulingReason, RegExp> = {
+  conflict: /\b(conflict|clash|busy|another meeting)\b/i,
+  illness: /\b(sick|ill|illness|unwell|doctor)\b/i,
+  travel: /\b(travel|travelling|traveling|flight|trip|airport)\b/i,
+  emergency: /\b(emergency|urgent)\b/i,
+};
+
+function hintsFrom(query: string, zone: string): Hints {
+  const day = findTypedDay(query, zone);
+  const minutes = /\b(\d{1,2})\s*(?:min|mins|minutes|m)\b/i.exec(query);
+  const reason = SCHEDULING_REASONS.find((r) => REASON_WORDS[r].test(query)) ?? '';
+  return {
+    time: findTypedTime(query) ?? '',
+    day: day ? DateTime.fromISO(day, { zone }) : null,
+    minutes: minutes ? Number(minutes[1]) : null,
+    reason,
+  };
+}
+
+function draftFor(type: SchedulingSlotType, hints: Hints): Draft {
+  const when: When = { date: hints.day, time: hints.time };
   switch (type) {
     case 'datetime':
-      return noWhen;
+      return when;
     case 'datetimes':
-      return [noWhen];
+      return [when];
     case 'range':
-      return { date: null, start: null, end: null };
+      return { date: hints.day, start: hints.time, end: '' };
+    case 'day':
+      return hints.day;
     case 'days':
-      return { from: null, to: null };
+      return { from: hints.day, to: hints.day };
     case 'duration':
-      return 30;
+      return (CALL_DURATIONS as readonly number[]).includes(hints.minutes ?? 0) ? hints.minutes : 30;
+    case 'late':
+      return (SCHEDULING_LATE_MINUTES as readonly number[]).includes(hints.minutes ?? 0) ? hints.minutes : null;
     case 'reason':
-      return '';
-    default:
-      return null;
+      return hints.reason;
   }
 }
 
-/** The instant a day and a time make in the zone, or nothing until both are there. */
-function instant(day: DateTime | null, time: DateTime | null, zone: string): string | undefined {
-  if (!day?.isValid || !time?.isValid) return undefined;
-  return day.setZone(zone, { keepLocalTime: true }).startOf('day').set({ hour: time.hour, minute: time.minute }).toUTC().toISO() ?? undefined;
+const calendarDay = (day: DateTime | null) => (day?.isValid ? day.toISODate() : null);
+
+/**
+ * The instant a day and a typed time make, or nothing until both are there and
+ * readable. A time without a zone is on `zone`.
+ */
+function instantOf(day: DateTime | null, time: string, zone: string): string | undefined {
+  const d = calendarDay(day);
+  const parsed = parseTypedTime(time, zone);
+  return d && parsed?.ok ? (typedInstant(d, parsed.time) ?? undefined) : undefined;
 }
 
-const calendarDay = (day: DateTime | null, zone: string) => (day?.isValid ? (day.setZone(zone, { keepLocalTime: true }).toISODate() ?? undefined) : undefined);
+/** The zone a span's end is on: the one its start named, unless the end names its own. */
+function endZone(span: Span, zone: string): string {
+  const start = parseTypedTime(span.start, zone);
+  return start?.ok ? start.time.zone : zone;
+}
 
 /** What a blank holds once it is filled in, or nothing while it isn't. */
 function valueOf(type: SchedulingSlotType, draft: Draft, zone: string): SchedulingSlotValue | undefined {
   switch (type) {
     case 'datetime': {
       const w = draft as When;
-      return instant(w.date, w.time, zone);
+      return instantOf(w.date, w.time, zone);
     }
     case 'datetimes': {
-      const list = (draft as When[]).map((w) => instant(w.date, w.time, zone));
+      const list = (draft as When[]).map((w) => instantOf(w.date, w.time, zone));
       return list.every((v): v is string => v !== undefined) ? list : undefined;
     }
     case 'range': {
-      const r = draft as { date: DateTime | null; start: DateTime | null; end: DateTime | null };
-      const start = instant(r.date, r.start, zone);
-      const end = instant(r.date, r.end, zone);
+      const r = draft as Span;
+      const start = instantOf(r.date, r.start, zone);
+      const end = instantOf(r.date, r.end, endZone(r, zone));
       return start && end ? { start, end } : undefined;
     }
     case 'day':
-      return calendarDay(draft as DateTime | null, zone);
+      return calendarDay(draft as DateTime | null) ?? undefined;
     case 'days': {
       const r = draft as { from: DateTime | null; to: DateTime | null };
-      const from = calendarDay(r.from, zone);
-      const to = calendarDay(r.to, zone);
+      const from = calendarDay(r.from);
+      const to = calendarDay(r.to);
       return from && to ? { from, to } : undefined;
     }
     case 'duration':
@@ -127,16 +180,18 @@ export function SchedulingComposer({
   sending: boolean;
   onSend: (message: SchedulingMessage) => Promise<unknown>;
 }) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const [query, setQuery] = useState('');
   const [key, setKey] = useState<SchedulingTemplateKey | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const mine = schedulingTemplatesFor(schedulingSideOf(role));
+  const side = schedulingSideOf(role);
+  const suggestions = suggestSchedulingTemplates(query, side);
+  const typing = query.trim() !== '';
 
-  const pick = (next: SchedulingTemplateKey) => {
-    setAnchor(null);
-    setKey(next);
+  const pick = (next: SchedulingTemplateKey, hints: Hints) => {
     const slots: SchedulingTemplate['slots'] = SCHEDULING_TEMPLATES[next].slots;
-    setDrafts(Object.fromEntries(Object.entries(slots).map(([name, type]) => [name, emptyDraft(type)])));
+    setKey(next);
+    setQuery('');
+    setDrafts(Object.fromEntries(Object.entries(slots).map(([name, type]) => [name, draftFor(type, hints)])));
   };
   const reset = () => {
     setKey(null);
@@ -152,19 +207,20 @@ export function SchedulingComposer({
   const problem = parsed && !parsed.success ? parsed.error.issues[0]?.message : null;
   const set = (name: string, draft: Draft) => setDrafts((d) => ({ ...d, [name]: draft }));
 
-  const send = async () => {
-    if (!message || sending) return;
+  const send = async (m: SchedulingMessage | null = message) => {
+    if (!m || sending) return;
     try {
-      await onSend(message);
+      await onSend(m);
       reset();
     } catch {
       // The thread says what went wrong; the message stays here to try again.
     }
   };
 
-  return (
-    <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
-      {template ? (
+
+  if (template) {
+    return (
+      <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
         <Stack spacing={1.25}>
           <Stack direction="row" alignItems="center">
             <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ flex: 1 }}>
@@ -187,78 +243,160 @@ export function SchedulingComposer({
           )}
           <Stack direction="row" spacing={1} justifyContent="flex-end">
             <Button onClick={reset}>Cancel</Button>
-            <Button variant="contained" endIcon={<SendRounded />} disabled={!message || sending} onClick={() => void send()}>
+            {/* With nothing to fill in, Enter sends it straight away. */}
+            <Button variant="contained" endIcon={<SendRounded />} disabled={!message || sending} onClick={() => void send()} autoFocus={!slots.length}>
               Send
             </Button>
           </Stack>
         </Stack>
-      ) : (
-        <>
-          <Button
-            fullWidth
-            variant="outlined"
-            startIcon={<EventNoteRounded />}
-            onClick={(e) => setAnchor(e.currentTarget)}
-            sx={{ justifyContent: 'flex-start' }}
-          >
-            Choose a scheduling message
-          </Button>
-          <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.75, px: 0.5 }}>
-            Experts and the team chat in set messages, only to schedule calls.
-          </Typography>
-        </>
-      )}
-      <Menu
-        anchorEl={anchor}
-        open={Boolean(anchor)}
-        onClose={() => setAnchor(null)}
-        anchorOrigin={{ vertical: 'top', horizontal: 'left' }}
-        transformOrigin={{ vertical: 'bottom', horizontal: 'left' }}
-        slotProps={{ paper: { sx: { maxHeight: 440, width: anchor?.clientWidth ?? 420, maxWidth: 'calc(100vw - 32px)' } } }}
-      >
-        {SCHEDULING_GROUPS.flatMap((group) => {
-          const keys = mine.filter((k) => SCHEDULING_TEMPLATES[k].group === group);
-          if (!keys.length) return [];
-          return [
-            <ListSubheader key={group} sx={{ lineHeight: '32px' }}>
-              {SCHEDULING_GROUP_LABELS[group]}
-            </ListSubheader>,
-            ...keys.map((k) => (
-              <MenuItem key={k} onClick={() => pick(k)} sx={{ whiteSpace: 'normal', typography: 'body2', py: 0.9 }}>
-                {outline(SCHEDULING_TEMPLATES[k])}
-              </MenuItem>
-            )),
-          ];
-        })}
-      </Menu>
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
+        <Button size="small" variant="contained" color="success" startIcon={<CheckRounded />} disabled={sending} onClick={() => void send({ key: 'yes', params: {} })}>
+          Yes
+        </Button>
+        <Button size="small" variant="contained" color="inherit" startIcon={<CloseRounded />} disabled={sending} onClick={() => void send({ key: 'no', params: {} })}>
+          No
+        </Button>
+        <Typography variant="caption" color="text.secondary" sx={{ flex: 1, textAlign: 'right' }}>
+          Set messages only, to schedule calls
+        </Typography>
+      </Stack>
+      <Autocomplete<SchedulingTemplateKey>
+        options={suggestions}
+        value={null}
+        inputValue={query}
+        onInputChange={(_e, text, reason) => reason !== 'reset' && setQuery(text)}
+        onChange={(_e, next) => next && pick(next, hintsFrom(query, zone))}
+        filterOptions={(keys) => keys}
+        groupBy={typing ? undefined : (k) => SCHEDULING_GROUP_LABELS[SCHEDULING_TEMPLATES[k].group]}
+        getOptionLabel={(k) => outline(SCHEDULING_TEMPLATES[k])}
+        renderOption={({ key: optionKey, ...props }, k) => (
+          <Box component="li" key={optionKey} {...props} sx={{ typography: 'body2', whiteSpace: 'normal' }}>
+            {preview(SCHEDULING_TEMPLATES[k], query, zone)}
+          </Box>
+        )}
+        autoHighlight
+        openOnFocus
+        blurOnSelect
+        disabled={sending}
+        noOptionsText="No set message says that. Try “time”, “reschedule”, “late” or “cancel”."
+        slotProps={{ popper: { placement: 'top-start' }, listbox: { sx: { maxHeight: 360 } } }}
+        renderInput={(params) => (
+          <TextField
+            {...params}
+            size="small"
+            placeholder="Type what you want to say: reschedule, 3pm ET, late…"
+            slotProps={{
+              input: {
+                ...params.InputProps,
+                startAdornment: (
+                  <InputAdornment position="start">
+                    <SearchRounded fontSize="small" />
+                  </InputAdornment>
+                ),
+              },
+              htmlInput: { ...params.inputProps, 'aria-label': 'Find a scheduling message' },
+            }}
+          />
+        )}
+      />
     </Box>
   );
 }
 
-/** The picker for one blank. */
+/** A suggestion as it would read with what was typed: the day and time typed go in the first time blank. */
+function preview(template: SchedulingTemplate, query: string, zone: string): string {
+  const time = findTypedTime(query);
+  const day = findTypedDay(query, zone);
+  const when = [day && DateTime.fromISO(day, { zone }).toFormat('ccc, LLL d'), time].filter(Boolean).join(' at ');
+  let used = false;
+  return template.text.replace(/\{(\w+)\}/g, (_whole, name: string) => {
+    const type = template.slots[name];
+    if (when && !used && (type === 'datetime' || type === 'datetimes' || type === 'range')) {
+      used = true;
+      return when;
+    }
+    return '___';
+  });
+}
+
+/** A time of day, typed: "3pm", "3:30 PM ET", "15:30". It says how it reads as you type. */
+function TimeText({
+  label,
+  value,
+  day,
+  zone,
+  ownZone = zone,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  day: DateTime | null;
+  /** The zone a time without one is on. */
+  zone: string;
+  /** The writer's own zone, which the result is shown in. */
+  ownZone?: string;
+  onChange: (text: string) => void;
+}) {
+  const parsed = parseTypedTime(value, zone);
+  const d = calendarDay(day);
+  const at = parsed?.ok && d ? typedInstant(d, parsed.time) : null;
+  const elsewhere = parsed?.ok && parsed.time.zone !== ownZone;
+  const helper = !parsed
+    ? `Like 3pm, 3:30 PM ET or 15:30 · ${zoneAbbr(zone)} unless you add a zone`
+    : !parsed.ok
+      ? parsed.error
+      : at
+        ? `${formatSchedulingMoment(at, ownZone)}${elsewhere ? ' (your time)' : ''}${Date.parse(at) < Date.now() ? ' · already past' : ''}`
+        : `${DateTime.fromObject({ hour: parsed.time.hour, minute: parsed.time.minute }).toFormat('h:mm a')} ${zoneAbbr(parsed.time.zone)} · choose the date`;
+  return (
+    <TextField
+      size="small"
+      fullWidth
+      label={label}
+      placeholder="3pm ET"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      error={Boolean(parsed && !parsed.ok)}
+      helperText={helper}
+      slotProps={{
+        htmlInput: { maxLength: 40, autoComplete: 'off' },
+        formHelperText: { sx: { color: !parsed?.ok ? undefined : at && Date.parse(at) < Date.now() ? 'warning.main' : 'success.main' } },
+      }}
+    />
+  );
+}
+
+const DATE_FIELD = { textField: { size: 'small' as const, fullWidth: true } };
+
+/** The fields for one blank. */
 function SlotField({ type, draft, zone, onChange }: { type: SchedulingSlotType; draft: Draft; zone: string; onChange: (draft: Draft) => void }) {
-  const zoneLabel = zoneAbbr(zone);
   switch (type) {
     case 'datetime':
-      return <WhenFields value={draft as When} zone={zone} zoneLabel={zoneLabel} onChange={onChange} />;
+      return <WhenFields value={draft as When} zone={zone} onChange={onChange} />;
     case 'datetimes': {
       const list = draft as When[];
       return (
         <Stack spacing={1}>
           {list.map((w, i) => (
-            <Stack key={i} direction="row" spacing={0.5} alignItems="center">
+            <Stack key={i} direction="row" spacing={0.5} alignItems="flex-start">
               <Box sx={{ flex: 1 }}>
-                <WhenFields value={w} zone={zone} zoneLabel={zoneLabel} onChange={(next) => onChange(list.map((x, j) => (j === i ? next : x)))} />
+                <WhenFields value={w} zone={zone} onChange={(next) => onChange(list.map((x, j) => (j === i ? next : x)))} />
               </Box>
               {list.length > 1 && (
-                <IconButton size="small" onClick={() => onChange(list.filter((_, j) => j !== i))} aria-label="Remove this time">
+                <IconButton size="small" onClick={() => onChange(list.filter((_, j) => j !== i))} aria-label="Remove this time" sx={{ mt: 0.5 }}>
                   <CloseRounded sx={{ fontSize: 18 }} />
                 </IconButton>
               )}
             </Stack>
           ))}
           {list.length < SCHEDULING_MAX_SLOTS && (
-            <Button size="small" startIcon={<AddRounded />} onClick={() => onChange([...list, noWhen])} sx={{ alignSelf: 'flex-start' }}>
+            <Button size="small" startIcon={<AddRounded />} onClick={() => onChange([...list, { date: list.at(-1)?.date ?? null, time: '' }])} sx={{ alignSelf: 'flex-start' }}>
               Add another time
             </Button>
           )}
@@ -266,23 +404,23 @@ function SlotField({ type, draft, zone, onChange }: { type: SchedulingSlotType; 
       );
     }
     case 'range': {
-      const r = draft as { date: DateTime | null; start: DateTime | null; end: DateTime | null };
+      const r = draft as Span;
       return (
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-          <DatePicker label="Date" value={r.date} timezone={zone} disablePast onChange={(date) => onChange({ ...r, date })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-          <TimePicker label={`From (${zoneLabel})`} value={r.start} timezone={zone} minutesStep={5} onChange={(start) => onChange({ ...r, start })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-          <TimePicker label={`To (${zoneLabel})`} value={r.end} timezone={zone} minutesStep={5} onChange={(end) => onChange({ ...r, end })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="flex-start">
+          <DatePicker label="Date" value={r.date} timezone={zone} disablePast onChange={(date) => onChange({ ...r, date })} slotProps={DATE_FIELD} />
+          <TimeText label="From" value={r.start} day={r.date} zone={zone} onChange={(start) => onChange({ ...r, start })} />
+          <TimeText label="To" value={r.end} day={r.date} zone={endZone(r, zone)} ownZone={zone} onChange={(end) => onChange({ ...r, end })} />
         </Stack>
       );
     }
     case 'day':
-      return <DatePicker label="Day" value={draft as DateTime | null} timezone={zone} disablePast onChange={onChange} slotProps={{ textField: { size: 'small', fullWidth: true } }} />;
+      return <DatePicker label="Day" value={draft as DateTime | null} timezone={zone} disablePast onChange={onChange} slotProps={DATE_FIELD} />;
     case 'days': {
       const r = draft as { from: DateTime | null; to: DateTime | null };
       return (
         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-          <DatePicker label="From" value={r.from} timezone={zone} disablePast onChange={(from) => onChange({ ...r, from })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-          <DatePicker label="To" value={r.to} timezone={zone} disablePast onChange={(to) => onChange({ ...r, to })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
+          <DatePicker label="From" value={r.from} timezone={zone} disablePast onChange={(from) => onChange({ ...r, from })} slotProps={DATE_FIELD} />
+          <DatePicker label="To" value={r.to} timezone={zone} disablePast onChange={(to) => onChange({ ...r, to })} slotProps={DATE_FIELD} />
         </Stack>
       );
     }
@@ -310,11 +448,11 @@ function SlotField({ type, draft, zone, onChange }: { type: SchedulingSlotType; 
   }
 }
 
-function WhenFields({ value, zone, zoneLabel, onChange }: { value: When; zone: string; zoneLabel: string; onChange: (when: When) => void }) {
+function WhenFields({ value, zone, onChange }: { value: When; zone: string; onChange: (when: When) => void }) {
   return (
-    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-      <DatePicker label="Date" value={value.date} timezone={zone} disablePast onChange={(date) => onChange({ ...value, date })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
-      <TimePicker label={`Time (${zoneLabel})`} value={value.time} timezone={zone} minutesStep={5} onChange={(time) => onChange({ ...value, time })} slotProps={{ textField: { size: 'small', fullWidth: true } }} />
+    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems="flex-start">
+      <DatePicker label="Date" value={value.date} timezone={zone} disablePast onChange={(date) => onChange({ ...value, date })} slotProps={DATE_FIELD} />
+      <TimeText label="Time" value={value.time} day={value.date} zone={zone} onChange={(time) => onChange({ ...value, time })} />
     </Stack>
   );
 }

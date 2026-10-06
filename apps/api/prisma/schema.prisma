@@ -49,6 +49,7 @@ enum PlatformRegistration {
 enum ChatMessageKind {
   text
   todo_done
+  ring
 }
 
 /// open → done (the taker ticks it) → completed (the giver confirms).

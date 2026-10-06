@@ -1,4 +1,5 @@
 import type {
+  ChatRingDTO,
   AuditEntryDTO,
   AuthResponse,
   ChatMessageDTO,
@@ -270,6 +271,12 @@ export function createApiClient(options: ClientOptions) {
       /** One of the set sentences: the only kind of message between an Expert and the team. */
       sendScheduling: (id: string, scheduling: SchedulingMessage) =>
         post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { scheduling }),
+      /** Rings the other person: a tune on their screen until they close it (RING_SECONDS at most). */
+      ring: (id: string) => post<{ ring: ChatRingDTO; message: ChatMessageDTO }>(`/chat/conversations/${enc(id)}/ring`),
+      /** The rings sounding now in your chats, either side. */
+      rings: () => get<ChatRingDTO[]>('/chat/rings'),
+      /** Stops a ring: the one rung closes it (or opens the chat), the ringer cancels it. */
+      endRing: (ringId: string, opened = false) => post<void>(`/chat/rings/${enc(ringId)}/end`, { opened }),
       /** Deletes your own message for both people. */
       deleteMessage: (messageId: string) => del<ChatMessageDTO>(`/chat/messages/${enc(messageId)}`),
       /** Adds your reaction, or takes it back if you had already reacted with that emoji. */

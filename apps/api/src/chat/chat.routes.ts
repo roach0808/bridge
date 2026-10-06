@@ -8,6 +8,8 @@ import {
   SCHEDULING_TEMPLATES,
   schedulingSideOf,
   CHAT_IMAGE_MAX_BYTES,
+  RING_SECONDS,
+  endRingSchema,
   COMPLETED_TASK_DAYS,
   canGiveTask,
   chatMessageSchema,
@@ -28,6 +30,8 @@ import {
   updateTodoSchema,
   type ChatMessageDTO,
   type ChatMessagePage,
+  type ChatRingDTO,
+  type ChatRingEndReason,
   type ConversationDTO,
   type ObservedChatDTO,
   type Role,
@@ -506,6 +510,111 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   res.status(201).json(dto);
 });
 
+// --- Ringing ------------------------------------------------------------------------
+
+/**
+ * A ring sounds on the other person's screen until they close it or open the chat,
+ * the ringer stops it, or RING_SECONDS pass. It lives only in this process while it
+ * sounds (a restart ends it, and each screen stops on its own at `endsAt`); the
+ * chat keeps a `ring` message saying it happened.
+ */
+interface Ring extends ChatRingDTO {
+  userAId: string;
+  userBId: string;
+  timer: NodeJS.Timeout;
+}
+const rings = new Map<string, Ring>();
+/** What a ring message says wherever only its words are shown. */
+const RING_BODY = 'Rang';
+/** Chats where a ring is being set up, so two at once cannot both start. */
+const startingRings = new Set<string>();
+
+const ringDTO = ({ timer: _timer, userAId: _a, userBId: _b, ...dto }: Ring): ChatRingDTO => dto;
+const ringIn = (conversationId: string) => [...rings.values()].find((r) => r.conversationId === conversationId);
+
+function endRing(ring: Ring, reason: ChatRingEndReason) {
+  if (!rings.delete(ring.id)) return;
+  clearTimeout(ring.timer);
+  emitToBoth(ring, 'chat:ring-ended', { id: ring.id, conversationId: ring.conversationId, reason });
+}
+
+/** Stops every ring at once (tests, shutting down). */
+export function stopAllRings() {
+  for (const ring of rings.values()) clearTimeout(ring.timer);
+  rings.clear();
+}
+
+/** Rings the other person; anyone who may write in the chat may ring, one ring at a time. */
+chatRouter.post('/chat/conversations/:id/ring', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadConversation(actor, idParam(req));
+  if (!canSendIn(c)) throw forbidden('This chat is closed: the other person is no longer available');
+  if (ringIn(c.id) || startingRings.has(c.id)) throw conflict('This chat is already ringing');
+  startingRings.add(c.id);
+  try {
+    const other = otherOf(c, actor.id);
+    const now = new Date();
+    const message = await prisma.$transaction(async (tx) => {
+      const m = await tx.chatMessage.create({
+        data: { conversationId: c.id, senderId: actor.id, body: RING_BODY, kind: 'ring', createdAt: now },
+        include: messageInclude,
+      });
+      await tx.conversation.update({
+        where: { id: c.id },
+        data: { lastMessageAt: now, ...(c.userAId === actor.id ? { userALastReadAt: now } : { userBLastReadAt: now }) },
+      });
+      return m;
+    });
+    const dto = toMessageDTO(message);
+    const ring: Ring = {
+      id: message.id,
+      conversationId: c.id,
+      from: dto.sender,
+      to: toUserRef(other),
+      startedAt: iso(now),
+      endsAt: iso(new Date(now.getTime() + RING_SECONDS * 1000)),
+      userAId: c.userAId,
+      userBId: c.userBId,
+      timer: setTimeout(() => endRing(ring, 'missed'), RING_SECONDS * 1000),
+    };
+    ring.timer.unref?.();
+    rings.set(ring.id, ring);
+    emitToBoth(c, 'chat:message', dto);
+    emitToBoth(c, 'chat:ring', ringDTO(ring));
+    void sendWebPush([other.id], {
+      title: `📞 ${actor.nickname} is ringing you`,
+      body: 'Open the chat to answer.',
+      url: `/chat/${c.id}`,
+      tag: `ring:${c.id}`,
+      kind: 'ring',
+    });
+    res.status(201).json({ ring: ringDTO(ring), message: dto });
+  } finally {
+    startingRings.delete(c.id);
+  }
+});
+
+/** The rings sounding now that the caller is in, either side. */
+chatRouter.get('/chat/rings', (req, res) => {
+  const actor = actorOf(req);
+  res.json([...rings.values()].filter((r) => isParticipant(r, actor.id)).map(ringDTO));
+});
+
+/**
+ * Stops a ring: the one rung closes it (or opens the chat, `opened: true`), the
+ * ringer cancels it. A ring that has already stopped is fine.
+ */
+chatRouter.post('/chat/rings/:id/end', (req, res) => {
+  const actor = actorOf(req);
+  const { opened } = parseBody(endRingSchema, req);
+  const ring = rings.get(idParam(req) ?? '');
+  if (ring) {
+    if (!isParticipant(ring, actor.id)) throw notFound('Ring');
+    endRing(ring, ring.to.id === actor.id ? (opened ? 'opened' : 'closed') : 'cancelled');
+  }
+  res.status(204).end();
+});
+
 chatRouter.post('/chat/conversations/:id/read', async (req, res) => {
   const actor = actorOf(req);
   const c = await loadConversation(actor, idParam(req));
@@ -593,6 +702,7 @@ chatRouter.delete('/chat/messages/:id', async (req, res) => {
   const m = await loadMessageForReaction(actor, idParam(req));
   if (m.senderId !== actor.id) throw forbidden('You can only delete your own messages');
   if (m.deletedAt) throw conflict('This message is already deleted');
+  if (m.kind === 'ring') throw conflict('A ring stays in the chat');
   if (m.kind !== 'text') throw conflict('A task’s done reply cannot be deleted');
   if (m.todo) throw conflict('This message is a task. Remove the task first.');
   const updated = await prisma.$transaction(async (tx) => {

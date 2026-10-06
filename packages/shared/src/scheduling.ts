@@ -2,6 +2,7 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { CALL_DURATIONS } from './callStatus';
 import type { Role } from './roles';
+import { findTypedTime, isDayWord } from './typedTime';
 
 /**
  * An Expert and the team (a Manager or an Associate) chat only to schedule
@@ -45,9 +46,10 @@ export const SCHEDULING_MAX_SLOTS = 3;
  */
 export type SchedulingSlotType = 'datetime' | 'datetimes' | 'range' | 'day' | 'days' | 'duration' | 'late' | 'reason';
 
-export const SCHEDULING_GROUPS = ['times', 'confirm', 'reschedule', 'cancel', 'day_of', 'replies'] as const;
+export const SCHEDULING_GROUPS = ['answer', 'times', 'confirm', 'reschedule', 'cancel', 'day_of', 'replies'] as const;
 export type SchedulingGroup = (typeof SCHEDULING_GROUPS)[number];
 export const SCHEDULING_GROUP_LABELS: Record<SchedulingGroup, string> = {
+  answer: 'Yes or no',
   times: 'Finding a time',
   confirm: 'Confirming',
   reschedule: 'Rescheduling',
@@ -75,6 +77,9 @@ const t = (group: SchedulingGroup, from: SchedulingTemplate['from'], text: strin
 
 /** Every sentence there is. A key, once used, is never renamed: messages store it. */
 export const SCHEDULING_TEMPLATES = {
+  // Yes or no: first, the quickest answer to most questions
+  yes: t('answer', 'both', 'Yes.'),
+  no: t('answer', 'both', 'No.'),
   // Finding a time
   ask_available: t('times', 'team', 'Are you available for a {duration} call on {at}?', { duration: 'duration', at: 'datetime' }),
   ask_times_on_day: t('times', 'team', 'Which times work for you on {day}?', { day: 'day' }),
@@ -237,4 +242,83 @@ export function renderSchedulingMessage(m: { key: string; params: Record<string,
     if (!type || value === undefined) return whole;
     return formatValue(type, value, zone);
   });
+}
+
+// --- Finding a sentence by typing ----------------------------------------------------
+
+/** Words people type looking for a sentence, beyond the ones in it. */
+const SCHEDULING_KEYWORDS: Partial<Record<SchedulingTemplateKey, string>> = {
+  yes: 'ok okay sure agree accept fine yeah yep correct right',
+  no: 'nope decline disagree not',
+  ask_available: 'free time slot when book schedule can',
+  ask_times_on_day: 'free time slot when what',
+  ask_availability: 'free when slots week schedule times',
+  available_window: 'free between window range from to time',
+  available_slots: 'free options choose slots times',
+  not_available_day: 'busy unavailable off away',
+  only_duration: 'short length minutes limit time',
+  time_works: 'ok accept agree fine good',
+  call_scheduled: 'booked set fixed',
+  please_confirm: 'attend check',
+  confirmed: 'yes attend agree ok',
+  research_ready: 'brief prep preparation materials document',
+  research_reviewed: 'brief prep read done',
+  reschedule_to: 'move change postpone another time later earlier',
+  reschedule_reason: 'move change postpone why sick ill travel emergency conflict',
+  client_reschedule: 'move change postpone customer',
+  call_moved: 'changed new time postponed rescheduled',
+  how_about: 'instead alternative counter other time',
+  call_cancelled: 'cancel off called canceled',
+  cannot_do: 'cancel decline drop withdraw canceled',
+  reminder: 'remind soon starts start',
+  running_late: 'delay delayed minutes behind',
+  ready_to_join: 'waiting here joined',
+  link_problem: 'zoom teams meet join url broken access',
+  details_updated: 'link zoom changed new join',
+  client_not_joined: 'waiting nobody absent missing',
+  client_late: 'delay delayed waiting customer',
+  ok_thanks: 'thanks thank okay ok great',
+  received: 'got noted seen',
+  check_details: 'info information page',
+  get_back: 'later wait check',
+};
+
+/** Too common to tell one sentence from another. */
+const STOP_WORDS = new Set(['i', 'a', 'an', 'the', 'to', 'for', 'on', 'at', 'in', 'of', 'and', 'or', 'me', 'my', 'you', 'your', 'we', 'it', 'is', 'be', 'pls', 'please', 'call']);
+
+const wordsOf = (text: string) =>
+  (text.toLowerCase().replace(/['’]/g, '').match(/[a-z]+/g) ?? []).filter((w) => !STOP_WORDS.has(w));
+
+const searchWords: Record<SchedulingTemplateKey, string[]> = Object.fromEntries(
+  SCHEDULING_TEMPLATE_KEYS.map((key) => {
+    const { text, group } = SCHEDULING_TEMPLATES[key];
+    return [key, wordsOf(`${text.replace(/\{\w+\}/g, ' ')} ${SCHEDULING_GROUP_LABELS[group]} ${SCHEDULING_KEYWORDS[key] ?? ''}`)];
+  }),
+) as Record<SchedulingTemplateKey, string[]>;
+
+/** "resched" finds "reschedule", and "rescheduling" finds it too. */
+const sameWord = (typed: string, known: string) => known.startsWith(typed) || (known.length >= 4 && typed.startsWith(known));
+
+const takesATime = (key: SchedulingTemplateKey) =>
+  Object.values(SCHEDULING_TEMPLATES[key].slots as Record<string, SchedulingSlotType>).some((t) => t === 'datetime' || t === 'datetimes' || t === 'range');
+
+/**
+ * The sentences one side may send, best match first, for what they have typed.
+ * Nothing typed gives them all in the catalog's order. A time in the text ("3pm ET")
+ * favours the sentences that carry one; a day ("tomorrow") counts for nothing either way.
+ */
+export function suggestSchedulingTemplates(query: string, side: SchedulingSide): SchedulingTemplateKey[] {
+  const mine = schedulingTemplatesFor(side);
+  const time = findTypedTime(query);
+  const words = wordsOf(time ? query.replace(time, ' ') : query).filter((w) => !isDayWord(w));
+  if (!words.length) return time ? mine.filter(takesATime) : mine;
+  const scored = mine
+    .map((key, order) => {
+      const known = searchWords[key];
+      // A word as it is beats one it only starts: "late" finds "late" before "later".
+      const hits = words.reduce((sum, w) => sum + (known.includes(w) ? 1 : known.some((k) => sameWord(w, k)) ? 0.8 : 0), 0);
+      return { key, order, hits, score: hits + (time && takesATime(key) ? 0.5 : 0) };
+    })
+    .filter((s) => s.hits > 0);
+  return scored.sort((a, b) => b.score - a.score || a.order - b.order).map((s) => s.key);
 }

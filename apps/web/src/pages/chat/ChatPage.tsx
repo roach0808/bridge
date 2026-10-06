@@ -10,6 +10,8 @@ import CloseRounded from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EmojiEmotionsOutlined from '@mui/icons-material/EmojiEmotionsOutlined';
 import MoreVertRounded from '@mui/icons-material/MoreVertRounded';
+import NotificationsActiveRounded from '@mui/icons-material/NotificationsActiveRounded';
+import NotificationsActiveOutlined from '@mui/icons-material/NotificationsActiveOutlined';
 import SendRounded from '@mui/icons-material/SendRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
@@ -61,6 +63,7 @@ import { shrinkChatImage } from '@/lib/image';
 import { inZone } from '@/lib/time';
 import { usePresence } from '@/realtime/PresenceProvider';
 import { appendChatMessage, replaceChatMessage } from '@/realtime/RealtimeProvider';
+import { useRings } from '@/realtime/RingProvider';
 import { ChatImage, EmojiPickerPopover, QuickReactionBar, ReactionChips, messageText, useReact } from './chatExtras';
 import { SchedulingComposer } from './SchedulingComposer';
 import { SearchField, useIsPhone } from '../admin/adminShared';
@@ -84,6 +87,7 @@ function previewOf(c: ConversationDTO, meId: string): string {
   const prefix = m.senderId === meId ? 'You: ' : '';
   if (m.deleted) return `${prefix}Message deleted`;
   if (m.kind === 'todo_done') return `${prefix}✓ Marked a task done`;
+  if (m.kind === 'ring') return m.senderId === meId ? 'You rang' : '🔔 Rang you';
   return m.hasImage ? `${prefix}📷 ${m.body || 'Photo'}` : `${prefix}${m.body}`;
 }
 
@@ -476,21 +480,34 @@ function ConfirmTaskButton({ todoId, conversationId }: { todoId: string; convers
   );
 }
 
-function MessageBubble({
-  message: m,
-  conversation,
-  mine,
-  seen,
-  zone,
-  onDone,
-}: {
+type BubbleProps = {
   message: ChatMessageDTO;
   conversation: ConversationDTO;
   mine: boolean;
   seen: boolean;
   zone: string;
   onDone: (m: ChatMessageDTO) => void;
-}) {
+};
+
+function MessageBubble(props: BubbleProps) {
+  const { message: m, conversation, mine, zone } = props;
+  if (m.kind === 'ring') return <RingLine message={m} other={conversation.other.nickname} mine={mine} zone={zone} />;
+  return <TalkBubble {...props} />;
+}
+
+/** A ring, kept in the chat as a line of its own between the messages. */
+function RingLine({ message: m, other, mine, zone }: { message: ChatMessageDTO; other: string; mine: boolean; zone: string }) {
+  return (
+    <Stack direction="row" spacing={0.75} alignItems="center" justifyContent="center" sx={{ mb: 1.25, color: 'text.secondary' }}>
+      <NotificationsActiveOutlined sx={{ fontSize: 16 }} />
+      <Typography variant="caption">
+        {mine ? `You rang ${other}` : `${m.sender.nickname} rang you`} · {inZone(m.createdAt, zone).toFormat('h:mm a')}
+      </Typography>
+    </Stack>
+  );
+}
+
+function TalkBubble({ message: m, conversation, mine, seen, zone, onDone }: BubbleProps) {
   const me = useMe();
   const dt = inZone(m.createdAt, zone);
   const isDone = m.kind === 'todo_done';
@@ -589,6 +606,52 @@ function MessageBubble({
         }}
       />
     </Stack>
+  );
+}
+
+/**
+ * Rings the other person: a tune on their screen until they close it. While it
+ * sounds, the ringer can stop it; the one rung answers from the ring itself.
+ */
+function RingButton({ conversation: c }: { conversation: ConversationDTO }) {
+  const me = useMe();
+  const { ringIn, ring, stop } = useRings();
+  const [starting, setStarting] = useState(false);
+  const current = ringIn(c.id);
+
+  if (current && current.from.id === me.id) {
+    return (
+      <Button
+        size="small"
+        variant="contained"
+        color="success"
+        startIcon={<NotificationsActiveRounded />}
+        onClick={() => stop(current)}
+        sx={{ flexShrink: 0, borderRadius: 99 }}
+      >
+        Ringing… Stop
+      </Button>
+    );
+  }
+  return (
+    <Tooltip title={current ? `${c.other.nickname} is ringing you` : `Ring ${c.other.nickname}: plays a tune on their screen until they close it`}>
+      <span>
+        <Button
+          size="small"
+          variant="outlined"
+          startIcon={<NotificationsActiveOutlined />}
+          disabled={starting || Boolean(current)}
+          onClick={async () => {
+            setStarting(true);
+            await ring(c.id);
+            setStarting(false);
+          }}
+          sx={{ flexShrink: 0, borderRadius: 99 }}
+        >
+          Ring
+        </Button>
+      </span>
+    </Tooltip>
   );
 }
 
@@ -837,6 +900,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
                 )}
               </Stack>
             </Box>
+            {c.canSend && <RingButton conversation={c} />}
           </>
         )}
       </Stack>

@@ -13,7 +13,8 @@ import { qk } from '@/lib/queryKeys';
 import { replaceChatMessage } from '@/realtime/RealtimeProvider';
 
 /** What a message says: a scheduling sentence is written out in the reader's zone. */
-export const messageText = (m: ChatMessageDTO, zone: string) => (m.scheduling ? (renderSchedulingMessage(m.scheduling, zone) ?? m.body) : m.body);
+export const messageText = (m: ChatMessageDTO, zone: string) =>
+  m.kind === 'ring' ? '🔔 Rang' : m.scheduling ? (renderSchedulingMessage(m.scheduling, zone) ?? m.body) : m.body;
 
 // The picker and its emoji data only load the first time someone opens it.
 const EmojiPicker = lazy(() => import('emoji-picker-react'));

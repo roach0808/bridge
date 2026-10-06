@@ -20,6 +20,7 @@ self.addEventListener('push', (event) => {
       const focused = open.filter((c) => c.focused && c.visibilityState === 'visible');
       // Don't interrupt someone who is already looking: a chat they have open,
       // or any page of the app for other notifications (the app shows those itself).
+      // A ring shows inside any open page of the app, so it only needs the system when none is in front.
       const watching =
         data.kind === 'test'
           ? false
@@ -32,6 +33,9 @@ self.addEventListener('push', (event) => {
         renotify: Boolean(data.tag),
         icon: '/icon-192.png',
         badge: '/badge-72.png',
+        // A ring stays up until it is dealt with, and buzzes a phone.
+        requireInteraction: data.kind === 'ring',
+        vibrate: data.kind === 'ring' ? [400, 200, 400, 200, 400] : undefined,
         data: { url: target.pathname + target.search },
       });
     })(),

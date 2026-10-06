@@ -392,6 +392,8 @@ export const messagesQuerySchema = z.object({
 // --- Chat & to-dos ------------------------------------------------------------
 
 export const startConversationSchema = z.object({ userId: uuid });
+/** Stopping a ring; the one rung says whether they opened the chat or just closed it. */
+export const endRingSchema = z.object({ opened: z.boolean().default(false) });
 export const chatMessageSchema = z
   .object({
     /** Required unless a picture is sent; then it is an optional caption. */

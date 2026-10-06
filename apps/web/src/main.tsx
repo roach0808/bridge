@@ -11,6 +11,7 @@ import { AuthProvider } from '@/auth/AuthProvider';
 import { ToastProvider } from '@/components/ToastProvider';
 import { PresenceProvider } from '@/realtime/PresenceProvider';
 import { RealtimeProvider } from '@/realtime/RealtimeProvider';
+import { RingProvider } from '@/realtime/RingProvider';
 import { router } from '@/router';
 import { theme } from '@/theme/theme';
 
@@ -35,7 +36,9 @@ createRoot(document.getElementById('root')!).render(
             <AuthProvider>
               <RealtimeProvider>
                 <PresenceProvider>
-                  <RouterProvider router={router} />
+                  <RingProvider>
+                    <RouterProvider router={router} />
+                  </RingProvider>
                 </PresenceProvider>
               </RealtimeProvider>
             </AuthProvider>

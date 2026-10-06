@@ -1355,6 +1355,33 @@ each reader sees them in their own zone (`displayZoneFor`); `body` holds the
 sentence as the sender read it, and is what a push notification falls back on.
 Chats with the Founder stay free and take no set sentences (400).
 
+**Finding and filling a sentence.** Yes and No come first, and are also one-tap
+buttons above the composer. Typing in the composer's search box lists the
+sentences that match (`suggestSchedulingTemplates`: the words of each sentence
+plus a few it is looked for by, such as "zoom" for a broken link), best first;
+nothing typed lists them all. A time or day in what was typed ("reschedule
+tomorrow 3pm ET") fills the first time blank of the sentence picked; minutes and
+a reason fill theirs. Times are typed, not picked from a clock
+(`parseTypedTime` in `packages/shared/src/typedTime.ts`): "3pm", "3:30 PM",
+"15:30", "noon", optionally with a zone — ET/CT/MT/PT (with daylight saving),
+UTC/GMT, KST, JST, IST, CET, BST and others, an offset such as UTC+9, or a place
+name such as Asia/Seoul. Without a zone the time is on the writer's own clock.
+An hour from 1 to 11 needs AM or PM unless written as on a 24-hour clock
+("09:30"). Under each time the composer shows how it reads on the writer's
+clock, and warns when it has passed. Only the instant is sent, so the blanks are
+checked exactly as before.
+
+**Ringing.** Either person in a chat they may write in can ring the other
+(`POST …/ring`): no call, but a pop-up with a tune on the other person's screens
+(and a push that stays up, §7.5) until they close it or open the chat, the ringer
+stops it, or 45 seconds pass (`RING_SECONDS`). One ring at a time per chat. The
+chat keeps a `ring` message (body "Rang"), shown as a line between messages; it
+cannot be deleted or made a task. The ringer is told how it ended: opened, seen
+(closed), or no answer. A ring lives in the API process only while it sounds;
+each screen also stops at `endsAt` on its own. Browsers make sound only once the
+person has used the page, so a ring before any tap shows silently and the tune
+starts at the next tap.
+
 | Method | Path | Who | Notes |
 |---|---|---|---|
 | GET | /chat/contacts | all | Active users the caller may chat with |
@@ -1364,10 +1391,13 @@ Chats with the Founder stay free and take no set sentences (400).
 | GET | /chat/conversations/:id/messages | the two people | Pages of `limit` (≤ 100) messages, oldest → newest: the latest without cursors, older ones with `cursor` (a page's `nextCursor`), newer ones with `after` (a page's `newerCursor`, while `hasNewer`). Each message: { id, sender, body, kind, replyTo, todo, image, deleted, reactions: [{ emoji, userIds }], scheduling, createdAt } |
 | POST | /chat/conversations/:id/messages | the two people | { body }, or in a scheduling chat { scheduling: { key, params } } (see above). 403 when the other person is inactive or no longer allowed (`canSend: false`) |
 | POST | /chat/conversations/:id/read | the two people | Marks the chat read (204) |
+| POST | /chat/conversations/:id/ring | the two people, while `canSend` | Rings the other person (201: { ring, message }). ring = { id (the ring message's), conversationId, from, to, startedAt, endsAt }. 409 while the chat is already ringing. Emits `chat:message` and `chat:ring` to both, and pushes to the one rung |
+| GET | /chat/rings | all | The rings sounding now in the caller's chats, either side |
+| POST | /chat/rings/:id/end | the two people | { opened? }. The one rung closes it (`closed`, or `opened` with `opened: true`); the ringer cancels it (`cancelled`); running out is `missed`. Emits `chat:ring-ended` { id, conversationId, reason } to both. 204, also once it has already ended |
 | POST | /chat/conversations/:id/messages (pictures) | the two people | **[Implementation]** { body, image?: { dataUrl, width, height } }. The browser shrinks a picture to at most 1600 px and 1 MB (JPEG, PNG or WebP; the bytes are checked); the body is then an optional caption. Pictures live in `chat_images` |
 | GET | /chat/images/:id | the two people | The picture bytes (`Cache-Control: private`) |
 | DELETE | /chat/conversations/:id/history | either of the two people | Erases every message, picture and reaction in the chat for both. Tasks made from the chat are kept, each keeping the message's words as its title. Emits `chat:cleared` |
-| DELETE | /chat/messages/:id | the sender | Deletes for both: body erased, picture row deleted at once, reactions removed; a "deleted" placeholder stays. 409 for a message that is a task or a task's done reply. Emits `chat:message-updated` |
+| DELETE | /chat/messages/:id | the sender | Deletes for both: body erased, picture row deleted at once, reactions removed; a "deleted" placeholder stays. 409 for a message that is a task, a task's done reply, or a ring. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/reactions | the two people | { emoji }. Toggles the caller's reaction (up to 10 per person per message); not on deleted messages or closed chats. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`), in **need action · strategic** like any new task. Founder → anyone, Manager → any Associate, anyone → themselves (`canGiveTask`); 403 otherwise, 409 if already a task |
 | DELETE | /chat/messages/:id/todo | the giver | Removes an open task. 409 once done |

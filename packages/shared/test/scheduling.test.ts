@@ -5,6 +5,7 @@ import {
   renderSchedulingMessage,
   schedulingMessageSchema,
   schedulingTemplatesFor,
+  suggestSchedulingTemplates,
 } from '../src/scheduling';
 import { chatMessageSchema } from '../src/schemas';
 
@@ -24,10 +25,49 @@ describe('the scheduling sentences', () => {
     expect(expert).not.toContain('call_scheduled');
     expect(team).toContain('call_scheduled');
     expect(team).not.toContain('confirmed');
-    for (const both of ['ok_thanks', 'how_about'] as const) {
+    for (const both of ['yes', 'no', 'ok_thanks', 'how_about'] as const) {
       expect(expert).toContain(both);
       expect(team).toContain(both);
     }
+  });
+});
+
+describe('suggestSchedulingTemplates', () => {
+  it('offers yes and no first when nothing is typed', () => {
+    expect(suggestSchedulingTemplates('', 'expert').slice(0, 2)).toEqual(['yes', 'no']);
+    expect(suggestSchedulingTemplates('  ', 'team').slice(0, 2)).toEqual(['yes', 'no']);
+  });
+
+  it.each([
+    ['expert', 'reschedule', 'reschedule_to'],
+    ['expert', 'rescheduling', 'reschedule_to'],
+    ['expert', 'resched', 'reschedule_to'],
+    ['expert', 'late', 'running_late'],
+    ['expert', 'zoom link', 'link_problem'],
+    ['expert', 'cant make it', 'cannot_do'],
+    ['team', 'remind', 'reminder'],
+    ['team', 'research', 'research_ready'],
+    ['team', 'cancel', 'call_cancelled'],
+    ['expert', 'yes', 'yes'],
+    ['expert', 'thanks', 'ok_thanks'],
+  ] as const)('the %s typing %j sees %s first', (side, query, first) => {
+    expect(suggestSchedulingTemplates(query, side)[0]).toBe(first);
+  });
+
+  it('only offers a side its own sentences', () => {
+    expect(suggestSchedulingTemplates('scheduled', 'expert')).not.toContain('call_scheduled');
+    expect(suggestSchedulingTemplates('scheduled', 'team')).toContain('call_scheduled');
+  });
+
+  it('a time on its own offers the sentences that carry one', () => {
+    const found = suggestSchedulingTemplates('3pm ET tomorrow', 'expert');
+    expect(found.length).toBeGreaterThan(0);
+    for (const key of found) expect(Object.values(SCHEDULING_TEMPLATES[key].slots).some((t) => ['datetime', 'datetimes', 'range'].includes(t))).toBe(true);
+    expect(suggestSchedulingTemplates('reschedule 3pm ET tomorrow', 'expert')[0]).toBe('reschedule_to');
+  });
+
+  it('offers nothing for words no sentence has', () => {
+    expect(suggestSchedulingTemplates('whatsapp number', 'expert')).toEqual([]);
   });
 });
 

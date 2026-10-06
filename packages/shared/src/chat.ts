@@ -24,8 +24,19 @@ export function canChat(a: { id: string; role: Role }, b: { id: string; role: Ro
   return chatModeOf(a, b) !== null;
 }
 
-export const CHAT_MESSAGE_KINDS = ['text', 'todo_done'] as const;
+/**
+ * `todo_done` is the reply posted when the assignee marks a to-do done; `ring`
+ * records that one person rang the other (see RING_SECONDS).
+ */
+export const CHAT_MESSAGE_KINDS = ['text', 'todo_done', 'ring'] as const;
 export type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
+
+/**
+ * Ringing is no call: it plays a tune on the other person's screen until they
+ * close it, open the chat, or this many seconds pass, so a chat waiting for them
+ * is hard to miss. Anyone who may write in a chat may ring in it, one ring at a time.
+ */
+export const RING_SECONDS = 45;
 
 /**
  * Not Started → In Progress → Ready for Review (the taker ticks it) → Completed
