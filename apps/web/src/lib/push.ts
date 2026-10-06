@@ -151,3 +151,48 @@ export function showInTabNotification(title: string, options: { body: string; ta
     // Some browsers (e.g. Android Chrome) only allow notifications from a service worker.
   }
 }
+
+/**
+ * A ring, shown by the system while the app isn't the window in front. Websites
+ * cannot bring their own window forward; clicking this notification can, so it
+ * stays up until it is dealt with or the ring ends (closeRingNotification). It
+ * shares its tag with the ring's push, so the two never show twice.
+ */
+/** Ring notifications made by the page itself (no service worker), to take down by tag. */
+const pageRingNotifications = new Map<string, Notification>();
+
+export async function showRingNotification(title: string, options: { body: string; tag: string; url: string }, onOpen: (url: string) => void) {
+  if (!notificationsSupported() || Notification.permission !== 'granted' || turnedOffHere()) return;
+  if (document.visibilityState === 'visible' && document.hasFocus()) return;
+  const shown = { body: options.body, tag: options.tag, icon: '/icon-192.png', badge: '/badge-72.png', requireInteraction: true, data: { url: options.url } };
+  try {
+    // The service worker's own click handler focuses the window and opens the chat.
+    // It may not be there yet where push was never turned on; it needs no push to show this.
+    if ('serviceWorker' in navigator) {
+      if (!(await navigator.serviceWorker.getRegistration(SW_URL))) await navigator.serviceWorker.register(SW_URL);
+      const reg = await navigator.serviceWorker.ready;
+      return await reg.showNotification(title, { ...shown, renotify: true } as NotificationOptions);
+    }
+    const n = new Notification(title, shown);
+    pageRingNotifications.set(options.tag, n);
+    n.onclick = () => {
+      window.focus();
+      onOpen(options.url);
+      n.close();
+    };
+  } catch {
+    // No way to show it here: the ring still shows in the app.
+  }
+}
+
+/** Takes a ring's notification down once the ring is over. */
+export async function closeRingNotification(tag: string) {
+  pageRingNotifications.get(tag)?.close();
+  pageRingNotifications.delete(tag);
+  try {
+    const reg = 'serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration(SW_URL) : undefined;
+    for (const n of (await reg?.getNotifications({ tag })) ?? []) n.close();
+  } catch {
+    // Nothing to close.
+  }
+}

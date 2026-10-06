@@ -1,7 +1,7 @@
 import CloseRounded from '@mui/icons-material/CloseRounded';
 import ForumRounded from '@mui/icons-material/ForumRounded';
 import NotificationsActiveRounded from '@mui/icons-material/NotificationsActiveRounded';
-import { Box, Button, Dialog, Stack, Typography } from '@mui/material';
+import { Box, Button, Dialog, Link, Stack, Typography } from '@mui/material';
 import { keyframes } from '@mui/material/styles';
 import type { ChatRingDTO, ChatRingEndedEvent } from '@god/shared';
 import { useQueryClient } from '@tanstack/react-query';
@@ -12,13 +12,16 @@ import { useToast } from '@/components/ToastProvider';
 import { api, socket } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
-import { primeRingtone, startRingtone } from '@/lib/ringtone';
+import { closeRingNotification, enableNotifications, notificationsSupported, showRingNotification } from '@/lib/push';
+import { primeRingtone, startRingback, startRingtone } from '@/lib/ringtone';
 import { appendChatMessage, navigateTo } from './RealtimeProvider';
 
 /**
  * Ringing someone in a chat (RING_SECONDS in @god/shared). It is no call: the
  * person rung sees who is ringing and hears a tune until they close it or open
- * the chat; the ringer hears back how it ended.
+ * the chat; the ringer hears it ringing out meanwhile, and then how it ended.
+ * While the app is not the window in front, the system shows the ring too: a
+ * website cannot bring its own window forward, but a click on that can.
  */
 
 interface RingApi {
@@ -44,6 +47,8 @@ export function RingProvider({ children }: { children: ReactNode }) {
   ringsNow.current = rings;
   // Rings this screen stopped itself, so it doesn't report back on them.
   const stoppedHere = useRef(new Set<string>());
+  // Rings started from this screen: only it plays the ringing-out sound.
+  const [startedHere, setStartedHere] = useState<string | null>(null);
 
   const add = useCallback((ring: ChatRingDTO) => setRings((list) => (list.some((r) => r.id === ring.id) ? list : [...list, ring])), []);
   const drop = useCallback((id: string) => setRings((list) => list.filter((r) => r.id !== id)), []);
@@ -90,6 +95,7 @@ export function RingProvider({ children }: { children: ReactNode }) {
       ring: async (conversationId) => {
         try {
           const { ring, message } = await api.chat.ring(conversationId);
+          setStartedHere(ring.id);
           add(ring);
           appendChatMessage(queryClient, message);
           void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
@@ -108,6 +114,10 @@ export function RingProvider({ children }: { children: ReactNode }) {
 
   // The first ring for me that is still sounding.
   const incoming = rings.find((r) => r.to.id === meId) ?? null;
+  const ringingOut = rings.some((r) => r.id === startedHere);
+
+  // The ringer hears it ringing out, until it is answered, stopped or missed.
+  useEffect(() => (ringingOut ? startRingback() : undefined), [ringingOut]);
 
   return (
     <RingContext.Provider value={value}>
@@ -140,6 +150,25 @@ const shake = keyframes`
 
 /** Who is ringing, with the tune playing, until it is closed or the chat opened. */
 function IncomingRing({ ring, onClose, onOpen }: { ring: ChatRingDTO; onClose: () => void; onOpen: () => void }) {
+  const [canNotify, setCanNotify] = useState(() => !notificationsSupported() || Notification.permission === 'granted');
+
+  // While the app isn't the window in front, the system shows the ring as well, and
+  // clicking it brings the window forward. Shown again whenever the window drops back.
+  useEffect(() => {
+    const tag = `ring:${ring.conversationId}`;
+    const show = () =>
+      void showRingNotification(`🔔 ${ring.from.nickname} is ringing you`, { body: 'Click to open the chat.', tag, url: `/chat/${ring.conversationId}` }, navigateTo);
+    show();
+    window.focus();
+    window.addEventListener('blur', show);
+    document.addEventListener('visibilitychange', show);
+    return () => {
+      window.removeEventListener('blur', show);
+      document.removeEventListener('visibilitychange', show);
+      void closeRingNotification(tag);
+    };
+  }, [ring.conversationId, ring.from.nickname]);
+
   useEffect(() => {
     const stop = startRingtone();
     navigator.vibrate?.([400, 200, 400, 200, 400]);
@@ -175,6 +204,15 @@ function IncomingRing({ ring, onClose, onOpen }: { ring: ChatRingDTO; onClose: (
             They’re waiting for you in the chat.
           </Typography>
         </Box>
+        {!canNotify && (
+          <Typography variant="caption" color="text.secondary">
+            So rings reach you while this window is behind others,{' '}
+            <Link component="button" variant="caption" onClick={() => void enableNotifications().then((s) => setCanNotify(s === 'on' || s === 'tab-only'))}>
+              turn on notifications
+            </Link>
+            .
+          </Typography>
+        )}
         <Stack direction="row" spacing={1.5} sx={{ pt: 1, width: '100%' }}>
           <Button fullWidth variant="outlined" color="inherit" startIcon={<CloseRounded />} onClick={onClose}>
             Close

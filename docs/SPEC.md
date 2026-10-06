@@ -1376,8 +1376,13 @@ checked exactly as before.
 (and a push that stays up, §7.5) until they close it or open the chat, the ringer
 stops it, or 45 seconds pass (`RING_SECONDS`). One ring at a time per chat. The
 chat keeps a `ring` message (body "Rang"), shown as a line between messages; it
-cannot be deleted or made a task. The ringer is told how it ended: opened, seen
-(closed), or no answer. A ring lives in the API process only while it sounds;
+cannot be deleted or made a task. While it rings, the ringer's screen plays a
+quieter ringback (a phone ringing out), and afterwards says how it ended: opened,
+seen (closed), or no answer. A website cannot bring its own window to the front,
+so while the app is not the window in front (another app, a hidden tab), the one
+rung also gets a system notification that stays up until dealt with; clicking it
+brings the app forward on the chat, and it is taken down when the ring ends. This
+needs notifications allowed in the browser; the ring pop-up offers to turn them on. A ring lives in the API process only while it sounds;
 each screen also stops at `endsAt` on its own. Browsers make sound only once the
 person has used the page, so a ring before any tap shows silently and the tune
 starts at the next tap.

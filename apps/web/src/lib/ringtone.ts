@@ -1,6 +1,7 @@
 /**
- * The tune a ring plays: a short bright phrase, made in the browser (no sound
- * file), repeated until it is stopped.
+ * The sounds of a ring, made in the browser (no sound files): the person rung
+ * hears a short bright phrase, the ringer a phone ringing out, each repeated
+ * until it is stopped.
  *
  * Browsers only let a page make sound once the person has used it, so the first
  * tap, click or key anywhere in the app wakes the sound up (primeRingtone). A
@@ -65,8 +66,27 @@ function bell(ac: AudioContext, out: AudioNode, note: number, at: number) {
   }
 }
 
-/** Plays the tune over and over; call what it returns to stop it. */
-export function startRingtone(volume = 0.25): () => void {
+/** The ringback the ringer hears while waiting: the dual tone of a phone ringing out (440 + 480 Hz). */
+function ringback(ac: AudioContext, out: AudioNode, at: number) {
+  for (const start of [at, at + 0.6]) {
+    const env = ac.createGain();
+    env.gain.setValueAtTime(0.0001, start);
+    env.gain.exponentialRampToValueAtTime(1, start + 0.02);
+    env.gain.setValueAtTime(1, start + 0.4);
+    env.gain.exponentialRampToValueAtTime(0.0001, start + 0.45);
+    env.connect(out);
+    for (const hz of [440, 480]) {
+      const osc = ac.createOscillator();
+      osc.frequency.value = hz;
+      osc.connect(env);
+      osc.start(start);
+      osc.stop(start + 0.5);
+    }
+  }
+}
+
+/** Plays a sound every `period` seconds until what it returns is called. */
+function loop(sound: (ac: AudioContext, out: AudioNode, at: number) => void, period: number, volume: number): () => void {
   const ac = context();
   if (!ac) return () => undefined;
   const out = ac.createGain();
@@ -77,8 +97,8 @@ export function startRingtone(volume = 0.25): () => void {
   // asleep the clock stands still, so nothing piles up before it wakes.
   const plan = () => {
     while (next < ac.currentTime + 1) {
-      for (const [note, at] of PHRASE) bell(ac, out, note, next + at);
-      next += LOOP_SECONDS;
+      sound(ac, out, next);
+      next += period;
     }
   };
   plan();
@@ -89,3 +109,9 @@ export function startRingtone(volume = 0.25): () => void {
     window.setTimeout(() => out.disconnect(), 400);
   };
 }
+
+/** Plays the tune over and over for the person rung; call what it returns to stop it. */
+export const startRingtone = (volume = 0.25) => loop((ac, out, at) => PHRASE.forEach(([note, t]) => bell(ac, out, note, at + t)), LOOP_SECONDS, volume);
+
+/** "Ring… ring…" for the ringer while the other person's screen rings; call what it returns to stop it. */
+export const startRingback = (volume = 0.12) => loop(ringback, 3, volume);
