@@ -116,8 +116,8 @@ function useSetPlatform(profileId: string, platformId: string) {
 }
 
 /**
- * Inline editor for one profile × platform status: the Founder, the Associate
- * looking after the Profile and their Manager (`profile.canEditPlatforms`).
+ * Inline editor for one profile × platform status: the Founder, and every
+ * Manager and Associate whichever team handles it (`profile.canEditPlatforms`).
  */
 export function PlatformStatusSelect({
   profile,

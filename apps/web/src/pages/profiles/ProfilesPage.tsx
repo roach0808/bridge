@@ -63,9 +63,8 @@ export default function ProfilesPage() {
     placeholderData: keepPreviousData,
   });
 
-  // An Associate's own Profiles; for a Manager, those their team looks after.
-  const isMine = (p: ProfileDTO) =>
-    me.role === 'manager' ? p.associate !== null && p.canAssign : p.associate?.id === me.id;
+  // The Profiles the viewer's team handles (their own team for a Manager, their Manager's for an Associate).
+  const isMine = (p: ProfileDTO) => p.mine;
   const counts = useMemo(() => {
     const c: Record<Filter, number> = { all: 0, mine: 0, pending: 0, approved: 0, rejected: 0, needs_bank: 0, deactivated: 0 };
     for (const p of query.data ?? []) {
@@ -112,9 +111,7 @@ export default function ProfilesPage() {
         f === 'all'
           ? 'All'
           : f === 'mine'
-            ? me.role === 'manager'
-              ? 'My team'
-              : 'Mine'
+            ? 'My team'
             : f === 'needs_bank'
             ? 'Needs bank'
             : f === 'deactivated'
@@ -238,7 +235,7 @@ export default function ProfilesPage() {
               <TableRow>
                 <TableCell sx={{ minWidth: 200 }}>Profile</TableCell>
                 <TableCell>Status</TableCell>
-                {!isExpert && <TableCell sx={{ minWidth: 130 }}>Associate</TableCell>}
+                {!isExpert && <TableCell sx={{ minWidth: 130 }}>Team</TableCell>}
                 <TableCell sx={{ minWidth: 190 }}>Pending</TableCell>
                 {!isExpert && <TableCell sx={{ minWidth: 230 }}>Platforms</TableCell>}
                 <TableCell align="right" width={96}>
@@ -290,8 +287,8 @@ function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isE
         </TableCell>
         {!isExpert && (
           <TableCell>
-            {p.associate ? (
-              <UserChip user={p.associate} size={22} showRole={false} />
+            {p.manager ? (
+              <UserChip user={p.manager} size={22} showRole={false} />
             ) : (
               <Typography variant="body2" color="text.disabled">
                 —

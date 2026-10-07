@@ -143,16 +143,16 @@ export interface ProfileDTO {
   bankCount: number | null;
   /** Founder only: the Profile has a booked call but no bank. */
   needsBank: boolean | null;
-  /** The Associate (or Manager) who looks after this Profile. Null for Experts. */
-  associate: UserRef | null;
   /**
-   * The Manager the Profile sits under: the Associate's Manager, or the Manager
-   * themselves when one looks after it. Null for Experts, and while nobody does.
+   * The Manager whose team handles this Profile: the Manager and every Associate
+   * under them. Null for Experts, and while no team does.
    */
   manager: UserRef | null;
-  /** The viewer may hand the Profile to another Associate (the Founder; a Manager within their team). */
+  /** The viewer's own team handles it: theirs for a Manager, their Manager's for an Associate. */
+  mine: boolean;
+  /** The viewer may choose which Manager's team handles it: the Founder only. */
   canAssign: boolean;
-  /** The viewer may change the Profile's status on the platforms (the Founder; its Associate; their Manager). */
+  /** The viewer may change the Profile's status on the platforms: everyone but an Expert, whichever team handles it. */
   canEditPlatforms: boolean;
   /** The viewer may change the Profile's details: everyone but an Expert. */
   canEdit: boolean;

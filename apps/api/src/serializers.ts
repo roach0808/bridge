@@ -81,7 +81,7 @@ export const toPlatformDTO = (p: Prisma.PlatformGetPayload<object>): PlatformDTO
 
 export const profileInclude = {
   createdBy: { select: userRefSelect },
-  associate: { select: { ...userRefSelect, managerId: true, manager: { select: userRefSelect } } },
+  manager: { select: userRefSelect },
   reviewedBy: { select: userRefSelect },
   platformStatuses: { select: { platformId: true, status: true, rate: true } },
 } satisfies Prisma.ProfileInclude;
@@ -91,17 +91,6 @@ export type PlatformRef = Prisma.PlatformGetPayload<{ select: typeof platformRef
 export const platformRefOrder = [{ priority: 'asc' }, { name: 'asc' }] satisfies Prisma.PlatformOrderByWithRelationInput[];
 
 export type ProfileRow = Prisma.ProfileGetPayload<{ include: typeof profileInclude }>;
-
-/**
- * The Manager a Profile sits under. A Manager who looks after a Profile himself
- * is its Manager; otherwise it is the Associate's own Manager, and a Profile
- * nobody looks after has none.
- */
-const managerOf = (associate: ProfileRow['associate']): UserRef | null =>
-  !associate ? null
-  : associate.role === 'manager' ? toUserRef(associate)
-  : associate.manager ? toUserRef(associate.manager)
-  : null;
 
 /** Relation counts only the Founder receives (bank data is Founder-only). */
 export const profileFounderCounts = {
@@ -119,18 +108,12 @@ type ProfileCounts = {
   addresses?: Array<{ id: string; label: string; address: string }>;
 };
 
-/**
- * Who may hand a Profile to another Associate: the Founder, and a Manager for a
- * Profile their own team looks after (or that nobody looks after yet).
- */
-export function canAssignProfile(
-  viewer: { id: string; role: Role },
-  associate: { id: string; managerId: string | null } | null,
-): boolean {
-  if (viewer.role === 'founder') return true;
-  if (viewer.role !== 'manager') return false;
-  return associate === null || associate.id === viewer.id || associate.managerId === viewer.id;
-}
+/** The team someone works in, by its Manager: their own for a Manager, their Manager's for an Associate. */
+export const teamOf = (viewer: { id: string; role: Role; managerId: string | null }): string | null =>
+  viewer.role === 'manager' ? viewer.id : viewer.role === 'associate' ? viewer.managerId : null;
+
+/** Who may choose which Manager's team handles a Profile: the Founder only. */
+export const canAssignProfile = (viewer: { role: Role }): boolean => viewer.role === 'founder';
 
 /**
  * Who may change a Profile's details: everyone who works with Profiles. An
@@ -141,18 +124,11 @@ export function canAssignProfile(
 export const canEditProfile = (viewer: { role: Role }): boolean => viewer.role !== 'expert';
 
 /**
- * Who may set a Profile's status on the platforms: the Founder, the Associate
- * looking after it, and the Manager of that Associate's team (§6.4).
+ * Who may set a Profile's status on the platforms: the Founder, and every
+ * Manager and Associate, whichever team handles the Profile. Rates stay the
+ * Founder's (§6.4).
  */
-export function canEditProfilePlatforms(
-  viewer: { id: string; role: Role },
-  associate: { id: string; managerId: string | null } | null,
-): boolean {
-  if (viewer.role === 'founder') return true;
-  if (viewer.role === 'associate') return associate?.id === viewer.id;
-  if (viewer.role === 'manager') return associate !== null && (associate.id === viewer.id || associate.managerId === viewer.id);
-  return false;
-}
+export const canEditProfilePlatforms = (viewer: { role: Role }): boolean => viewer.role !== 'expert';
 
 /**
  * `platforms` lists every platform for viewers who may see platform statuses;
@@ -162,7 +138,7 @@ export function canEditProfilePlatforms(
 export const toProfileDTO = (
   p: ProfileRow & ProfileCounts,
   platforms: PlatformRef[] | null,
-  viewer: { id: string; role: Role },
+  viewer: { id: string; role: Role; managerId: string | null },
 ): ProfileDTO => ({
   id: p.id,
   name: p.name,
@@ -196,10 +172,10 @@ export const toProfileDTO = (
     : null,
   bankCount: p._count ? p._count.banks : null,
   needsBank: p._count ? p._count.calls > 0 && p._count.banks === 0 : null,
-  associate: platforms && p.associate ? toUserRef(p.associate) : null,
-  manager: platforms ? managerOf(p.associate) : null,
-  canAssign: canAssignProfile(viewer, p.associate),
-  canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer, p.associate),
+  manager: platforms && p.manager ? toUserRef(p.manager) : null,
+  mine: p.managerId !== null && p.managerId === teamOf(viewer),
+  canAssign: canAssignProfile(viewer),
+  canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer),
   canEdit: canEditProfile(viewer),
   managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,
   createdBy: toUserRef(p.createdBy),

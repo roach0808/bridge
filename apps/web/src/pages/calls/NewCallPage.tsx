@@ -326,8 +326,8 @@ export default function NewCallPage() {
               value={form.profile}
               onChange={(_, v) => {
                 set('profile', v);
-                // The Associate who looks after the Profile usually runs its calls.
-                const handler = v?.associate && associates.data.find((a) => a.id === v.associate!.id);
+                // The Manager whose team handles the Profile is the first guess for who runs it.
+                const handler = v?.manager && associates.data.find((a) => a.id === v.manager!.id);
                 if (needsAssociate && handler) set('associateId', handler.id);
               }}
               getOptionLabel={(p) => p.name}

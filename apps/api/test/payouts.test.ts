@@ -3,7 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { as, clientsFor, expectError, makeBank, makeCall, prisma, seedFixtures, type Client, type Fixtures } from './helpers';
 
 let fx: Fixtures;
-let c: Record<'founder' | 'm1' | 'm2' | 'a1' | 'a2' | 'e1' | 'e2', Client>;
+let c: Record<'founder' | 'm1' | 'm2' | 'a1' | 'a2' | 'a3' | 'e1' | 'e2', Client>;
 
 beforeEach(async () => {
   fx = await seedFixtures();
@@ -14,7 +14,7 @@ beforeEach(async () => {
   await prisma.profilePlatformStatus.create({
     data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 1000 },
   });
-  c = await clientsFor(fx, ['founder', 'm1', 'm2', 'a1', 'a2', 'e1', 'e2']);
+  c = await clientsFor(fx, ['founder', 'm1', 'm2', 'a1', 'a2', 'a3', 'e1', 'e2']);
   bankId = (await makeBank(fx)).id;
 });
 /** The Profile's bank, which invoices are submitted to. */
@@ -441,91 +441,72 @@ describe('the research step is the Founder’s, hidden from Associates and Manag
   });
 });
 
-describe('the Manager a Profile sits under', () => {
-  it('follows the Associate, and is the Manager themselves when one looks after it', async () => {
+describe('profiles are handled by a Manager’s team', () => {
+  it('a submission goes to the submitter’s team; the Founder’s to no team', async () => {
+    const byAssociate = await c.a1.post('/profiles', { name: 'Robin Handled', avatarId: 'profile-04' });
+    expect(byAssociate.status, byAssociate.text).toBe(201);
+    expect(byAssociate.body).toMatchObject({ manager: { id: fx.m1.id }, mine: true, canAssign: false });
+    expect((await c.m2.post('/profiles', { name: 'Sky Handled', avatarId: 'profile-05' })).body).toMatchObject({ manager: { id: fx.m2.id }, mine: true });
+    expect((await c.founder.post('/profiles', { name: 'Lee Unhandled', avatarId: 'profile-06' })).body).toMatchObject({ manager: null, mine: false });
+  });
+
+  it('the whole team calls it theirs, the other team does not', async () => {
     const profile = `/profiles/${fx.approvedProfile.id}`;
-    // Nobody looking after it yet: no Manager either.
-    expect((await c.founder.get(profile)).body).toMatchObject({ associate: null, manager: null });
+    await c.founder.put(`${profile}/manager`, { managerId: fx.m1.id });
+    for (const who of ['m1', 'a1', 'a2'] as const) expect((await c[who].get(profile)).body.mine, who).toBe(true);
+    for (const who of ['m2', 'a3', 'founder'] as const) expect((await c[who].get(profile)).body.mine, who).toBe(false);
+    expect((await c.a3.get(profile)).body.manager).toMatchObject({ id: fx.m1.id, role: 'manager' });
+  });
 
-    await c.founder.put(`${profile}/associate`, { associateId: fx.a1.id });
-    let body = (await c.founder.get(profile)).body;
-    expect(body.associate).toMatchObject({ id: fx.a1.id });
-    expect(body.manager).toMatchObject({ id: fx.m1.id, nickname: 'ManagerOne', role: 'manager' });
+  it('a pending Profile is seen by the team handling it, not by other teams', async () => {
+    const profile = `/profiles/${fx.pendingProfile.id}`;
+    expectError(await c.m2.get(profile), 404);
+    await c.founder.put(`${profile}/manager`, { managerId: fx.m2.id });
+    expect((await c.a3.get(profile)).status).toBe(200);
+    expect((await c.m2.get(profile)).status).toBe(200);
+    // Its submitter still sees it.
+    expect((await c.a1.get(profile)).status).toBe(200);
+  });
 
-    // Handed to the other team, the Profile moves under that team's Manager.
-    await c.founder.put(`${profile}/associate`, { associateId: fx.a3.id });
-    expect((await c.founder.get(profile)).body.manager).toMatchObject({ id: fx.m2.id });
+  it('only the Founder hands a Profile to another team, and only to an active Manager', async () => {
+    const path = `/profiles/${fx.approvedProfile.id}/manager`;
+    let res = await c.founder.put(path, { managerId: fx.m1.id });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.manager.id).toBe(fx.m1.id);
+    res = await c.founder.put(path, { managerId: fx.m2.id });
+    expect(res.body.manager.id).toBe(fx.m2.id);
+    expectError(await c.founder.put(path, { managerId: fx.a1.id }), 400);
+    expectError(await c.founder.put(path, { managerId: fx.e1.id }), 400);
 
-    // A Manager running a Profile themselves is its Manager.
-    await c.founder.put(`${profile}/associate`, { associateId: fx.m2.id });
-    body = (await c.founder.get(profile)).body;
-    expect(body.associate).toMatchObject({ id: fx.m2.id, role: 'manager' });
-    expect(body.manager).toMatchObject({ id: fx.m2.id });
+    for (const who of ['m1', 'm2', 'a1', 'a3'] as const) {
+      expect((await c[who].get(`/profiles/${fx.approvedProfile.id}`)).body.canAssign, who).toBe(false);
+      expectError(await c[who].put(path, { managerId: fx.m1.id }), 403);
+    }
 
-    // The Expert on a call with this Profile reads its personal details, but
-    // never who looks after it.
-    await makeCall(fx, { associate: fx.m2, expert: fx.e1, status: 'scheduled', scheduledAt: nextSlot() });
-    expect((await c.e1.get(profile)).body).toMatchObject({ associate: null, manager: null });
+    res = await c.founder.put(path, { managerId: null });
+    expect(res.body.manager).toBeNull();
+    // Experts never see which team handles it.
+    await c.founder.put(path, { managerId: fx.m1.id });
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: nextSlot() });
+    expect((await c.e1.get(`/profiles/${fx.approvedProfile.id}`)).body).toMatchObject({ manager: null, mine: false, managerSharePercent: null });
   });
 });
 
 describe('platform statuses', () => {
-  it('the Founder, the Associate looking after the Profile and their Manager set them; only the Founder sets rates', async () => {
-    await c.founder.put(`/profiles/${fx.approvedProfile.id}/associate`, { associateId: fx.a1.id });
+  it('every Manager and Associate sets them, whichever team handles the Profile; only the Founder sets rates', async () => {
+    await c.founder.put(`/profiles/${fx.approvedProfile.id}/manager`, { managerId: fx.m1.id });
     const url = `/profiles/${fx.approvedProfile.id}/platforms/${fx.platform2.id}`;
 
-    expect((await c.a1.get(`/profiles/${fx.approvedProfile.id}`)).body.canEditPlatforms).toBe(true);
-    let res = await c.a1.put(url, { status: 'registered' });
-    expect(res.status, res.text).toBe(200);
-    expect(res.body.platformStatuses[1]).toMatchObject({ status: 'registered', rate: null });
-    expect((await c.m1.put(url, { status: 'banned' })).status).toBe(200);
-
-    for (const who of ['a2', 'm2'] as const) {
-      expect((await c[who].get(`/profiles/${fx.approvedProfile.id}`)).body.canEditPlatforms, who).toBe(false);
-      expectError(await c[who].put(url, { status: 'registered' }), 403);
+    for (const [who, status] of [['a1', 'registered'], ['m1', 'banned'], ['a3', 'registered'], ['m2', 'not_registered']] as const) {
+      expect((await c[who].get(`/profiles/${fx.approvedProfile.id}`)).body.canEditPlatforms, who).toBe(true);
+      const res = await c[who].put(url, { status });
+      expect(res.status, `${who}: ${res.text}`).toBe(200);
+      expect(res.body.platformStatuses[1]).toMatchObject({ status, rate: null });
     }
-    expectError(await c.a1.put(url, { rate: 900 }), 403);
-    expectError(await c.m1.put(url, { rate: 900 }), 403);
+    for (const who of ['a1', 'm1', 'a3', 'm2'] as const) expectError(await c[who].put(url, { rate: 900 }), 403);
     expectError(await c.e1.put(url, { status: 'registered' }), 403);
-    res = await c.founder.put(url, { status: 'registered', rate: 900 });
+    const res = await c.founder.put(url, { status: 'registered', rate: 900 });
     expect(res.body.platformStatuses[1]).toMatchObject({ status: 'registered', rate: 900 });
-  });
-});
-
-describe('profiles are looked after by an Associate', () => {
-  it('a submission is looked after by whoever submitted it', async () => {
-    const res = await c.a1.post('/profiles', { name: 'Robin Handled', avatarId: 'profile-04' });
-    expect(res.status, res.text).toBe(201);
-    expect(res.body.associate).toMatchObject({ id: fx.a1.id });
-    expect(res.body.canAssign).toBe(false);
-  });
-
-  it('the Founder hands a Profile to anyone; a Manager only within their team', async () => {
-    const path = `/profiles/${fx.approvedProfile.id}/associate`;
-    let res = await c.founder.put(path, { associateId: fx.a1.id });
-    expect(res.status, res.text).toBe(200);
-    expect(res.body.associate.id).toBe(fx.a1.id);
-
-    // m1's team: move it between a1, a2 and m1 themselves.
-    res = await c.m1.put(path, { associateId: fx.a2.id });
-    expect(res.status, res.text).toBe(200);
-    res = await c.m1.put(path, { associateId: fx.m1.id });
-    expect(res.status, res.text).toBe(200);
-    expectError(await c.m1.put(path, { associateId: fx.a3.id }), 403);
-    expectError(await c.m1.put(path, { associateId: null }), 403);
-    expectError(await c.m1.put(path, { associateId: fx.e1.id }), 400);
-
-    // Not m2's to move, and never an Associate's.
-    expect((await c.m2.get(`/profiles/${fx.approvedProfile.id}`)).body.canAssign).toBe(false);
-    expectError(await c.m2.put(path, { associateId: fx.a3.id }), 403);
-    expectError(await c.a1.put(path, { associateId: fx.a1.id }), 403);
-
-    res = await c.founder.put(path, { associateId: null });
-    expect(res.body.associate).toBeNull();
-    // Experts never see who looks after it.
-    await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: nextSlot() });
-    await c.founder.put(path, { associateId: fx.a1.id });
-    expect((await c.e1.get(`/profiles/${fx.approvedProfile.id}`)).body).toMatchObject({ associate: null, managerSharePercent: null });
   });
 });
 

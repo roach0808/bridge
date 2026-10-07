@@ -233,9 +233,9 @@ export function createApiClient(options: ClientOptions) {
       setActive: (id: string, isActive: boolean) => patch<ProfileDTO>(`/profiles/${enc(id)}/active`, { isActive }),
       setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number | null }) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}`, { body }),
-      /** Founder, or a Manager within their team: who looks after the Profile. */
-      setAssociate: (id: string, associateId: string | null) =>
-        http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/associate`, { body: { associateId } }),
+      /** Founder only: the Manager whose team handles the Profile, or none. */
+      setManager: (id: string, managerId: string | null) =>
+        http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/manager`, { body: { managerId } }),
     },
 
     calls: {

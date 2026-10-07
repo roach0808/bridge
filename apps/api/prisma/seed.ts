@@ -71,8 +71,8 @@ async function main() {
   const ember = await mkUser('ember', 'expert', 4, { timeZone: 'Asia/Seoul', hourlyRate: 180 });
   const flint = await mkUser('flint', 'expert', 7, { timeZone: 'Europe/London', hourlyRate: 220 });
   const quill = await mkUser('quill', 'expert', 12, { timeZone: 'America/New_York', hourlyRate: 200 });
-  // Who looks after each Profile, in turn.
-  const handlers = [pixel, sprout, mango, comet];
+  // The Manager whose team handles each Profile, in turn.
+  const handlers = [atlas, beacon];
 
   const platformRows = [
     { name: 'Northwind Insights', url: 'https://northwind.example.com', priority: 1, country: 'US' },
@@ -132,7 +132,7 @@ async function main() {
           addresses: { create: [{ label: 'Home', address: `${10 + i} Market Street, ${location}`, sortOrder: 0 }] },
           avatarId: `profile-${String(i + 1).padStart(2, '0')}`,
           status: 'approved',
-          associateId: handlers[i % handlers.length]!.id,
+          managerId: handlers[i % handlers.length]!.id,
           createdById: founder.id,
           reviewedById: founder.id,
           reviewedAt: now,
@@ -166,7 +166,7 @@ async function main() {
       avatarId: 'profile-11',
       status: 'pending',
       createdById: pixel.id,
-      associateId: pixel.id,
+      managerId: atlas.id,
     },
   });
   await prisma.profile.create({
@@ -176,7 +176,7 @@ async function main() {
       avatarId: 'profile-12',
       status: 'rejected',
       createdById: mango.id,
-      associateId: mango.id,
+      managerId: beacon.id,
       reviewedById: founder.id,
       reviewedAt: now,
       rejectionReason: 'Could not verify the employment history.',

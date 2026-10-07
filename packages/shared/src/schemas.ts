@@ -232,7 +232,8 @@ export const profilePlatformStatusSchema = z
   .refine((v) => v.status !== undefined || v.rate !== undefined, 'Nothing to update');
 
 /** Who looks after a Profile: an Associate or a Manager, or nobody. */
-export const profileAssociateSchema = z.object({ associateId: uuid.nullable() });
+/** Which Manager's team handles a Profile, or none. */
+export const profileManagerSchema = z.object({ managerId: uuid.nullable() });
 
 export const rejectProfileSchema = z.object({ reason: trimmed('Reason', 1000) });
 export const profileActiveSchema = z.object({ isActive: z.boolean() });

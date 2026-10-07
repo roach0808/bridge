@@ -3,7 +3,7 @@ import {
   isAvatarForAudience,
   listProfilesQuerySchema,
   profileActiveSchema,
-  profileAssociateSchema,
+  profileManagerSchema,
   profilePlatformStatusSchema,
   profileSchema,
   rejectProfileSchema,
@@ -19,13 +19,13 @@ import { badRequest, conflict, forbidden, notFound } from '../errors';
 import { fromDateOnly, idParam, parseBody, parseQuery } from '../http';
 import { notify } from '../notifications/notify';
 import {
-  canAssignProfile,
   canEditProfile,
   canEditProfilePlatforms,
   platformRefOrder,
   platformRefSelect,
   profileFounderCounts,
   profileInclude,
+  teamOf,
   toProfileDTO,
   type PlatformRef,
 } from '../serializers';
@@ -45,16 +45,18 @@ const platformsFor = (actor: Pick<Actor, 'role'>): Promise<PlatformRef[] | null>
 
 /**
  * Approved profiles are shared. Pending and rejected ones are visible to the
- * Founder, the author, and the author's Manager (§6.4). Experts see only the
- * profiles of calls they are assigned to.
+ * Founder, the author, the author's Manager, and the team handling it (§6.4).
+ * Experts see only the profiles of calls they are assigned to.
  */
-export function visibleProfilesWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.ProfileWhereInput {
+export function visibleProfilesWhere(actor: Pick<Actor, 'id' | 'role' | 'managerId'>): Prisma.ProfileWhereInput {
   // Deactivated Profiles are the Founder's business only.
   // Deleted Profiles are gone for everyone; only their past calls still name them.
   if (actor.role === 'founder') return { deletedAt: null };
   if (actor.role === 'expert') return { deletedAt: null, isActive: true, calls: { some: { expertId: actor.id } } };
-  const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }, { associateId: actor.id }];
-  if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } }, { associate: { managerId: actor.id } });
+  const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }];
+  const team = teamOf(actor);
+  if (team) own.push({ managerId: team });
+  if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } });
   return { deletedAt: null, isActive: true, OR: [{ status: 'approved' }, ...own] };
 }
 
@@ -136,8 +138,8 @@ profilesRouter.post('/profiles', requireRole('founder', 'manager', 'associate'),
         ...personalDetails(input, actor),
         avatarId: input.avatarId,
         createdById: actor.id,
-        // Whoever adds a Profile looks after it, until someone hands it on.
-        associateId: isFounder ? null : actor.id,
+        // The team of whoever adds a Profile handles it, until the Founder hands it on.
+        managerId: teamOf(actor),
         ...(isFounder && input.managerSharePercent !== undefined ? { managerSharePercent: input.managerSharePercent } : {}),
         ...(isFounder
           ? {
@@ -316,9 +318,7 @@ profilesRouter.delete('/profiles/:id', requireRole('founder'), async (req, res) 
 profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder', 'manager', 'associate'), async (req, res) => {
   const actor = actorOf(req);
   const profile = await loadVisible(actor, idParam(req));
-  if (!canEditProfilePlatforms(actor, profile.associate)) {
-    throw forbidden('Only the Founder, or the Associate looking after this profile and their Manager, set its platforms');
-  }
+  if (!canEditProfilePlatforms(actor)) throw forbidden('Experts cannot change a profile’s platforms');
   const platformId = idParam(req, 'platformId');
   const platform = platformId && (await prisma.platform.findUnique({ where: { id: platformId }, select: { id: true } }));
   if (!platform) throw notFound('Platform');
@@ -333,34 +333,22 @@ profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder',
 });
 
 /**
- * Hands the Profile to the Associate (or Manager) who looks after it from now on.
- * The Founder chooses anyone; a Manager moves a Profile their team looks after
- * (or nobody does yet) between themselves and their own Associates.
+ * Hands the Profile to the Manager whose team handles it from now on (the
+ * Manager and every Associate under them), or to no team. The Founder only.
  */
-profilesRouter.put('/profiles/:id/associate', requireRole('founder', 'manager'), async (req, res) => {
+profilesRouter.put('/profiles/:id/manager', requireRole('founder'), async (req, res) => {
   const actor = actorOf(req);
   const profile = await loadVisible(actor, idParam(req));
-  const { associateId } = parseBody(profileAssociateSchema, req);
-  if (!canAssignProfile(actor, profile.associate)) {
-    throw forbidden('Only the Founder, or the Manager of the team looking after it, can hand this profile on');
-  }
-  if (associateId !== null) {
-    const next = await prisma.user.findUnique({
-      where: { id: associateId },
-      select: { id: true, role: true, managerId: true, isActive: true, deletedAt: true },
-    });
-    if (!next || !next.isActive || next.deletedAt || (next.role !== 'associate' && next.role !== 'manager')) {
-      throw badRequest('Choose an active Associate or Manager', { issues: [{ path: 'associateId', message: 'Not an active Associate or Manager' }] });
+  const { managerId } = parseBody(profileManagerSchema, req);
+  if (managerId !== null) {
+    const next = await prisma.user.findUnique({ where: { id: managerId }, select: { role: true, isActive: true, deletedAt: true } });
+    if (!next || !next.isActive || next.deletedAt || next.role !== 'manager') {
+      throw badRequest('Choose an active Manager', { issues: [{ path: 'managerId', message: 'Not an active Manager' }] });
     }
-    if (actor.role === 'manager' && next.id !== actor.id && next.managerId !== actor.id) {
-      throw forbidden('Managers hand profiles to themselves or to Associates on their own team');
-    }
-  } else if (actor.role !== 'founder') {
-    throw forbidden('Only the Founder leaves a profile without an Associate');
   }
   const updated = await prisma.profile.update({
     where: { id: profile.id },
-    data: { associateId },
+    data: { managerId },
     include: includeFor(actor),
   });
   res.json(toProfileDTO(updated, await platformsFor(actor), actor));

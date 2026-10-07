@@ -53,7 +53,9 @@ describe('POST /profiles', () => {
 
     // Visible to the author, their manager and the founder, not to other teams.
     expect((await (await as(fx.m1)).get(`/profiles/${res.body.id}`)).status).toBe(200);
-    expectError(await (await as(fx.a1)).get(`/profiles/${res.body.id}`), 404);
+    // The submitter's team handles it, so a teammate sees it too; another team does not.
+    expect((await (await as(fx.a1)).get(`/profiles/${res.body.id}`)).status).toBe(200);
+    expectError(await (await as(fx.a3)).get(`/profiles/${res.body.id}`), 404);
     expectError(await (await as(fx.m2)).get(`/profiles/${res.body.id}`), 404);
 
     // It cannot be used for a call until approved.
@@ -283,7 +285,7 @@ describe('platform statuses', () => {
     }
   });
 
-  it('the founder sets a status; managers and associates see it but cannot change it', async () => {
+  it('the founder sets statuses and rates; managers and associates set statuses only', async () => {
     const url = `/profiles/${fx.approvedProfile.id}/platforms/${fx.platform2.id}`;
     const f = await as(fx.founder);
     const res = await f.put(url, { status: 'banned' });
@@ -293,8 +295,12 @@ describe('platform statuses', () => {
 
     const m1 = await as(fx.m1);
     expect((await m1.get('/profiles')).body.find((p: { id: string }) => p.id === fx.approvedProfile.id).platformStatuses[1].status).toBe('registered');
-    expectError(await m1.put(url, { status: 'banned' }), 403);
-    expectError(await (await as(fx.a1)).put(url, { status: 'banned' }), 403);
+    // No team handles this Profile; anyone who works with Profiles sets its statuses all the same.
+    expect((await m1.put(url, { status: 'banned' })).status).toBe(200);
+    const a3 = await as(fx.a3);
+    expect((await a3.put(url, { status: 'not_registered' })).body.platformStatuses[1]).toMatchObject({ status: 'not_registered', rate: null });
+    expectError(await a3.put(url, { rate: 100 }), 403);
+    expectError(await (await as(fx.e1)).put(url, { status: 'banned' }), 403);
   });
 
   it('validates the status and the ids', async () => {

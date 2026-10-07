@@ -102,7 +102,7 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^profiles\/:id\/platforms\/:id$/, 'profile.platform', true],
   [/^profiles\/:id\/(approve|reject)$/, 'profile.review', true],
   [/^profiles\/:id\/active$/, 'profile.active', true],
-  [/^profiles\/:id\/associate$/, 'profile.associate', true],
+  [/^profiles\/:id\/manager$/, 'profile.manager', true],
   [/^profiles\/:id\/banks/, 'bank'],
   [/^profiles\/:id\/photo$/, 'profile.photo'],
   [/^profiles/, 'profile'],
@@ -158,7 +158,9 @@ const SUMMARIES: Record<string, string> = {
   'call.update': 'changed a call',
   'call.delete': 'deleted a call',
   'payout.mark': 'marked someone’s pay for calls as paid or unpaid',
+  // Older entries, from when one Associate looked after a Profile.
   'profile.associate': 'handed a profile to another Associate',
+  'profile.manager': 'handed a profile to another Manager’s team',
   'profile.platform': 'set a profile’s status or rate on a platform',
   'profile.review': 'approved or rejected a profile',
   'profile.active': 'activated or deactivated a profile',

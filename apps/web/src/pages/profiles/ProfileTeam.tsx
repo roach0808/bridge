@@ -34,107 +34,98 @@ function useSaveProfile() {
   };
 }
 
-/**
- * Who may look after a Profile, for the person handing it on: anyone who runs
- * calls for the Founder; for a Manager, themselves and their own team.
- */
-function useCandidates(enabled: boolean): { data: UserRef[]; isLoading: boolean } {
-  const me = useMe();
-  const founder = me.role === 'founder';
+/** The Managers a Founder can hand a Profile's handling to. */
+function useManagers(enabled: boolean): { data: UserRef[]; isLoading: boolean } {
   const all = useQuery({
-    queryKey: qk.users.list({ active: 'true', scope: 'profile-associates' }),
+    queryKey: qk.users.list({ active: 'true', scope: 'profile-managers' }),
     queryFn: () => api.users.list({ active: 'true' }),
-    enabled: enabled && founder,
+    enabled,
   });
-  const team = useQuery({ queryKey: qk.users.team, queryFn: api.users.team, enabled: enabled && me.role === 'manager' });
-  if (founder) {
-    return { data: (all.data ?? []).filter((u) => u.role === 'associate' || u.role === 'manager'), isLoading: all.isLoading };
-  }
-  return { data: [me, ...(team.data ?? []).filter((u) => u.isActive)], isLoading: team.isLoading };
+  return { data: (all.data ?? []).filter((u) => u.role === 'manager'), isLoading: all.isLoading };
 }
 
-/** The Associate (or Manager) who looks after the Profile, and a way to hand it on. */
-export function ProfileAssociateField({ profile }: { profile: ProfileDTO }) {
-  const me = useMe();
+/**
+ * The Manager whose team handles the Profile: the Manager and every Associate
+ * under them. The Founder hands it to another team.
+ */
+export function ProfileTeamField({ profile }: { profile: ProfileDTO }) {
   const toast = useToast();
   const save = useSaveProfile();
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<string | null>(profile.associate?.id ?? null);
+  const [selected, setSelected] = useState<string | null>(profile.manager?.id ?? null);
   useEffect(() => {
-    if (open) setSelected(profile.associate?.id ?? null);
-  }, [open, profile.associate?.id]);
-  const candidates = useCandidates(open);
-  const options = candidates.data;
-  const value = options.find((o) => o.id === selected) ?? null;
+    if (open) setSelected(profile.manager?.id ?? null);
+  }, [open, profile.manager?.id]);
+  const managers = useManagers(open && profile.canAssign);
+  const value = managers.data.find((o) => o.id === selected) ?? null;
 
   const mutation = useMutation({
-    mutationFn: (associateId: string | null) => api.profiles.setAssociate(profile.id, associateId),
+    mutationFn: (managerId: string | null) => api.profiles.setManager(profile.id, managerId),
     onSuccess: (saved) => {
       save(saved);
-      toast.success(saved.associate ? `${saved.name} is now looked after by ${saved.associate.nickname}` : `${saved.name} has nobody looking after it`);
+      toast.success(saved.manager ? `${saved.name} is now handled by ${saved.manager.nickname}’s team` : `${saved.name} has no team handling it`);
       setOpen(false);
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
 
   return (
-    <Field label="Looked after by">
+    <Field label="Handled by">
       <Stack direction="row" spacing={0.5} alignItems="center">
-        {profile.associate ? (
-          <UserChip user={profile.associate} size={24} showRole={false} />
+        {profile.manager ? (
+          <>
+            <UserChip user={profile.manager} size={24} showRole={false} />
+            <Typography variant="body2" color="text.secondary">
+              and team
+            </Typography>
+          </>
         ) : (
           <Typography variant="body2" color="text.disabled">
-            Nobody yet
+            No team yet
           </Typography>
         )}
         {profile.canAssign && (
-          <Tooltip title={profile.associate ? 'Hand to another Associate' : 'Choose who looks after it'}>
-            <IconButton size="small" onClick={() => setOpen(true)} aria-label="Change who looks after this profile">
+          <Tooltip title={profile.manager ? 'Hand to another team' : 'Choose the team that handles it'}>
+            <IconButton size="small" onClick={() => setOpen(true)} aria-label="Change which team handles this profile">
               <SwapHorizRounded sx={{ fontSize: 18, color: 'text.secondary' }} />
             </IconButton>
           </Tooltip>
         )}
       </Stack>
       <Dialog open={open} onClose={() => !mutation.isPending && setOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Who looks after {profile.name}?</DialogTitle>
+        <DialogTitle>Which team handles {profile.name}?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            {me.role === 'manager'
-              ? 'You can hand it to yourself or to an Associate on your team.'
-              : 'Any Associate or Manager can look after a profile.'}
+            Choose a Manager: they and every Associate on their team handle the profile.
           </Typography>
           <Autocomplete
-            options={options}
-            loading={candidates.isLoading}
+            options={managers.data}
+            loading={managers.isLoading}
             value={value}
             onChange={(_, v) => setSelected(v?.id ?? null)}
-            getOptionLabel={(o) => (o.id === me.id ? `${o.nickname} (you)` : o.nickname)}
+            getOptionLabel={(o) => o.nickname}
             isOptionEqualToValue={(a, b) => a.id === b.id}
             renderOption={({ key, ...props }, o) => (
               <li key={key} {...props}>
                 <Stack direction="row" spacing={1.25} alignItems="center">
                   <UserAvatar avatarId={o.avatarId} photoId={o.photoId} label={o.nickname} size={26} />
-                  <span>{o.id === me.id ? `${o.nickname} (you)` : o.nickname}</span>
+                  <span>{o.nickname}</span>
                 </Stack>
               </li>
             )}
-            renderInput={(params) => <TextField {...params} label="Associate" autoFocus />}
+            renderInput={(params) => <TextField {...params} label="Manager" autoFocus />}
           />
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2 }}>
-          {me.role === 'founder' && profile.associate && (
+          {profile.manager && (
             <Button color="inherit" onClick={() => setSelected(null)} sx={{ mr: 'auto' }}>
-              Nobody
+              No team
             </Button>
           )}
           <Button color="inherit" onClick={() => setOpen(false)} disabled={mutation.isPending}>
             Cancel
           </Button>
-          <Button
-            variant="contained"
-            disabled={mutation.isPending || selected === (profile.associate?.id ?? null) || (selected === null && me.role !== 'founder')}
-            onClick={() => mutation.mutate(selected)}
-          >
+          <Button variant="contained" disabled={mutation.isPending || selected === (profile.manager?.id ?? null)} onClick={() => mutation.mutate(selected)}>
             {mutation.isPending ? <CircularProgress size={18} color="inherit" /> : 'Save'}
           </Button>
         </DialogActions>

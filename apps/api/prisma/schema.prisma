@@ -135,7 +135,8 @@ model User {
   expertCalls       Call[]                @relation("CallExpert")
   createdCalls      Call[]                @relation("CallCreatedBy")
   payeeCalls        Call[]                @relation("CallPayeeManager")
-  handledProfiles   Profile[]             @relation("ProfileAssociate")
+  /// Profiles this Manager and their team handle.
+  handledProfiles   Profile[]             @relation("ProfileManager")
   closedPayCycles   PayCycle[]            @relation("PayCycleClosedBy")
   identities        AuthIdentity[]
   chatImages        ChatImage[]           @relation("ChatImageUploader")
@@ -221,7 +222,9 @@ model Profile {
   deletedAt           DateTime?     @map("deleted_at") @db.Timestamptz(3)
   /// The Manager's share of this Profile's real income (percent), set by the Founder.
   managerSharePercent Decimal       @default(15) @map("manager_share_percent") @db.Decimal(5, 2)
-  /// The Associate (or Manager) who looks after this Profile.
+  /// The Manager whose team handles this Profile (the Manager and every Associate under them).
+  managerId           String?       @map("manager_id") @db.Uuid
+  /// Superseded by `managerId` (an Associate used to look after a Profile alone); kept until the running API no longer reads it.
   associateId         String?       @map("associate_id") @db.Uuid
   createdById         String        @map("created_by") @db.Uuid
   reviewedById        String?       @map("reviewed_by") @db.Uuid
@@ -236,13 +239,13 @@ model Profile {
   platformStatuses ProfilePlatformStatus[]
   addresses        ProfileAddress[]
   createdBy        User                    @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
-  associate        User?                   @relation("ProfileAssociate", fields: [associateId], references: [id], onDelete: SetNull)
+  manager          User?                   @relation("ProfileManager", fields: [managerId], references: [id], onDelete: SetNull)
   reviewedBy       User?                   @relation("ProfileReviewedBy", fields: [reviewedById], references: [id], onDelete: Restrict)
   calls            Call[]
 
   @@index([status])
   @@index([createdById])
-  @@index([associateId])
+  @@index([managerId])
   @@map("profiles")
 }
 
