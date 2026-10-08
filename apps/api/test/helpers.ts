@@ -4,6 +4,7 @@ import request, { type Response } from 'supertest';
 import { expect } from 'vitest';
 import { createApp } from '../src/app';
 import { resetDeviceCache } from '../src/auth/devices';
+import { broadcastsSettled } from '../src/calls/calls.service';
 import { prisma } from '../src/db';
 
 export { prisma };
@@ -20,6 +21,8 @@ export const passwordHash = () => (hashPromise ??= argon2.hash(PASSWORD, { type:
 
 /** Empties every table except the avatar catalog (and Prisma's migration log). */
 export async function resetDb() {
+  // A call's live update still reading the tables would deadlock with emptying them.
+  await broadcastsSettled();
   const rows = await prisma.$queryRaw<Array<{ tablename: string }>>`
     SELECT tablename FROM pg_tables
     WHERE schemaname = 'public' AND tablename NOT IN ('avatars', '_prisma_migrations')`;

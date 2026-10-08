@@ -54,8 +54,23 @@ export async function viewerIds(db: Tx | typeof prisma, call: CallRow): Promise<
   return [...new Set([...(await participantIds(db, call)), ...teammates.map((u) => u.id)])];
 }
 
+/** Broadcasts still on their way, so a caller (the tests) can wait for them. */
+const inFlight = new Set<Promise<void>>();
+
+/** Resolves once every broadcast started so far has gone out. */
+export const broadcastsSettled = async (): Promise<void> => {
+  await Promise.all([...inFlight]);
+};
+
 /** Sends everyone who may see the Call its latest version, as they are allowed to see it (§4.4 step 4). */
-export async function broadcastCall(callId: string): Promise<void> {
+export function broadcastCall(callId: string): Promise<void> {
+  const sending = sendCall(callId);
+  inFlight.add(sending);
+  void sending.finally(() => inFlight.delete(sending));
+  return sending;
+}
+
+async function sendCall(callId: string): Promise<void> {
   // Runs fire-and-forget after the response: it must never reject, or the
   // unhandled rejection would take the whole process down.
   try {
