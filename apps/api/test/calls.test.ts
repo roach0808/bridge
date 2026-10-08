@@ -83,7 +83,9 @@ describe('POST /calls', () => {
 
     // A Manager's own call stays theirs: other Managers and Associates don't see it.
     expectError(await (await as(fx.m2)).get(`/calls/${call.id}`), 404);
-    expectError(await (await as(fx.a1)).get(`/calls/${call.id}`), 404);
+    // The manager's own call belongs to their team: its associates handle it, another team's do not.
+    expect((await (await as(fx.a1)).get(`/calls/${call.id}`)).status).toBe(200);
+    expectError(await (await as(fx.a3)).get(`/calls/${call.id}`), 404);
     expect((await (await as(fx.founder)).get(`/calls/${call.id}`)).status).toBe(200);
     expect((await m1.get('/calls')).body.items.map((c: { id: string }) => c.id)).toContain(call.id);
 
@@ -117,7 +119,8 @@ describe('POST /calls', () => {
     expect(await waiting(fx.e1)).toBe(1); // one to confirm
     expect(await waiting(fx.founder)).toBe(1); // one to invoice
     expect(await waiting(fx.m1)).toBe(1); // scheduling steps across every associate
-    expect(await waiting(fx.a2)).toBe(0);
+    expect(await waiting(fx.a2)).toBe(1); // a1's call to schedule is the team's
+    expect(await waiting(fx.a3)).toBe(0);
   });
 
   it('expert cannot create calls', async () => {
@@ -177,21 +180,41 @@ describe('POST /calls', () => {
   });
 });
 
+describe('an associate handles the calls of their team', () => {
+  it('edits a teammate’s call and their manager’s, but hands neither on', async () => {
+    const a2 = await as(fx.a2);
+    for (const [owner, scheduledAt] of [[fx.a1, '2027-07-01T09:00:00Z'], [fx.m1, '2027-07-02T09:00:00Z']] as const) {
+      const call = await makeCall(fx, { associate: owner, expert: fx.e1, status: 'on_scheduling', scheduledAt });
+      const seen = (await a2.get(`/calls/${call.id}`)).body;
+      expect(seen.permissions).toMatchObject({ edit: true, reassignExpert: true, editMeeting: true, reassignAssociate: false, editRate: false });
+      const edited = await a2.patch(`/calls/${call.id}`, { projectDetails: 'Updated by a teammate', expertId: fx.e2.id, meetingDetails: 'zoom.us/j/1' });
+      expect(edited.status, edited.text).toBe(200);
+      expect(edited.body).toMatchObject({ projectDetails: 'Updated by a teammate', expert: { id: fx.e2.id }, associate: { id: owner.id } });
+      expectError(await a2.patch(`/calls/${call.id}`, { associateId: fx.a2.id }), 403);
+      // Another team's associate neither sees nor edits it.
+      expectError(await (await as(fx.a3)).patch(`/calls/${call.id}`, { projectDetails: 'Not mine' }), 404);
+    }
+  });
+});
+
 describe('GET /calls visibility', () => {
-  it('each role sees its calls: managers follow every associate', async () => {
+  it('each role sees its calls: managers follow every associate, associates their team', async () => {
     const c1 = await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: '2027-02-01T09:00:00Z' });
     const c2 = await makeCall(fx, { associate: fx.a2, expert: fx.e2, scheduledAt: '2027-02-02T09:00:00Z' });
     const c3 = await makeCall(fx, { associate: fx.a3, expert: fx.e1, scheduledAt: '2027-02-03T09:00:00Z' });
-    const cs = await clientsFor(fx, ['founder', 'm1', 'm2', 'a1', 'e1', 'e3']);
+    const c4 = await makeCall(fx, { associate: fx.m1, expert: fx.e2, scheduledAt: '2027-02-04T09:00:00Z' });
+    const cs = await clientsFor(fx, ['founder', 'm1', 'm2', 'a1', 'a3', 'e1', 'e3']);
     const ids = async (k: keyof typeof cs) => {
       const res = await cs[k].get('/calls', { sort: 'scheduledAt' });
       expect(res.status).toBe(200);
       return res.body.items.map((c: { id: string }) => c.id);
     };
-    expect(await ids('founder')).toEqual([c1.id, c2.id, c3.id]);
-    expect(await ids('m1')).toEqual([c1.id, c2.id, c3.id]);
+    expect(await ids('founder')).toEqual([c1.id, c2.id, c3.id, c4.id]);
+    expect(await ids('m1')).toEqual([c1.id, c2.id, c3.id, c4.id]);
     expect(await ids('m2')).toEqual([c1.id, c2.id, c3.id]);
-    expect(await ids('a1')).toEqual([c1.id]);
+    // An associate sees their team's calls: their own, a teammate's and their manager's.
+    expect(await ids('a1')).toEqual([c1.id, c2.id, c4.id]);
+    expect(await ids('a3')).toEqual([c3.id]);
     expect(await ids('e1')).toEqual([c1.id, c3.id]);
     expect(await ids('e3')).toEqual([]);
   });

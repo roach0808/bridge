@@ -331,7 +331,7 @@ financeRouter.get('/finance/records', async (req, res) => {
     return i < 0 ? null : buckets[i]!;
   };
   // Amounts are worked out as the Founder sees them; each viewer then gets their own share of the picture.
-  const founder: Viewer = { id: actor.id, role: 'founder' };
+  const founder = { id: actor.id, role: 'founder' as const, managerId: null };
   for (const call of calls) {
     const { payouts } = toCallDTO(call, founder);
     const pay = (at: Date | null, kind: Payee, line: { user: PayLine['user'] | null; amount: number | null } | null) => {

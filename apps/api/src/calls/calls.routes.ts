@@ -25,6 +25,7 @@ import {
   getCallForActor,
   listCalls,
   participantIds,
+  viewerIds,
   transitionCall,
   updateCall,
 } from './calls.service';
@@ -64,7 +65,7 @@ callsRouter.patch('/calls/:id', async (req, res) => {
 callsRouter.delete('/calls/:id', requireRole('founder'), async (req, res) => {
   const actor = actorOf(req);
   const call = await getCallForActor(actor, idParam(req));
-  const people = await participantIds(prisma, call);
+  const people = await viewerIds(prisma, call);
   await prisma.$transaction([
     prisma.$executeRaw`DELETE FROM notifications WHERE payload->>'callId' = ${call.id}`,
     // Status history and messages go with the call (cascade).

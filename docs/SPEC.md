@@ -103,22 +103,22 @@ grouped under Managers; they are assigned per Call.
 | Approve / reject a pending Profile | ✓ | | | |
 | Choose own avatar (from own role's set) | ✓ | ✓ | ✓ | ✓ |
 | Create Call | ✓ | ✓ | ✓ | |
-| View Call | all | every Associate's + own | own | assigned |
+| View Call | all | every Associate's + own | their team's (own, teammates', their Manager's) | assigned |
 | Reassign Associate on a Call | ✓ (to any Associate or Manager) | ✓ (to themselves or any Associate) | | |
-| Reassign Expert on a Call | ✓ | ✓ (every Associate's + own) | ✓ (own, whole scheduling stage) | |
-| Set scheduling statuses | override | override (own calls: ✓) | ✓ | request rescheduling only |
+| Reassign Expert on a Call | ✓ | ✓ (every Associate's + own) | ✓ (their team's, whole scheduling stage) | |
+| Set scheduling statuses | override | override (own calls: ✓) | ✓ (their team's) | request rescheduling only |
 | Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
 | Delete a Call | ✓ | | | |
-| See invoice statuses | ✓ | ✓ (every Associate's) | own | |
+| See invoice statuses | ✓ | ✓ (every Associate's) | their team's | |
 | See a call's income and rate (expected price, real income) | ✓ | ✓ (every Associate's) | | |
 | See a Profile's platform rates | ✓ | ✓ | | |
 | Activate or deactivate a bank | ✓ | | | |
 | Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | | |
 | Set the Call's research data link, mark the research data ready | ✓ | | | |
 | Read the Call's research data link and Ninja link; see the "research data ready" step | ✓ | | | ✓ (assigned) |
-| Add or change a Call's meeting details | ✓ | ✓ (every Associate's + own) | own, until it took place | |
+| Add or change a Call's meeting details | ✓ | ✓ (every Associate's + own) | their team's, until it took place | |
 | Read a Call's meeting details | ✓ | ✓ | ✓ | ✓ |
 | Read the Call's Ninja (meeting) link | ✓ | | | ✓ (assigned; the Expert adds it when starting) |
 | Set an Expert's hourly rate, a Profile's Manager share | ✓ | | | |
@@ -136,7 +136,7 @@ grouped under Managers; they are assigned per Call.
 | Clear a chat's whole history | the two people in it | same | same | same |
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates; Experts in set scheduling messages | Founders, Managers; Experts in set scheduling messages | Founders; Managers and Associates in set scheduling messages |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
-| View a Call's status history | ✓ | ✓ (every Associate's + own) | own | assigned (without invoicing steps) |
+| View a Call's status history | ✓ | ✓ (every Associate's + own) | their team's | assigned (without invoicing steps) |
 | View the audit trail (§6.16) | ✓ | | | |
 | See and end own signed-in devices | ✓ | ✓ | ✓ | ✓ |
 | See financial statistics (§6.14) | all | every Associate's + own | | |
@@ -2075,6 +2075,7 @@ Container alternative:
 | 2026-10-05 | The **Calendar** filters by **Experts, Profiles and Managers**, several values at a time. Ticking several Experts shows them side by side (all of them is the old All experts view); an Associate's call counts as their Manager's. `GET /calendar` and `/calendar/experts` name each call's Manager |
 | 2026-10-05 | **Banks** carry a nickname, type, bank name and address, routing, account and SWIFT numbers, the online banking email and password (encrypted, shown to the Founder on request and audited) and where the account is signed in; type, bank name, routing and account numbers are required. Account holder, country, currency, notes and "primary" are gone. Managers and Associates now read a Profile's banks, without the password and where it is signed in; Experts see none. The Founder has a **Banks** page, and **submitting an invoice names the bank** it is paid into, by nickname |
 | 2026-10-07 | **Profiles are handled by a Manager's team**, no longer by one Associate: the Manager and every Associate under them. Existing Profiles went to the team of whoever looked after them. Only the Founder hands a Profile to another team. Which team handles a Profile no longer changes what anyone may do with it: every Manager and Associate sets platform statuses on every Profile (rates stay the Founder's); it is the **My team** filter, the Team and Manager columns, and who sees it while pending or rejected |
+| 2026-10-08 | **Associates handle their team's calls**: the calls of the other Associates under the same Manager, and the Manager's own, as well as their own — they see them (list, calendar, dashboard, live updates), edit them, swap the Expert and move them along as the call's own Associate would. Handing a call to someone else stays with Managers and the Founder; the call's Associate and Manager are still the ones notified and paid, and nobody sees another's pay |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

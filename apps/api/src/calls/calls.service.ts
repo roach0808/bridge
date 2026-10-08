@@ -26,7 +26,7 @@ import { logger } from '../logger';
 import { deliverAll, notify, type Deliver } from '../notifications/notify';
 import { emitToUser } from '../realtime/hub';
 import { historyInclude, messageInclude, toHistoryDTO, toMessageDTO } from '../serializers';
-import { callPermissions, canViewCall, transitionContext, visibleCallsWhere, visibleHistoryWhere } from './calls.access';
+import { callPermissions, callTeamOf, canViewCall, transitionContext, visibleCallsWhere, visibleHistoryWhere } from './calls.access';
 import { callInclude, toCallDTO, type CallRow } from './calls.serialize';
 
 type CreateCallInput = z.output<typeof createCallSchema>;
@@ -43,7 +43,18 @@ export async function participantIds(db: Tx | typeof prisma, call: CallRow): Pro
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
 }
 
-/** Sends each participant the Call as they are allowed to see it (§4.4 step 4). */
+/**
+ * Everyone who may see the Call: its participants, and the Associates of its
+ * team, who handle it too. They hear of every change; only the participants are
+ * notified.
+ */
+export async function viewerIds(db: Tx | typeof prisma, call: CallRow): Promise<string[]> {
+  const team = callTeamOf(call);
+  const teammates = team ? await db.user.findMany({ where: { role: 'associate', managerId: team }, select: { id: true } }) : [];
+  return [...new Set([...(await participantIds(db, call)), ...teammates.map((u) => u.id)])];
+}
+
+/** Sends everyone who may see the Call its latest version, as they are allowed to see it (§4.4 step 4). */
 export async function broadcastCall(callId: string): Promise<void> {
   // Runs fire-and-forget after the response: it must never reject, or the
   // unhandled rejection would take the whole process down.
@@ -51,8 +62,8 @@ export async function broadcastCall(callId: string): Promise<void> {
     const call = await prisma.call.findUnique({ where: { id: callId }, include: callInclude });
     if (!call) return;
     const users = await prisma.user.findMany({
-      where: { id: { in: await participantIds(prisma, call) }, isActive: true },
-      select: { id: true, role: true },
+      where: { id: { in: await viewerIds(prisma, call) }, isActive: true },
+      select: { id: true, role: true, managerId: true },
     });
     for (const user of users) {
       if (canViewCall(user, call)) emitToUser(user.id, 'call:updated', toCallDTO(call, user));

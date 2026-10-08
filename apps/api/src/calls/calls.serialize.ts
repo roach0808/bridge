@@ -51,7 +51,7 @@ const num = (d: { toString(): string } | null): number | null => (d === null ? n
  * Neither Experts nor Associates see what a call brings in, or its rate; the
  * research data and Ninja links go to the Founder and the Expert only.
  */
-export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>): CallDTO {
+export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role' | 'managerId'>): CallDTO {
   const hideMoney = viewer.role === 'expert' || viewer.role === 'associate';
   const insider = viewer.role === 'founder' || viewer.role === 'expert';
   const { platformStatuses, managerSharePercent: _share, _count, ...profile } = call.profile;

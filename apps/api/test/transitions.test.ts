@@ -308,11 +308,17 @@ describe('409 for an invalid edge', () => {
 });
 
 describe('404 for a call the user cannot see', () => {
-  it.each<keyof Fixtures>(['a2', 'a3', 'e2'])('%s gets 404 on a1’s call', async (who) => {
+  // a2 is on a1's team, so a1's calls are theirs to handle too (see "the team's calls").
+  it.each<keyof Fixtures>(['a3', 'a4', 'e2'])('%s gets 404 on a1’s call', async (who) => {
     const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
     const client = await as(fx[who] as FixtureUser);
     expectError(await transition(client, call.id, 'on_rescheduling'), 404, 'not_found');
     expectError(await client.get(`/calls/${call.id}`), 404, 'not_found');
+  });
+
+  it('a manager’s own call is 404 for another team’s associates', async () => {
+    const call = await makeCall(fx, { associate: fx.m1, expert: fx.e1, status: 'scheduled' });
+    for (const who of ['a3', 'a4'] as const) expectError(await (await as(fx[who])).get(`/calls/${call.id}`), 404, 'not_found');
   });
 
   it('a manager’s own call is 404 for another manager', async () => {
@@ -505,5 +511,20 @@ describe('processing to bank records what actually arrived', () => {
     const res = await founder.post(`/calls/${call.id}/transition`, { to: 'process_to_bank', realIncome: 980.4 });
     expect(res.status, res.text).toBe(200);
     expect(res.body).toMatchObject({ status: 'process_to_bank', realIncome: 980.4 });
+  });
+});
+
+describe('the team’s calls', () => {
+  it('an associate moves along the calls of teammates and of their manager, as their own associate would', async () => {
+    const a2 = await as(fx.a2);
+    for (const [owner, scheduledAt] of [[fx.a1, '2027-06-01T09:00:00Z'], [fx.m1, '2027-06-02T09:00:00Z']] as const) {
+      const call = await makeCall(fx, { associate: owner, expert: fx.e1, status: 'scheduled', scheduledAt });
+      const seen = await a2.get(`/calls/${call.id}`);
+      expect(seen.status, seen.text).toBe(200);
+      expect(seen.body.allowedTransitions).toContain('on_rescheduling');
+      const moved = await transition(a2, call.id, 'on_rescheduling', 'Client asked');
+      expect(moved.status, moved.text).toBe(200);
+      expect(moved.body.status).toBe('on_rescheduling');
+    }
   });
 });

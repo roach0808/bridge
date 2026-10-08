@@ -163,6 +163,11 @@ describe('the Associate’s part is a portion of the Manager’s share', () => {
     expect(associateView.payouts.expert).toBeNull();
     expect(associateView.payouts.canMark).toEqual([]);
 
+    // A teammate handles the call too, but someone else's pay stays theirs.
+    const teammate = await view(c.a2, call.id);
+    expect(teammate).toMatchObject({ expectedPrice: null, realIncome: null, platformRate: null });
+    expect(teammate.payouts).toMatchObject({ manager: null, associate: null, expert: null, canMark: [] });
+
     // Another Manager oversees the call but is not paid for it.
     expect((await view(c.m2, call.id)).payouts).toMatchObject({ expert: null, manager: null, associate: null, canMark: [] });
   });

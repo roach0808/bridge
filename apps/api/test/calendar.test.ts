@@ -50,19 +50,20 @@ describe('GET /calendar privacy', () => {
     expect(mine.body.calls.every((c: { manager: { id: string } }) => c.manager.id === fx.m1.id)).toBe(true);
   });
 
-  it('associate: own calls in full, other associates’ blocking calls only as busy time', async () => {
+  it('associate: their team’s calls in full, other teams’ blocking calls only as busy time', async () => {
     const w = await seedExpertWeek();
     const res = await calendarOf(await as(fx.a1), fx.e1.id);
     expect(res.status, res.text).toBe(200);
     expect(res.body.expert).toMatchObject({ id: fx.e1.id, timeZone: 'Asia/Seoul' });
     expect(res.body.canEditBlocks).toBe(false);
-    expect(ids(res.body.calls)).toEqual([w.c1.id]);
-    expect(res.body.calls[0]).toMatchObject({ platform: { name: 'GLG' }, profile: { name: 'Dana Approved' }, associate: { id: fx.a1.id } });
+    // Their own call and their teammate a2's; a3 is on the other team.
+    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.c4]));
+    expect(res.body.calls.find((c: { id: string }) => c.id === w.c1.id)).toMatchObject({ platform: { name: 'GLG' }, profile: { name: 'Dana Approved' }, associate: { id: fx.a1.id } });
+    expect(res.body.calls.find((c: { id: string }) => c.id === w.c4.id)).toMatchObject({ associate: { id: fx.a2.id } });
     expect(res.body.busy).toEqual([
       { startsAt: '2027-02-01T12:00:00.000Z', endsAt: '2027-02-01T12:30:00.000Z' },
       // Still being scheduled: shown as taken, but marked as it may yet move.
       { startsAt: '2027-02-01T14:00:00.000Z', endsAt: '2027-02-01T15:00:00.000Z', tentative: true },
-      { startsAt: '2027-02-02T09:00:00.000Z', endsAt: '2027-02-02T09:45:00.000Z' },
     ]);
     for (const b of res.body.busy) expect(Object.keys(b).sort()).toEqual(['endsAt', 'startsAt', ...(b.tentative ? ['tentative'] : [])].sort());
     expect(res.body.rules).toEqual([]);
@@ -70,7 +71,7 @@ describe('GET /calendar privacy', () => {
       expect.objectContaining({ date: '2027-02-01', startsAt: '2027-02-01T01:00:00Z', kind: 'unavailable' }),
     ]);
     // Nothing identifying the hidden calls or the private notes leaks anywhere.
-    for (const secret of [w.c2.id, w.c3.id, w.c4.id, 'AssocThree', 'AssocTwo', 'AlphaSights', 'secret-call-note', 'private-block-note']) {
+    for (const secret of [w.c2.id, w.c3.id, 'AssocThree', 'AlphaSights', 'secret-call-note', 'private-block-note']) {
       expect(res.text).not.toContain(secret);
     }
   });
@@ -122,7 +123,7 @@ describe('GET /calendar privacy', () => {
     const w = await seedExpertWeek();
     const res = await calendarOf(await as(fx.a1));
     expect(res.body.expert).toBeNull();
-    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.other]));
+    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.c4, w.other]));
     expect(res.body).toMatchObject({ busy: [], occurrences: [], rules: [] });
   });
 
@@ -169,8 +170,8 @@ describe('GET /calendar/experts', () => {
     ]);
     const col = res.body.experts[0];
     expect(Object.keys(col).sort()).toEqual(['busy', 'calls', 'expert', 'occurrences', 'slot']);
-    expect(ids(col.calls)).toEqual([w.c1.id]);
-    expect(col.busy).toHaveLength(3);
+    expect(ids(col.calls)).toEqual(ids([w.c1, w.c4]));
+    expect(col.busy).toHaveLength(2);
     expect(col.busy.filter((b: { tentative?: boolean }) => b.tentative)).toHaveLength(1);
     expect(col.occurrences).toHaveLength(1);
     expect(ids(res.body.experts[1].calls)).toEqual([w.other.id]);
