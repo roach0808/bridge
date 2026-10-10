@@ -1,4 +1,7 @@
 import AddCommentRounded from '@mui/icons-material/AddCommentRounded';
+import GroupAddOutlined from '@mui/icons-material/GroupAddOutlined';
+import InfoOutlined from '@mui/icons-material/InfoOutlined';
+import ReplyRounded from '@mui/icons-material/ReplyRounded';
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ChatBubbleOutlineRounded from '@mui/icons-material/ChatBubbleOutlineRounded';
@@ -19,6 +22,7 @@ import VisibilityOutlined from '@mui/icons-material/VisibilityOutlined';
 import {
   Box,
   Button,
+  ButtonBase,
   Card,
   CircularProgress,
   Dialog,
@@ -39,7 +43,9 @@ import {
   CHAT_MESSAGE_MAX,
   ROLE_LABELS,
   ROLES,
+  canJoinGroups,
   isActiveTodo,
+  runsGroup,
   type ChatMessageDTO,
   type ConversationDTO,
   type ChatMessagePage,
@@ -66,6 +72,7 @@ import { appendChatMessage, replaceChatMessage } from '@/realtime/RealtimeProvid
 import { useRings } from '@/realtime/RingProvider';
 import { ChatImage, EmojiPickerPopover, QuickReactionBar, ReactionChips, messageText, useReact } from './chatExtras';
 import { SchedulingComposer } from './SchedulingComposer';
+import { ChatAvatar, GroupInfoDialog, MentionText, NewGroupDialog, ReplyQuote, SystemLine, chatTitle, nameColor, useMentions } from './groupChat';
 import { SearchField, useIsPhone } from '../admin/adminShared';
 import { TODO_COLORS, TodoDoneDialog, TodoPill, useRefreshTodos } from '../todos/todoShared';
 
@@ -84,10 +91,13 @@ const PANEL_HEIGHT = { xs: 'calc(100dvh - 150px)', md: 'calc(100vh - 170px)' };
 function previewOf(c: ConversationDTO, meId: string): string {
   const m = c.lastMessage;
   if (!m) return 'No messages yet';
-  const prefix = m.senderId === meId ? 'You: ' : '';
+  const mine = m.senderId === meId;
+  if (m.kind === 'system') return `${mine ? 'You' : m.senderNickname} ${m.body}`;
+  // In a group, who said it comes first.
+  const prefix = mine ? 'You: ' : c.group ? `${m.senderNickname}: ` : '';
   if (m.deleted) return `${prefix}Message deleted`;
   if (m.kind === 'todo_done') return `${prefix}✓ Marked a task done`;
-  if (m.kind === 'ring') return m.senderId === meId ? 'You rang' : '🔔 Rang you';
+  if (m.kind === 'ring') return mine ? 'You rang' : '🔔 Rang you';
   return m.hasImage ? `${prefix}📷 ${m.body || 'Photo'}` : `${prefix}${m.body}`;
 }
 
@@ -178,6 +188,8 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
   const [picking, setPicking] = useState(false);
+  const [grouping, setGrouping] = useState(false);
+  const [newMenu, setNewMenu] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ conversation: ConversationDTO; anchor: HTMLElement } | null>(null);
   const [clearing, setClearing] = useState<ConversationDTO | null>(null);
   const conversations = useQuery({ queryKey: qk.chat.conversations, queryFn: api.chat.conversations });
@@ -204,7 +216,8 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
   });
 
   const term = search.trim().toLowerCase();
-  const rows = (conversations.data ?? []).filter((c) => !term || c.other.nickname.toLowerCase().includes(term));
+  const rows = (conversations.data ?? []).filter((c) => !term || chatTitle(c).toLowerCase().includes(term));
+  const mayGroup = canJoinGroups(me.role);
 
   return (
     <Card sx={{ height: PANEL_HEIGHT, display: 'flex', flexDirection: 'column', minHeight: 420 }}>
@@ -221,11 +234,31 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
               </IconButton>
             </Tooltip>
           )}
-          <Tooltip title="New chat">
-            <IconButton color="primary" onClick={() => setPicking(true)} aria-label="New chat">
+          <Tooltip title={mayGroup ? 'New chat or group' : 'New chat'}>
+            <IconButton color="primary" onClick={(e) => (mayGroup ? setNewMenu(e.currentTarget) : setPicking(true))} aria-label="New chat">
               <AddCommentRounded fontSize="small" />
             </IconButton>
           </Tooltip>
+          <Menu anchorEl={newMenu} open={Boolean(newMenu)} onClose={() => setNewMenu(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} transformOrigin={{ vertical: 'top', horizontal: 'right' }}>
+            <MenuItem
+              onClick={() => {
+                setNewMenu(null);
+                setPicking(true);
+              }}
+            >
+              <AddCommentRounded fontSize="small" sx={{ mr: 1.25 }} />
+              New chat
+            </MenuItem>
+            <MenuItem
+              onClick={() => {
+                setNewMenu(null);
+                setGrouping(true);
+              }}
+            >
+              <GroupAddOutlined fontSize="small" sx={{ mr: 1.25 }} />
+              New group
+            </MenuItem>
+          </Menu>
         </Stack>
       </Stack>
       <Box sx={{ px: 2, pb: 1.25 }}>
@@ -262,14 +295,12 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                 sx={{ py: 1.25, px: 2, gap: 1.5, alignItems: 'flex-start', '&:hover .chat-menu': { opacity: 1 } }}
               >
                 <Box>
-                  <PresenceBadge userId={c.other.id}>
-                    <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={40} />
-                  </PresenceBadge>
+                  <ChatAvatar conversation={c} size={40} />
                 </Box>
                 <Box sx={{ flex: 1, minWidth: 0 }}>
                   <Stack direction="row" alignItems="center" spacing={0.75}>
                     <Typography variant="body2" fontWeight={c.unreadCount ? 700 : 600} noWrap sx={{ flex: 1, minWidth: 0 }}>
-                      {c.other.nickname}
+                      {chatTitle(c)}
                     </Typography>
                     {c.lastMessage && (
                       <Typography variant="caption" color={c.unreadCount ? 'primary.main' : 'text.secondary'} sx={{ flexShrink: 0 }}>
@@ -286,6 +317,13 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                         <ChecklistRounded sx={{ fontSize: 15, color: TODO_COLORS.open }} />
                       </Tooltip>
                     )}
+                    {c.unreadMentions > 0 && (
+                      <Tooltip title={`You were mentioned ${c.unreadMentions === 1 ? 'once' : `${c.unreadMentions} times`}`}>
+                        <Box sx={{ width: 18, height: 18, borderRadius: 99, bgcolor: 'primary.main', color: 'common.white', fontSize: 12, fontWeight: 700, display: 'grid', placeItems: 'center' }}>
+                          @
+                        </Box>
+                      </Tooltip>
+                    )}
                     {c.unreadCount > 0 && (
                       <Box sx={{ minWidth: 18, height: 18, px: 0.5, borderRadius: 99, bgcolor: 'primary.main', color: 'common.white', fontSize: 11, fontWeight: 700, display: 'grid', placeItems: 'center' }}>
                         {c.unreadCount}
@@ -293,10 +331,12 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                     )}
                   </Stack>
                 </Box>
+                {/* Clearing a group's history is its owner's call. */}
+                {(!c.group || c.group.myRole === 'owner') && (
                 <IconButton
                   className="chat-menu"
                   size="small"
-                  aria-label={`Options for the chat with ${c.other.nickname}`}
+                  aria-label={`Options for ${c.group ? `the group ${c.group.title}` : `the chat with ${c.other!.nickname}`}`}
                   onClick={(e) => {
                     e.stopPropagation();
                     setMenu({ conversation: c, anchor: e.currentTarget });
@@ -305,6 +345,7 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
                 >
                   <MoreVertRounded sx={{ fontSize: 18 }} />
                 </IconButton>
+                )}
               </ListItemButton>
             ))}
           </List>
@@ -324,8 +365,12 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
       </Menu>
       <ConfirmDialog
         open={Boolean(clearing)}
-        title={`Clear the chat with ${clearing?.other.nickname ?? ''}?`}
-        description={`Every message and picture in this chat is erased for you and ${clearing?.other.nickname ?? 'them'}. Tasks that came from it are kept. This cannot be undone.`}
+        title={clearing?.group ? `Clear “${clearing.group.title}”?` : `Clear the chat with ${clearing?.other?.nickname ?? ''}?`}
+        description={
+          clearing?.group
+            ? 'Every message and picture in this group is erased for everyone in it. This cannot be undone.'
+            : `Every message and picture in this chat is erased for you and ${clearing?.other?.nickname ?? 'them'}. Tasks that came from it are kept. This cannot be undone.`
+        }
         confirmLabel="Clear history"
         destructive
         onClose={() => setClearing(null)}
@@ -334,6 +379,14 @@ function ConversationList({ activeId, onOpen }: { activeId: string | null; onOpe
         }}
       />
       <NewChatDialog open={picking} onClose={() => setPicking(false)} onPick={(u) => start.mutate(u.id)} />
+      <NewGroupDialog
+        open={grouping}
+        onClose={() => setGrouping(false)}
+        onCreated={(c) => {
+          setGrouping(false);
+          onOpen(c.id);
+        }}
+      />
     </Card>
   );
 }
@@ -344,10 +397,12 @@ function MessageMenu({
   message,
   conversation,
   onReact,
+  onReply,
 }: {
   message: ChatMessageDTO;
   conversation: ConversationDTO;
   onReact: (anchor: HTMLElement) => void;
+  onReply: () => void;
 }) {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -361,7 +416,7 @@ function MessageMenu({
     mutationFn: () => api.chat.makeTodo(message.id),
     onSuccess: () => {
       refresh();
-      toast.success(`Task given to ${conversation.other.nickname}`);
+      toast.success(`Task given to ${conversation.other?.nickname ?? 'them'}`);
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
@@ -387,10 +442,13 @@ function MessageMenu({
   const me = useMe();
   const canMake = !message.todo && conversation.canGiveTask && !message.image && !message.deleted;
   const canRemove = message.todo !== null && isActiveTodo(message.todo.status) && message.todo.createdBy.id === me.id;
-  const canDelete = message.sender.id === me.id && !message.todo && !message.deleted;
+  // A group's owner and admins also take down anyone's message.
+  const moderates = Boolean(conversation.group) && runsGroup(conversation.group?.myRole) && message.sender.id !== me.id;
+  const canDelete = (message.sender.id === me.id || moderates) && !message.todo && !message.deleted;
   const canReact = conversation.canSend && !message.deleted;
+  const canReply = conversation.canSend && conversation.mode === 'free' && !message.deleted;
   const menuButton = useRef<HTMLButtonElement>(null);
-  if (!canMake && !canRemove && !canDelete && !canReact) return null;
+  if (!canMake && !canRemove && !canDelete && !canReact && !canReply) return null;
   return (
     <>
       <IconButton
@@ -404,6 +462,17 @@ function MessageMenu({
         <MoreVertRounded sx={{ fontSize: 17 }} />
       </IconButton>
       <Menu anchorEl={anchor} open={Boolean(anchor)} onClose={() => setAnchor(null)}>
+        {canReply && (
+          <MenuItem
+            onClick={() => {
+              setAnchor(null);
+              onReply();
+            }}
+          >
+            <ReplyRounded fontSize="small" sx={{ mr: 1.25 }} />
+            Reply
+          </MenuItem>
+        )}
         {canMake && (
           <MenuItem
             onClick={() => {
@@ -412,7 +481,7 @@ function MessageMenu({
             }}
           >
             <ChecklistRounded fontSize="small" sx={{ mr: 1.25, color: TODO_COLORS.open }} />
-            Give as task to {conversation.other.nickname}
+            Give as task to {conversation.other?.nickname}
           </MenuItem>
         )}
         {canRemove && (
@@ -452,7 +521,7 @@ function MessageMenu({
       <ConfirmDialog
         open={confirmDelete}
         title="Delete this message?"
-        description={`It will be deleted for you and ${conversation.other.nickname}${message.image ? ', including the picture' : ''}. This cannot be undone.`}
+        description={`It will be deleted for ${conversation.group ? 'everyone in the group' : `you and ${conversation.other?.nickname ?? 'them'}`}${message.image ? ', including the picture' : ''}. This cannot be undone.`}
         confirmLabel="Delete"
         destructive
         onClose={() => setConfirmDelete(false)}
@@ -487,11 +556,17 @@ type BubbleProps = {
   seen: boolean;
   zone: string;
   onDone: (m: ChatMessageDTO) => void;
+  onReply: (m: ChatMessageDTO) => void;
+  /** Scrolls to a quoted message, when it is loaded. */
+  onJump: (id: string) => void;
+  /** The group's members, for its @mentions. */
+  people: ReadonlyArray<{ id: string; nickname: string }>;
 };
 
 function MessageBubble(props: BubbleProps) {
   const { message: m, conversation, mine, zone } = props;
-  if (m.kind === 'ring') return <RingLine message={m} other={conversation.other.nickname} mine={mine} zone={zone} />;
+  if (m.kind === 'system') return <SystemLine message={m} zone={zone} />;
+  if (m.kind === 'ring') return <RingLine message={m} other={conversation.other?.nickname ?? ''} mine={mine} zone={zone} />;
   return <TalkBubble {...props} />;
 }
 
@@ -507,7 +582,9 @@ function RingLine({ message: m, other, mine, zone }: { message: ChatMessageDTO; 
   );
 }
 
-function TalkBubble({ message: m, conversation, mine, seen, zone, onDone }: BubbleProps) {
+function TalkBubble({ message: m, conversation, mine, seen, zone, onDone, onReply, onJump, people }: BubbleProps) {
+  // In a group, others' messages carry their face and name.
+  const showSender = Boolean(conversation.group) && !mine;
   const me = useMe();
   const dt = inZone(m.createdAt, zone);
   const isDone = m.kind === 'todo_done';
@@ -530,6 +607,11 @@ function TalkBubble({ message: m, conversation, mine, seen, zone, onDone }: Bubb
       alignItems="flex-end"
       sx={{ mb: 1.25, '&:hover .msg-menu': { opacity: 1 }, '&:hover .msg-actions': { opacity: 1, pointerEvents: 'auto' } }}
     >
+      {showSender && (
+        <Box sx={{ alignSelf: 'flex-end', mb: 3.25, mr: 0.25 }}>
+          <UserAvatar avatarId={m.sender.avatarId} photoId={m.sender.photoId} label={m.sender.nickname} size={28} />
+        </Box>
+      )}
       <Box sx={{ maxWidth: { xs: '85%', md: '72%' }, minWidth: 0 }}>
         <Tooltip title={dt.toFormat('LLL d, h:mm a ZZZZ')} placement={mine ? 'left' : 'right'} disableHoverListener={Boolean(m.image)}>
           <Box
@@ -546,6 +628,11 @@ function TalkBubble({ message: m, conversation, mine, seen, zone, onDone }: Bubb
               ...bubbleSx,
             }}
           >
+            {showSender && (
+              <Typography variant="caption" component="div" sx={{ fontWeight: 650, color: nameColor(m.sender.id), mb: 0.25, ...(m.image ? { px: 1, pt: 0.5 } : {}) }}>
+                {m.sender.nickname}
+              </Typography>
+            )}
             {m.deleted && 'This message was deleted'}
             {isDone && (
               <>
@@ -567,13 +654,18 @@ function TalkBubble({ message: m, conversation, mine, seen, zone, onDone }: Bubb
             )}
             {!isDone && !m.deleted && (
               <>
+                {m.replyTo && <ReplyQuote reply={m.replyTo} mine={mine} onClick={() => onJump(m.replyTo!.id)} />}
                 {m.image && <ChatImage image={m.image} />}
-                {m.body && <Box sx={m.image ? { px: 1, pt: 0.75, pb: 0.25 } : undefined}>{messageText(m, zone)}</Box>}
+                {m.body && (
+                  <Box sx={m.image ? { px: 1, pt: 0.75, pb: 0.25 } : undefined}>
+                    <MentionText text={messageText(m, zone)} people={people} mine={mine} />
+                  </Box>
+                )}
               </>
             )}
           </Box>
         </Tooltip>
-        <ReactionChips message={m} conversation={conversation} align={mine ? 'right' : 'left'} />
+        <ReactionChips message={m} conversation={conversation} align={mine ? 'right' : 'left'} people={people} />
         <Stack direction="row" spacing={0.75} alignItems="center" justifyContent={mine ? 'flex-end' : 'flex-start'} sx={{ mt: 0.4, mx: 0.5, flexWrap: 'wrap' }}>
           {todo && (
             <>
@@ -595,7 +687,7 @@ function TalkBubble({ message: m, conversation, mine, seen, zone, onDone }: Bubb
           </Typography>
         </Stack>
       </Box>
-      {m.kind === 'text' && !m.deleted && <MessageMenu message={m} conversation={conversation} onReact={setPickerAnchor} />}
+      {m.kind === 'text' && !m.deleted && <MessageMenu message={m} conversation={conversation} onReact={setPickerAnchor} onReply={() => onReply(m)} />}
       {canReact && <QuickReactionBar message={m} onMore={setPickerAnchor} />}
       <EmojiPickerPopover
         anchor={pickerAnchor}
@@ -634,7 +726,7 @@ function RingButton({ conversation: c }: { conversation: ConversationDTO }) {
     );
   }
   return (
-    <Tooltip title={current ? `${c.other.nickname} is ringing you` : `Ring ${c.other.nickname}: plays a tune on their screen until they close it`}>
+    <Tooltip title={current ? `${c.other!.nickname} is ringing you` : `Ring ${c.other!.nickname}: plays a tune on their screen until they close it`}>
       <span>
         <Button
           size="small"
@@ -662,6 +754,8 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState('');
   const [doneFor, setDoneFor] = useState<ChatMessageDTO | null>(null);
+  const [replyTo, setReplyTo] = useState<ChatMessageDTO | null>(null);
+  const [infoOpen, setInfoOpen] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
 
@@ -754,12 +848,13 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
     void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
   };
   const send = useMutation({
-    mutationFn: ({ body, image }: { body: string; image: Attachment | null }) =>
-      api.chat.send(conversationId, body, image ? { dataUrl: image.dataUrl, width: image.width, height: image.height } : undefined),
+    mutationFn: ({ body, image, reply }: { body: string; image: Attachment | null; reply: ChatMessageDTO | null }) =>
+      api.chat.send(conversationId, body, image ? { dataUrl: image.dataUrl, width: image.width, height: image.height } : undefined, reply?.id),
     onSuccess: onSent,
-    onError: (err, { body, image }) => {
+    onError: (err, { body, image, reply }) => {
       setDraft(body);
       setAttachment(image);
+      setReplyTo(reply);
       toast.error(errorMessage(err));
     },
   });
@@ -804,6 +899,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
   useEffect(() => {
     stickToBottom.current = true;
     setDraft('');
+    setReplyTo(null);
   }, [conversationId]);
 
   useLayoutEffect(() => {
@@ -826,10 +922,27 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
     if ((!body && !attachment) || send.isPending || preparing) return;
     setDraft('');
     setAttachment(null);
-    send.mutate({ body, image: attachment });
+    setReplyTo(null);
+    send.mutate({ body, image: attachment, reply: replyTo });
   };
 
   const c = conversation.data;
+  // A group's members: for its @mentions, and to suggest them while typing.
+  const groupInfo = useQuery({ queryKey: qk.chat.group(conversationId), queryFn: () => api.chat.group(conversationId), enabled: c?.kind === 'group' });
+  const people = useMemo(() => (groupInfo.data?.members ?? []).map((m) => m.user), [groupInfo.data]);
+  const others = useMemo(() => people.filter((p) => p.id !== me.id && p.isActive), [people, me.id]);
+  const mentions = useMentions({ draft, setDraft, input, people: others });
+  const startReply = (m: ChatMessageDTO) => {
+    setReplyTo(m);
+    requestAnimationFrame(() => input.current?.focus());
+  };
+  /** Brings a quoted message into view and flashes it, when it is among those loaded. */
+  const jumpTo = (id: string) => {
+    const el = scroller.current?.querySelector<HTMLElement>(`[data-mid="${id}"]`);
+    if (!el) return toast.info('That message is further up: scroll to load it.');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.animate([{ backgroundColor: 'rgba(25, 118, 210, 0.18)' }, { backgroundColor: 'transparent' }], { duration: 1400, easing: 'ease-out' });
+  };
   // Pictures and free text are for free chats only.
   const free = c?.mode !== 'scheduling';
   const lastMine = [...messages].reverse().find((m) => m.sender.id === me.id);
@@ -881,11 +994,32 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
             <ArrowBackRounded />
           </IconButton>
         )}
-        {c && (
+        {c?.group && (
           <>
-            <PresenceBadge userId={c.other.id} size={11}>
-              <UserAvatar avatarId={c.other.avatarId} photoId={c.other.photoId} label={c.other.nickname} size={38} />
-            </PresenceBadge>
+            <ButtonBase onClick={() => setInfoOpen(true)} sx={{ borderRadius: 99 }} aria-label="Group info">
+              <ChatAvatar conversation={c} size={38} />
+            </ButtonBase>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="subtitle1" noWrap>
+                {c.group.title}
+              </Typography>
+              <ButtonBase onClick={() => setInfoOpen(true)} sx={{ borderRadius: 1, typography: 'caption', color: 'text.secondary' }}>
+                {groupInfo.data
+                  ? `${c.group.memberCount} members: ${groupInfo.data.members.slice(0, 4).map((m) => (m.user.id === me.id ? 'you' : m.user.nickname)).join(', ')}${c.group.memberCount > 4 ? '…' : ''}`
+                  : `${c.group.memberCount} members`}
+              </ButtonBase>
+            </Box>
+            <Tooltip title="Group info">
+              <IconButton onClick={() => setInfoOpen(true)} aria-label="Open group info">
+                <InfoOutlined fontSize="small" />
+              </IconButton>
+            </Tooltip>
+            <GroupInfoDialog conversationId={c.id} open={infoOpen} onClose={() => setInfoOpen(false)} />
+          </>
+        )}
+        {c?.other && (
+          <>
+            <ChatAvatar conversation={c} size={38} />
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="subtitle1" noWrap>
                 {c.other.nickname}
@@ -900,7 +1034,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
                 )}
               </Stack>
             </Box>
-            {c.canSend && <RingButton conversation={c} />}
+            {c.canRing && <RingButton conversation={c} />}
           </>
         )}
       </Stack>
@@ -921,7 +1055,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
         )}
         {!isLoading && !hasNextPage && messages.length > 0 && (
           <Typography variant="caption" color="text.disabled" component="div" sx={{ textAlign: 'center', my: 1 }}>
-            Start of your chat with {c?.other.nickname}
+            {c?.group ? `Start of ${c.group.title}` : `Start of your chat with ${c?.other?.nickname ?? ''}`}
           </Typography>
         )}
         {isLoading || !c ? (
@@ -931,7 +1065,7 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
         ) : messages.length === 0 ? (
           <EmptyState
             icon={<ChatBubbleOutlineRounded />}
-            title={`Say hello to ${c.other.nickname}`}
+            title={`Say hello to ${c.group ? 'the group' : c.other!.nickname}`}
             description={
               !free ? 'Choose a scheduling message below to start.'
               : me.role === 'founder' || me.role === 'manager' ? 'Tip: open a message’s menu to give it as a task.'
@@ -957,6 +1091,9 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
                   seen={m.id === lastMine?.id && seenMine}
                   zone={zone}
                   onDone={setDoneFor}
+                  onReply={startReply}
+                  onJump={jumpTo}
+                  people={people}
                 />
               </Box>
             );
@@ -986,13 +1123,28 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
       {c && !c.canSend ? (
         <Box sx={{ p: 2, borderTop: 1, borderColor: 'divider', textAlign: 'center' }}>
           <Typography variant="body2" color="text.secondary">
-            {c.other.nickname} is no longer active, so this chat is read-only.
+            {c.group ? 'You can no longer write in this group.' : `${c.other?.nickname} is no longer active, so this chat is read-only.`}
           </Typography>
         </Box>
       ) : c && !free ? (
         <SchedulingComposer key={conversationId} role={me.role} zone={zone} sending={sendScheduling.isPending} onSend={(m) => sendScheduling.mutateAsync(m)} />
       ) : (
         <Box sx={{ p: 1.5, borderTop: 1, borderColor: 'divider' }}>
+          {replyTo && (
+            <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1, pl: 0.5 }}>
+              <ReplyRounded fontSize="small" color="primary" />
+              <Box sx={{ flex: 1, minWidth: 0 }}>
+                <ReplyQuote
+                  reply={{ id: replyTo.id, body: replyTo.body, sender: replyTo.sender, deleted: replyTo.deleted, hasImage: replyTo.image !== null }}
+                  onClick={() => jumpTo(replyTo.id)}
+                />
+              </Box>
+              <IconButton size="small" onClick={() => setReplyTo(null)} aria-label="Cancel the reply">
+                <CloseRounded sx={{ fontSize: 18 }} />
+              </IconButton>
+            </Stack>
+          )}
+          {mentions.popper}
           {(attachment || preparing) && (
             <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}>
               <Box sx={{ position: 'relative', width: 72, height: 72, borderRadius: 1.5, overflow: 'hidden', bgcolor: 'action.hover', flexShrink: 0 }}>
@@ -1045,14 +1197,24 @@ function ChatThread({ conversationId, onBack }: { conversationId: string; onBack
               </span>
             </Tooltip>
             <TextField
-              placeholder={c ? `Message ${c.other.nickname}…` : 'Write a message…'}
+              placeholder={c ? `Message ${chatTitle(c)}…${c.group ? ' (@ to mention someone)' : ''}` : 'Write a message…'}
               multiline
               maxRows={6}
               fullWidth
               value={draft}
               inputRef={input}
-              onChange={(e) => setDraft(e.target.value)}
+              onChange={(e) => {
+                setDraft(e.target.value);
+                mentions.track();
+              }}
+              onKeyUp={mentions.track}
+              onClick={mentions.track}
               onKeyDown={(e) => {
+                if (mentions.onKeyDown(e)) return;
+                if (e.key === 'Escape' && replyTo) {
+                  setReplyTo(null);
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   submit();

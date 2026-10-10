@@ -1,4 +1,5 @@
 import type {
+  GroupDTO,
   ChatRingDTO,
   AuditEntryDTO,
   AuthResponse,
@@ -266,8 +267,8 @@ export function createApiClient(options: ClientOptions) {
       messages: (id: string, query: { cursor?: string | null; after?: string | null; limit?: number } = {}) =>
         get<ChatMessagePage>(`/chat/conversations/${enc(id)}/messages`, query),
       /** Text, a picture (already shrunk by the browser) with an optional caption, or both. */
-      send: (id: string, body: string, image?: { dataUrl: string; width: number; height: number }) =>
-        post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, image ? { body, image } : { body }),
+      send: (id: string, body: string, image?: { dataUrl: string; width: number; height: number }, replyToId?: string) =>
+        post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { body, ...(image ? { image } : {}), ...(replyToId ? { replyToId } : {}) }),
       /** One of the set sentences: the only kind of message between an Expert and the team. */
       sendScheduling: (id: string, scheduling: SchedulingMessage) =>
         post<ChatMessageDTO>(`/chat/conversations/${enc(id)}/messages`, { scheduling }),
@@ -288,6 +289,20 @@ export function createApiClient(options: ClientOptions) {
       clearHistory: (id: string) => del<void>(`/chat/conversations/${enc(id)}/history`),
       makeTodo: (messageId: string) => post<TodoDTO>(`/chat/messages/${enc(messageId)}/todo`),
       removeTodo: (messageId: string) => del<void>(`/chat/messages/${enc(messageId)}/todo`),
+      /** Everyone the caller may put in a group (not Experts). */
+      groupCandidates: () => get<UserRef[]>('/chat/group-candidates'),
+      /** Starts a group the caller owns. */
+      createGroup: (title: string, memberIds: string[]) => post<ConversationDTO>('/chat/groups', { title, memberIds }),
+      group: (id: string) => get<GroupDTO>(`/chat/groups/${enc(id)}`),
+      renameGroup: (id: string, title: string) => http.request<GroupDTO>('PATCH', `/chat/groups/${enc(id)}`, { body: { title } }),
+      setGroupPhoto: (id: string, dataUrl: string) => http.request<GroupDTO>('PUT', `/chat/groups/${enc(id)}/photo`, { body: { dataUrl } }),
+      removeGroupPhoto: (id: string) => del<GroupDTO>(`/chat/groups/${enc(id)}/photo`),
+      addGroupMembers: (id: string, userIds: string[]) => post<GroupDTO>(`/chat/groups/${enc(id)}/members`, { userIds }),
+      /** Takes someone out; the caller's own id leaves the group (nothing comes back then). */
+      removeGroupMember: (id: string, userId: string) => del<GroupDTO | undefined>(`/chat/groups/${enc(id)}/members/${enc(userId)}`),
+      setGroupMemberRole: (id: string, userId: string, role: 'admin' | 'member') =>
+        http.request<GroupDTO>('PUT', `/chat/groups/${enc(id)}/members/${enc(userId)}/role`, { body: { role } }),
+      deleteGroup: (id: string) => del<void>(`/chat/groups/${enc(id)}`),
       /** Owner only: every chat in the system, to read and nothing else. */
       observed: () => get<ObservedChatDTO[]>('/chat/observed'),
       /** Owner only: a page of one chat between two other people. */

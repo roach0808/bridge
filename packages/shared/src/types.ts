@@ -2,7 +2,7 @@ import type { AvatarAudience, AvatarStyle } from './avatars';
 import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
 import type { BlockRule, Occurrence } from './scheduleBlocks';
-import type { ChatMessageKind, ChatMode, TodoImportance, TodoStatus, TodoUrgency } from './chat';
+import type { ChatMessageKind, ChatMode, ConversationKind, GroupRole, TodoImportance, TodoStatus, TodoUrgency } from './chat';
 import type { SchedulingMessage } from './scheduling';
 import type { Payee } from './payouts';
 import type { PresenceStatus } from './presence';
@@ -42,7 +42,10 @@ export interface MeDTO extends UserDTO {
  */
 export interface ObservedChatDTO {
   id: string;
-  people: [UserRef, UserRef];
+  /** The group's title; null for a one-to-one chat. */
+  title: string | null;
+  /** The two people of a one-to-one chat, or a group's members. */
+  people: UserRef[];
   lastMessage: ConversationDTO['lastMessage'];
   messageCount: number;
   createdAt: string;
@@ -576,24 +579,57 @@ export interface ChatMessageDTO {
    * out in their own zone; `body` holds it as the sender read it.
    */
   scheduling: SchedulingMessage | null;
+  /** The people the message @mentions (groups). */
+  mentionIds: string[];
+  createdAt: string;
+}
+
+/** A group as its list entry shows it. */
+export interface GroupSummary {
+  title: string;
+  photoId: string | null;
+  memberCount: number;
+  /** The caller's place in it. */
+  myRole: GroupRole;
+}
+
+export interface GroupMemberDTO {
+  user: UserRef & { isActive: boolean };
+  role: GroupRole;
+  joinedAt: string;
+}
+
+/** A group with everyone in it, for its info panel. */
+export interface GroupDTO extends GroupSummary {
+  id: string;
+  createdBy: UserRef | null;
+  members: GroupMemberDTO[];
   createdAt: string;
 }
 
 export interface ConversationDTO {
   id: string;
-  other: UserRef & { isActive: boolean };
-  lastMessage: (Pick<ChatMessageDTO, 'id' | 'body' | 'kind' | 'deleted' | 'createdAt'> & { senderId: string; hasImage: boolean }) | null;
+  kind: ConversationKind;
+  /** The other person in a one-to-one chat; null for a group. */
+  other: (UserRef & { isActive: boolean }) | null;
+  /** Set for a group. */
+  group: GroupSummary | null;
+  lastMessage: (Pick<ChatMessageDTO, 'id' | 'body' | 'kind' | 'deleted' | 'createdAt'> & { senderId: string; senderNickname: string; hasImage: boolean }) | null;
   unreadCount: number;
+  /** Unread messages that @mention the caller. */
+  unreadMentions: number;
   /** Open to-dos in this chat (assigned to either person). */
   openTodoCount: number;
-  /** When the other person last read the chat (for "Seen"). */
+  /** When the other person last read the chat (for "Seen"); null in groups. */
   otherLastReadAt: string | null;
   /** Both people are active and still allowed to chat. */
   canSend: boolean;
   /** `scheduling`: an Expert and the team, who send only the set sentences (scheduling.ts). */
   mode: ChatMode;
-  /** The caller may turn messages in this chat into tasks for the other person. */
+  /** The caller may turn messages in this chat into tasks for the other person (one-to-one only). */
   canGiveTask: boolean;
+  /** The caller may ring the other person (one-to-one only). */
+  canRing: boolean;
   createdAt: string;
 }
 
@@ -879,6 +915,8 @@ export interface ServerToClientEvents {
   'chat:cleared': (event: { conversationId: string }) => void;
   /** Sent to both people: the one rung hears it, the ringer's other tabs show it ringing. */
   'chat:ring': (ring: ChatRingDTO) => void;
+  /** A group's name, picture or members changed; `removedUserIds` are no longer in it. */
+  'chat:group-updated': (event: { conversationId: string; removedUserIds: string[] }) => void;
   'chat:ring-ended': (event: ChatRingEndedEvent) => void;
   'presence:update': (presence: PresenceDTO[]) => void;
   'user:typing': (payload: { callId: string; userId: string; nickname: string }) => void;

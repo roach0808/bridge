@@ -135,6 +135,7 @@ grouped under Managers; they are assigned per Call.
 | Delete own chat message; react; send pictures | ✓ | ✓ | ✓ | ✓ |
 | Clear a chat's whole history | the two people in it | same | same | same |
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates; Experts in set scheduling messages | Founders, Managers; Experts in set scheduling messages | Founders; Managers and Associates in set scheduling messages |
+| Start a group chat, be in one (§6.11c) | ✓ | ✓ | ✓ | |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
 | View a Call's status history | ✓ | ✓ (every Associate's + own) | their team's | assigned (without invoicing steps) |
 | View the audit trail (§6.16) | ✓ | | | |
@@ -1447,6 +1448,51 @@ Both reads are **recorded in the audit trail** (`chat.observed.list`,
 Web: **Everyone's chats** (`/chat/all`), reached by the eye button on the Chat
 page, which only a Founder is shown.
 
+### 6.11c Group chats **[Implementation]**
+
+A group is a conversation (`kind: group`) with a title, an optional picture and
+members, instead of two people. Everyone but Experts may start one and be in one
+(`canJoinGroups`); Experts keep their one-to-one chats. Messages, pictures,
+reactions, deleting and live updates work as in any chat; ringing and turning a
+message into a task are for one-to-one chats only (400).
+
+- **Roles** (`conversation_members.role`): the creator is the **owner**. Owners
+  and **admins** add people, take out plain members, rename the group, change its
+  picture and delete anyone's message. The owner also makes and unmakes admins,
+  takes out admins, clears the history and deletes the group. Anyone leaves; an
+  owner who leaves hands the group to the longest-standing admin, or member, and
+  the last one out deletes it. At most 200 people.
+- **What happened** — created, added, removed, left, renamed, a new picture, a new
+  admin — is a `system` message (sender + words), shown as a line between the
+  messages; it never counts as unread and takes no reactions.
+- **Replies**: any message may answer another of the same chat (`replyToId`; not
+  a system message), shown quoted above it. One-to-one chats too.
+- **@mentions**: "@nickname" (a member's, any case; a dot or dash ending a
+  sentence is not part of it) is stored in `mention_ids`. The person mentioned
+  gets a "mentioned you" push instead of the usual one, and the chat list counts
+  unread mentions (`unreadMentions`, an @ badge). Typing @ in a group suggests its
+  members.
+- Each member has their own read marker (a new member's starts empty); "Seen" is
+  for one-to-one chats. A member taken out loses the group at once
+  (`chat:group-updated` with `removedUserIds`). New members read the history.
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /chat/group-candidates | everyone but Experts | Active Founders, Managers and Associates |
+| POST | /chat/groups | everyone but Experts | { title (≤ 64), memberIds }: the caller owns it (201: the conversation) |
+| GET | /chat/groups/:id | members | { title, photoId, memberCount, myRole, createdBy, members: [{ user (+ isActive), role, joinedAt }] }, owner first, then admins |
+| PATCH | /chat/groups/:id | owner, admins | { title } |
+| PUT / DELETE | /chat/groups/:id/photo | owner, admins | { dataUrl } (≤ 400 KB), or remove it |
+| POST | /chat/groups/:id/members | owner, admins | { userIds }: anyone already in it is skipped; Experts are 400 |
+| DELETE | /chat/groups/:id/members/:userId | the member themselves (leaving); owner (anyone); admins (plain members) | 204 when the caller is no longer in it |
+| PUT | /chat/groups/:id/members/:userId/role | owner | { role: admin \| member } |
+| DELETE | /chat/groups/:id | owner | Deletes it with every message and picture |
+
+`GET /chat/conversations` lists groups too: `kind`, `group` ({ title, photoId,
+memberCount, myRole }) and `other: null`; `lastMessage` names its sender
+(`senderNickname`). The Founder's view of every chat (§6.11a) lists groups by
+title, with their members.
+
 ### 6.11b Start By and Complete By **[Implementation]**
 
 A due date read as a start date is the mistake the task board exists to
@@ -2076,6 +2122,7 @@ Container alternative:
 | 2026-10-05 | **Banks** carry a nickname, type, bank name and address, routing, account and SWIFT numbers, the online banking email and password (encrypted, shown to the Founder on request and audited) and where the account is signed in; type, bank name, routing and account numbers are required. Account holder, country, currency, notes and "primary" are gone. Managers and Associates now read a Profile's banks, without the password and where it is signed in; Experts see none. The Founder has a **Banks** page, and **submitting an invoice names the bank** it is paid into, by nickname |
 | 2026-10-07 | **Profiles are handled by a Manager's team**, no longer by one Associate: the Manager and every Associate under them. Existing Profiles went to the team of whoever looked after them. Only the Founder hands a Profile to another team. Which team handles a Profile no longer changes what anyone may do with it: every Manager and Associate sets platform statuses on every Profile (rates stay the Founder's); it is the **My team** filter, the Team and Manager columns, and who sees it while pending or rejected |
 | 2026-10-08 | **Associates handle their team's calls**: the calls of the other Associates under the same Manager, and the Manager's own, as well as their own — they see them (list, calendar, dashboard, live updates), edit them, swap the Expert and move them along as the call's own Associate would. Handing a call to someone else stays with Managers and the Founder; the call's Associate and Manager are still the ones notified and paid, and nobody sees another's pay |
+| 2026-10-10 | **Group chats**: anyone but an Expert starts a group (a name, a picture, members) and owns it; owners and admins add and remove people, rename it and delete messages, the owner chooses admins and deletes it; anyone leaves. What happens in a group shows as a line in it. **Replies** quote the message they answer, in any chat, and **@mentions** call a member, with their own notification and an @ badge in the chat list |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

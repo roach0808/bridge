@@ -130,12 +130,14 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       if (message.sender.id !== meId && message.kind === 'text') {
         const url = `/chat/${message.conversationId}`;
         const preview = message.body || '\uD83D\uDCF7 Photo';
-        showInTabNotification(message.sender.nickname, { body: preview, tag: `chat:${message.conversationId}`, url }, navigateTo);
+        const called = meId !== undefined && message.mentionIds.includes(meId);
+        const who = called ? `${message.sender.nickname} mentioned you` : message.sender.nickname;
+        showInTabNotification(who, { body: preview, tag: `chat:${message.conversationId}`, url }, navigateTo);
         // Inside the app a browser notification is suppressed, so say it here too,
         // unless they are already reading that very chat.
         if (window.location.pathname !== url) {
           toast.info(
-            `${message.sender.nickname}: ${preview.slice(0, 80)}`,
+            `${who}: ${preview.slice(0, 80)}`,
             <Button color="inherit" size="small" onClick={() => navigateTo(url)}>
               Open
             </Button>,
@@ -182,6 +184,20 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       void queryClient.invalidateQueries({ queryKey: qk.todos.all });
     };
 
+    // A group's name, picture or members changed; anyone taken out loses it at once.
+    const onGroupUpdated = ({ conversationId, removedUserIds }: { conversationId: string; removedUserIds: string[] }) => {
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
+      if (meId && removedUserIds.includes(meId)) {
+        queryClient.removeQueries({ queryKey: qk.chat.conversation(conversationId) });
+        queryClient.removeQueries({ queryKey: qk.chat.messages(conversationId) });
+        queryClient.removeQueries({ queryKey: qk.chat.group(conversationId) });
+        if (window.location.pathname === `/chat/${conversationId}`) navigateTo('/chat');
+        return;
+      }
+      void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(conversationId) });
+      void queryClient.invalidateQueries({ queryKey: qk.chat.group(conversationId) });
+    };
+
     const onChatRead = (event: ChatReadEvent) => {
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversation(event.conversationId) });
       void queryClient.invalidateQueries({ queryKey: qk.chat.conversations });
@@ -208,6 +224,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     socket.on('chat:read', onChatRead);
     socket.on('chat:message-updated', onChatMessageUpdated);
     socket.on('chat:cleared', onChatCleared);
+    socket.on('chat:group-updated', onGroupUpdated);
     socket.on('call:deleted', onCallDeleted);
     if (socket.connected) setConnected(true);
 
@@ -223,6 +240,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       socket.off('chat:read', onChatRead);
       socket.off('chat:message-updated', onChatMessageUpdated);
       socket.off('chat:cleared', onChatCleared);
+      socket.off('chat:group-updated', onGroupUpdated);
       socket.off('call:deleted', onCallDeleted);
     };
   }, [queryClient, status, meId, toast]);

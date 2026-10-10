@@ -1,6 +1,18 @@
 import {
   ACTIVE_TODO_STATUSES,
+  addGroupMembersSchema,
   canChat,
+  canJoinGroups,
+  canRemoveFromGroup,
+  createGroupSchema,
+  GROUP_MAX_MEMBERS,
+  groupMemberRoleSchema,
+  PHOTO_MAX_BYTES,
+  photoUploadSchema,
+  updateGroupSchema,
+  type GroupDTO,
+  runsGroup,
+  mentionedIn,
   chatModeOf,
   displayZoneFor,
   isActiveTodo,
@@ -33,6 +45,8 @@ import {
   type ChatRingDTO,
   type ChatRingEndReason,
   type ConversationDTO,
+  type GroupRole,
+  type GroupSummary,
   type ObservedChatDTO,
   type Role,
   type SchedulingMessage,
@@ -68,8 +82,15 @@ const participantSelect = { ...userRefSelect, isActive: true, managerId: true, t
 const conversationInclude = {
   userA: { select: participantSelect },
   userB: { select: participantSelect },
+  createdBy: { select: userRefSelect },
+  // Only groups have member rows.
+  members: { select: { userId: true, role: true, lastReadAt: true, joinedAt: true, user: { select: participantSelect } }, orderBy: [{ role: 'asc' }, { joinedAt: 'asc' }, { userId: 'asc' }] },
 } satisfies Prisma.ConversationInclude;
 type ConversationRow = Prisma.ConversationGetPayload<{ include: typeof conversationInclude }>;
+type Participant = NonNullable<ConversationRow['userA']>;
+/** A one-to-one chat, whose two people are always there. */
+type DirectRow = ConversationRow & { kind: 'direct'; userAId: string; userBId: string; userA: Participant; userB: Participant };
+const isDirect = (c: ConversationRow): c is DirectRow => c.kind === 'direct';
 
 const todoSummaryInclude = {
   // The owner's zone is the one a task's times are read in unless it says otherwise.
@@ -127,6 +148,7 @@ const toMessageDTO = (m: MessageRow): ChatMessageDTO => ({
   deleted: m.deletedAt !== null,
   reactions: groupReactions(m.reactions),
   scheduling: m.scheduling as SchedulingMessage | null,
+  mentionIds: m.mentionIds,
   createdAt: iso(m.createdAt),
 });
 
@@ -176,18 +198,35 @@ function countsFor(rows: Array<{ assigneeId: string; status: TodoStatus; _count:
   };
 }
 
-const isParticipant = (c: { userAId: string; userBId: string }, userId: string) => c.userAId === userId || c.userBId === userId;
-const otherOf = (c: ConversationRow, userId: string) => (c.userAId === userId ? c.userB : c.userA);
-const myLastReadAt = (c: ConversationRow, userId: string) => (c.userAId === userId ? c.userALastReadAt : c.userBLastReadAt);
-const otherLastReadAt = (c: ConversationRow, userId: string) => (c.userAId === userId ? c.userBLastReadAt : c.userALastReadAt);
+/** Who is in a chat: its two people, or a group's members. */
+type MembersShape = { kind: string; userAId: string | null; userBId: string | null; members?: Array<{ userId: string }> };
+const memberIdsOf = (c: MembersShape): string[] =>
+  c.kind === 'group' ? (c.members ?? []).map((m) => m.userId) : [c.userAId, c.userBId].filter((id): id is string => id !== null);
+const isParticipant = (c: MembersShape, userId: string) => memberIdsOf(c).includes(userId);
+/** The caller's place in a group; null outside one, or in a one-to-one chat. */
+const roleIn = (c: ConversationRow, userId: string): GroupRole | null => c.members.find((m) => m.userId === userId)?.role ?? null;
+const otherOf = (c: DirectRow, userId: string) => (c.userAId === userId ? c.userB : c.userA);
+const myLastReadAt = (c: ConversationRow, userId: string) =>
+  isDirect(c) ? (c.userAId === userId ? c.userALastReadAt : c.userBLastReadAt) : (c.members.find((m) => m.userId === userId)?.lastReadAt ?? null);
+const otherLastReadAt = (c: DirectRow, userId: string) => (c.userAId === userId ? c.userBLastReadAt : c.userALastReadAt);
+/** Moves the caller's read marker in the chat to `at` (sending counts as reading). */
+const readMarker = (c: ConversationRow, userId: string, at: Date) =>
+  isDirect(c)
+    ? prisma.conversation.update({ where: { id: c.id }, data: c.userAId === userId ? { userALastReadAt: at } : { userBLastReadAt: at } })
+    : prisma.conversationMember.update({ where: { conversationId_userId: { conversationId: c.id, userId } }, data: { lastReadAt: at } });
 
-/** Both people are active and their roles still allow a chat. */
-const canSendIn = (c: ConversationRow) =>
-  c.userA.isActive && c.userB.isActive && canChat({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role });
+/**
+ * One-to-one: both people are active and their roles still allow a chat. A
+ * group: the caller is an active member (anyone who left can no longer write).
+ */
+const canSendIn = (c: ConversationRow, userId: string) =>
+  isDirect(c)
+    ? c.userA.isActive && c.userB.isActive && canChat({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role })
+    : c.members.some((m) => m.userId === userId && m.user.isActive);
 
-/** An Expert and the team only schedule calls; every other chat is free. */
+/** An Expert and the team only schedule calls; every other chat, groups included, is free. */
 const modeOf = (c: ConversationRow) =>
-  chatModeOf({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role }) ?? 'free';
+  isDirect(c) ? (chatModeOf({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role }) ?? 'free') : 'free';
 
 async function loadConversation(actor: Actor, id: string | null): Promise<ConversationRow> {
   if (!id) throw notFound('Conversation');
@@ -196,11 +235,25 @@ async function loadConversation(actor: Actor, id: string | null): Promise<Conver
   return c;
 }
 
-const meIn = (c: ConversationRow, userId: string) => {
+/** A one-to-one chat of the caller's, for what only makes sense between two people (rings, tasks). */
+async function loadDirect(actor: Actor, id: string | null, what: string): Promise<DirectRow> {
+  const c = await loadConversation(actor, id);
+  if (!isDirect(c)) throw badRequest(`${what} is for one-to-one chats`);
+  return c;
+}
+
+const meIn = (c: DirectRow, userId: string) => {
   const me = c.userAId === userId ? c.userA : c.userB;
   return { id: me.id, role: me.role as Role };
 };
 const asTaker = (u: { id: string; role: string }) => ({ id: u.id, role: u.role as Role });
+
+const groupSummary = (c: ConversationRow, userId: string): GroupSummary => ({
+  title: c.title ?? '',
+  photoId: c.photoId,
+  memberCount: c.members.length,
+  myRole: roleIn(c, userId) ?? 'member',
+});
 
 /** Builds the list entries for the given conversations, as `userId` sees them. */
 async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: string): Promise<ConversationDTO[]> {
@@ -208,18 +261,27 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
   const ids = rows.map((r) => r.id);
   const [lastMessages, unread, openTodos] = await Promise.all([
     db.$queryRaw<
-      Array<{ id: string; conversation_id: string; sender_id: string; body: string; kind: ChatMessageDTO['kind']; image_id: string | null; deleted_at: Date | null; created_at: Date }>
+      Array<{ id: string; conversation_id: string; sender_id: string; sender_nickname: string; body: string; kind: ChatMessageDTO['kind']; image_id: string | null; deleted_at: Date | null; created_at: Date }>
     >`
-      SELECT DISTINCT ON (conversation_id) id, conversation_id, sender_id, body, kind, image_id, deleted_at, created_at
-      FROM chat_messages WHERE conversation_id = ANY(${ids}::uuid[])
-      ORDER BY conversation_id, created_at DESC, id DESC`,
-    db.$queryRaw<Array<{ id: string; count: bigint }>>`
-      SELECT c.id, count(m.id) AS count
+      SELECT DISTINCT ON (m.conversation_id) m.id, m.conversation_id, m.sender_id, u.nickname AS sender_nickname, m.body, m.kind, m.image_id, m.deleted_at, m.created_at
+      FROM chat_messages m JOIN users u ON u.id = m.sender_id
+      WHERE m.conversation_id = ANY(${ids}::uuid[])
+      ORDER BY m.conversation_id, m.created_at DESC, m.id DESC`,
+    // Unread: from someone else, after the caller's read marker (a group keeps one per member).
+    // What a group did ("added Pixel") is shown but never counts as unread.
+    db.$queryRaw<Array<{ id: string; count: bigint; mentions: bigint }>>`
+      SELECT c.id, count(m.id) AS count, count(m.id) FILTER (WHERE ${userId}::uuid = ANY(m.mention_ids)) AS mentions
       FROM conversations c
+      LEFT JOIN conversation_members cm ON cm.conversation_id = c.id AND cm.user_id = ${userId}::uuid
       JOIN chat_messages m ON m.conversation_id = c.id
         AND m.sender_id <> ${userId}::uuid
+        AND m.kind::text <> 'system'
         AND m.created_at > COALESCE(
-          CASE WHEN c.user_a_id = ${userId}::uuid THEN c.user_a_last_read_at ELSE c.user_b_last_read_at END,
+          CASE
+            WHEN c.kind::text = 'group' THEN cm.last_read_at
+            WHEN c.user_a_id = ${userId}::uuid THEN c.user_a_last_read_at
+            ELSE c.user_b_last_read_at
+          END,
           '-infinity'::timestamptz)
       WHERE c.id = ANY(${ids}::uuid[])
       GROUP BY c.id`,
@@ -231,27 +293,34 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
   ]);
   return rows.map((c) => {
     const last = lastMessages.find((m) => m.conversation_id === c.id);
-    const other = otherOf(c, userId);
+    const counts = unread.find((u) => u.id === c.id);
+    const other = isDirect(c) ? otherOf(c, userId) : null;
+    const open = canSendIn(c, userId);
     return {
       id: c.id,
-      other: { ...toUserRef(other), isActive: other.isActive },
+      kind: c.kind,
+      other: other ? { ...toUserRef(other), isActive: other.isActive } : null,
+      group: isDirect(c) ? null : groupSummary(c, userId),
       lastMessage: last
         ? {
             id: last.id,
             body: last.body,
             kind: last.kind,
             senderId: last.sender_id,
+            senderNickname: last.sender_nickname,
             hasImage: last.image_id !== null,
             deleted: last.deleted_at !== null,
             createdAt: iso(last.created_at),
           }
         : null,
-      unreadCount: Number(unread.find((u) => u.id === c.id)?.count ?? 0),
+      unreadCount: Number(counts?.count ?? 0),
+      unreadMentions: Number(counts?.mentions ?? 0),
       openTodoCount: openTodos.find((t) => t.conversationId === c.id)?._count._all ?? 0,
-      otherLastReadAt: isoOrNull(otherLastReadAt(c, userId)),
-      canSend: canSendIn(c),
+      otherLastReadAt: isDirect(c) ? isoOrNull(otherLastReadAt(c, userId)) : null,
+      canSend: open,
       mode: modeOf(c),
-      canGiveTask: canSendIn(c) && canGiveTask(meIn(c, userId), asTaker(other)),
+      canGiveTask: isDirect(c) && open && canGiveTask(meIn(c, userId), asTaker(other!)),
+      canRing: isDirect(c) && open,
       createdAt: iso(c.createdAt),
     };
   });
@@ -264,6 +333,11 @@ function emitToBoth<E extends keyof ServerToClientEvents>(
 ) {
   emitToUser(c.userAId, event, ...args);
   emitToUser(c.userBId, event, ...args);
+}
+
+/** Tells everyone in the chat: its two people, or every member of a group. */
+function emitToMembers<E extends keyof ServerToClientEvents>(c: MembersShape, event: E, ...args: Parameters<ServerToClientEvents[E]>) {
+  for (const id of memberIdsOf(c)) emitToUser(id, event, ...args);
 }
 
 // --- Contacts & conversations ----------------------------------------------------
@@ -283,7 +357,7 @@ chatRouter.get('/chat/contacts', async (req, res) => {
 chatRouter.get('/chat/conversations', async (req, res) => {
   const actor = actorOf(req);
   const rows = await prisma.conversation.findMany({
-    where: { OR: [{ userAId: actor.id }, { userBId: actor.id }], lastMessageAt: { not: null } },
+    where: { OR: [{ userAId: actor.id }, { userBId: actor.id }, { members: { some: { userId: actor.id } } }], lastMessageAt: { not: null } },
     include: conversationInclude,
     orderBy: [{ lastMessageAt: 'desc' }, { id: 'asc' }],
   });
@@ -315,6 +389,262 @@ chatRouter.get('/chat/conversations/:id', async (req, res) => {
   const actor = actorOf(req);
   const c = await loadConversation(actor, idParam(req));
   res.json((await toConversationDTOs(prisma, [c], actor.id))[0]);
+});
+
+// --- Groups ----------------------------------------------------------------------------
+//
+// A group is a conversation with a title, a picture and members (§6.11c). Everyone but
+// Experts may start one and be in one. Its creator owns it; owners and admins run it.
+
+/** "Pixel", "Pixel and Sprout", "Pixel, Sprout and Mango". */
+const namesOf = (people: Array<{ nickname: string }>) => {
+  const names = people.map((p) => p.nickname);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : (names[0] ?? '');
+};
+
+/** Records in the group what someone did there ("added Pixel"), as a line between the messages. */
+async function postSystem(tx: Db, conversationId: string, actorId: string, body: string, at = new Date()) {
+  const m = await tx.chatMessage.create({ data: { conversationId, senderId: actorId, body, kind: 'system', createdAt: at }, include: messageInclude });
+  await tx.conversation.update({ where: { id: conversationId }, data: { lastMessageAt: at } });
+  return m;
+}
+
+/** The caller's group; anything else, or a group they are not in, is a 404. */
+async function loadGroup(actor: Actor, id: string | null): Promise<ConversationRow> {
+  const c = await loadConversation(actor, id);
+  if (isDirect(c)) throw notFound('Group');
+  return c;
+}
+
+/** Only owners and admins run a group. */
+function assertRuns(c: ConversationRow, actor: Actor) {
+  if (!runsGroup(roleIn(c, actor.id))) throw forbidden('Only the group’s owner and admins can do that');
+}
+
+/** The people to put in a group: each must be an active Founder, Manager or Associate. */
+async function groupPeople(ids: string[]) {
+  const people = await prisma.user.findMany({ where: { id: { in: ids } }, select: { ...userRefSelect, isActive: true } });
+  const wrong = ids.filter((id) => {
+    const u = people.find((p) => p.id === id);
+    return !u || !u.isActive || !canJoinGroups(u.role as Role);
+  });
+  if (wrong.length) {
+    throw badRequest('Groups are for active Founders, Managers and Associates', { issues: wrong.map(() => ({ path: 'memberIds', message: 'Cannot be in a group' })) });
+  }
+  // In the order they were picked.
+  return ids.map((id) => people.find((p) => p.id === id)!);
+}
+
+const toGroupDTO = (c: ConversationRow, userId: string): GroupDTO => ({
+  id: c.id,
+  ...groupSummary(c, userId),
+  createdBy: c.createdBy ? toUserRef(c.createdBy) : null,
+  members: c.members.map((m) => ({ user: { ...toUserRef(m.user), isActive: m.user.isActive }, role: m.role, joinedAt: iso(m.joinedAt) })),
+  createdAt: iso(c.createdAt),
+});
+
+/**
+ * After a change: everyone in the group (and anyone just taken out of it) hears
+ * the group changed, the line saying what happened shows in the chat, and the
+ * caller gets the group as it is now.
+ */
+async function groupChanged(res: import('express').Response, actor: Actor, id: string, system: MessageRow | null, removed: string[] = []) {
+  const c = await prisma.conversation.findUnique({ where: { id }, include: conversationInclude });
+  if (system && c) emitToMembers(c, 'chat:message', toMessageDTO(system));
+  for (const userId of new Set([...(c ? memberIdsOf(c) : []), ...removed])) {
+    emitToUser(userId, 'chat:group-updated', { conversationId: id, removedUserIds: removed });
+  }
+  if (!c || !isParticipant(c, actor.id)) return res.status(204).end();
+  return res.json(toGroupDTO(c, actor.id));
+}
+
+/** Everyone the caller may put in a group. */
+chatRouter.get('/chat/group-candidates', async (req, res) => {
+  const actor = actorOf(req);
+  if (!canJoinGroups(actor.role)) throw forbidden('Experts are not in groups');
+  const users = await prisma.user.findMany({
+    where: { isActive: true, id: { not: actor.id }, role: { not: 'expert' } },
+    select: userRefSelect,
+    orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
+  });
+  res.json(users.map(toUserRef));
+});
+
+/** Starts a group: the caller owns it, with the people they picked as members. */
+chatRouter.post('/chat/groups', async (req, res) => {
+  const actor = actorOf(req);
+  if (!canJoinGroups(actor.role)) throw forbidden('Experts are not in groups');
+  const { title, memberIds } = parseBody(createGroupSchema, req);
+  const people = await groupPeople(memberIds.filter((id) => id !== actor.id));
+  if (!people.length) throw badRequest('Add at least one person', { issues: [{ path: 'memberIds', message: 'Add at least one person' }] });
+  const now = new Date();
+  const { id, system } = await prisma.$transaction(async (tx) => {
+    const group = await tx.conversation.create({
+      data: {
+        kind: 'group',
+        title,
+        createdById: actor.id,
+        lastMessageAt: now,
+        members: { create: [{ userId: actor.id, role: 'owner', lastReadAt: now }, ...people.map((p) => ({ userId: p.id, joinedAt: now }))] },
+      },
+      select: { id: true },
+    });
+    return { id: group.id, system: await postSystem(tx, group.id, actor.id, `created the group “${title}”`, now) };
+  });
+  const c = await prisma.conversation.findUniqueOrThrow({ where: { id }, include: conversationInclude });
+  emitToMembers(c, 'chat:message', toMessageDTO(system));
+  emitToMembers(c, 'chat:group-updated', { conversationId: id, removedUserIds: [] });
+  void sendWebPush(people.filter((p) => p.isActive).map((p) => p.id), {
+    title,
+    body: `${actor.nickname} added you to the group`,
+    url: `/chat/${id}`,
+    tag: `chat:${id}`,
+    kind: 'chat',
+  });
+  res.status(201).json((await toConversationDTOs(prisma, [c], actor.id))[0]);
+});
+
+chatRouter.get('/chat/groups/:id', async (req, res) => {
+  const actor = actorOf(req);
+  res.json(toGroupDTO(await loadGroup(actor, idParam(req)), actor.id));
+});
+
+/** Renames the group (owners and admins). */
+chatRouter.patch('/chat/groups/:id', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  assertRuns(c, actor);
+  const { title } = parseBody(updateGroupSchema, req);
+  if (title === c.title) return void (await groupChanged(res, actor, c.id, null));
+  const system = await prisma.$transaction(async (tx) => {
+    await tx.conversation.update({ where: { id: c.id }, data: { title } });
+    return postSystem(tx, c.id, actor.id, `renamed the group to “${title}”`);
+  });
+  await groupChanged(res, actor, c.id, system);
+});
+
+/** Sets or clears the group's picture (owners and admins). */
+async function setGroupPhoto(actor: Actor, c: ConversationRow, upload: { contentType: string; data: Buffer } | null) {
+  return prisma.$transaction(async (tx) => {
+    const photo = upload
+      ? await tx.photo.create({
+          data: { contentType: upload.contentType, data: new Uint8Array(upload.data), byteSize: upload.data.length, createdById: actor.id },
+          select: { id: true },
+        })
+      : null;
+    await tx.conversation.update({ where: { id: c.id }, data: { photoId: photo?.id ?? null } });
+    // The picture it replaces goes, so old ones never pile up.
+    if (c.photoId) await tx.photo.deleteMany({ where: { id: c.photoId } });
+    return postSystem(tx, c.id, actor.id, upload ? 'changed the group photo' : 'removed the group photo');
+  });
+}
+
+chatRouter.put('/chat/groups/:id/photo', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  assertRuns(c, actor);
+  const upload = decodeImageDataUrl(parseBody(photoUploadSchema, req).dataUrl, PHOTO_MAX_BYTES);
+  await groupChanged(res, actor, c.id, await setGroupPhoto(actor, c, upload));
+});
+
+chatRouter.delete('/chat/groups/:id/photo', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  assertRuns(c, actor);
+  if (!c.photoId) return void (await groupChanged(res, actor, c.id, null));
+  await groupChanged(res, actor, c.id, await setGroupPhoto(actor, c, null));
+});
+
+/** Adds people to the group (owners and admins); anyone already in it is skipped. */
+chatRouter.post('/chat/groups/:id/members', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  assertRuns(c, actor);
+  const { userIds } = parseBody(addGroupMembersSchema, req);
+  const fresh = await groupPeople(userIds.filter((id) => !isParticipant(c, id)));
+  if (!fresh.length) return void (await groupChanged(res, actor, c.id, null));
+  if (c.members.length + fresh.length > GROUP_MAX_MEMBERS) throw conflict(`A group holds at most ${GROUP_MAX_MEMBERS} people`);
+  const now = new Date();
+  const system = await prisma.$transaction(async (tx) => {
+    await tx.conversationMember.createMany({ data: fresh.map((p) => ({ conversationId: c.id, userId: p.id, joinedAt: now })), skipDuplicates: true });
+    return postSystem(tx, c.id, actor.id, `added ${namesOf(fresh)}`, now);
+  });
+  void sendWebPush(fresh.filter((p) => p.isActive).map((p) => p.id), {
+    title: c.title ?? 'Group',
+    body: `${actor.nickname} added you to the group`,
+    url: `/chat/${c.id}`,
+    tag: `chat:${c.id}`,
+    kind: 'chat',
+  });
+  await groupChanged(res, actor, c.id, system);
+});
+
+/**
+ * Takes someone out of the group: owners anyone, admins plain members. Taking
+ * yourself out is leaving; an owner who leaves hands the group to the longest-
+ * standing admin, or member, and the last one out deletes it.
+ */
+chatRouter.delete('/chat/groups/:id/members/:userId', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  const userId = idParam(req, 'userId');
+  const target = c.members.find((m) => m.userId === userId);
+  if (!target) throw notFound('Member');
+  const mine = roleIn(c, actor.id)!;
+  const leaving = target.userId === actor.id;
+  if (!leaving && !canRemoveFromGroup(mine, target.role)) {
+    throw forbidden(mine === 'admin' ? 'Admins take out members only; the owner takes out admins' : 'Only the group’s owner and admins take people out');
+  }
+  const rest = c.members.filter((m) => m.userId !== target.userId);
+  if (!rest.length) {
+    await deleteGroup(c);
+    return void (await groupChanged(res, actor, c.id, null, [target.userId]));
+  }
+  const system = await prisma.$transaction(async (tx) => {
+    await tx.conversationMember.delete({ where: { conversationId_userId: { conversationId: c.id, userId: target.userId } } });
+    if (target.role === 'owner') {
+      // Members come owner first, then admins, then the rest, each by when they joined.
+      const heir = rest.find((m) => m.role === 'admin') ?? rest[0]!;
+      await tx.conversationMember.update({ where: { conversationId_userId: { conversationId: c.id, userId: heir.userId } }, data: { role: 'owner' } });
+      return postSystem(tx, c.id, actor.id, `left the group; ${heir.user.nickname} owns it now`);
+    }
+    return postSystem(tx, c.id, actor.id, leaving ? 'left the group' : `removed ${target.user.nickname}`);
+  });
+  await groupChanged(res, actor, c.id, system, [target.userId]);
+});
+
+/** The owner makes a member an admin, or an admin a plain member again. */
+chatRouter.put('/chat/groups/:id/members/:userId/role', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  if (roleIn(c, actor.id) !== 'owner') throw forbidden('Only the group’s owner chooses its admins');
+  const target = c.members.find((m) => m.userId === idParam(req, 'userId'));
+  if (!target) throw notFound('Member');
+  if (target.role === 'owner') throw conflict('The owner is the owner');
+  const { role } = parseBody(groupMemberRoleSchema, req);
+  if (role === target.role) return void (await groupChanged(res, actor, c.id, null));
+  const system = await prisma.$transaction(async (tx) => {
+    await tx.conversationMember.update({ where: { conversationId_userId: { conversationId: c.id, userId: target.userId } }, data: { role } });
+    return postSystem(tx, c.id, actor.id, role === 'admin' ? `made ${target.user.nickname} an admin` : `removed ${target.user.nickname} as an admin`);
+  });
+  await groupChanged(res, actor, c.id, system);
+});
+
+/** Deletes a group with everything in it. */
+async function deleteGroup(c: ConversationRow) {
+  await prisma.$transaction(async (tx) => {
+    await tx.conversation.delete({ where: { id: c.id } });
+    if (c.photoId) await tx.photo.deleteMany({ where: { id: c.photoId } });
+  });
+}
+
+/** The owner deletes the group, for everyone. */
+chatRouter.delete('/chat/groups/:id', async (req, res) => {
+  const actor = actorOf(req);
+  const c = await loadGroup(actor, idParam(req));
+  if (roleIn(c, actor.id) !== 'owner') throw forbidden('Only the group’s owner deletes it');
+  await deleteGroup(c);
+  await groupChanged(res, actor, c.id, null, memberIdsOf(c));
 });
 
 // --- Messages ------------------------------------------------------------------------
@@ -415,24 +745,27 @@ async function toObservedChatDTOs(rows: ConversationRow[]): Promise<ObservedChat
   const ids = rows.map((r) => r.id);
   const [lastMessages, counts] = await Promise.all([
     prisma.$queryRaw<
-      Array<{ id: string; conversation_id: string; sender_id: string; body: string; kind: ChatMessageDTO['kind']; image_id: string | null; deleted_at: Date | null; created_at: Date }>
+      Array<{ id: string; conversation_id: string; sender_id: string; sender_nickname: string; body: string; kind: ChatMessageDTO['kind']; image_id: string | null; deleted_at: Date | null; created_at: Date }>
     >`
-      SELECT DISTINCT ON (conversation_id) id, conversation_id, sender_id, body, kind, image_id, deleted_at, created_at
-      FROM chat_messages WHERE conversation_id = ANY(${ids}::uuid[])
-      ORDER BY conversation_id, created_at DESC, id DESC`,
+      SELECT DISTINCT ON (m.conversation_id) m.id, m.conversation_id, m.sender_id, u.nickname AS sender_nickname, m.body, m.kind, m.image_id, m.deleted_at, m.created_at
+      FROM chat_messages m JOIN users u ON u.id = m.sender_id
+      WHERE m.conversation_id = ANY(${ids}::uuid[])
+      ORDER BY m.conversation_id, m.created_at DESC, m.id DESC`,
     prisma.chatMessage.groupBy({ by: ['conversationId'], where: { conversationId: { in: ids } }, _count: { _all: true } }),
   ]);
   return rows.map((c) => {
     const last = lastMessages.find((m) => m.conversation_id === c.id);
     return {
       id: c.id,
-      people: [toUserRef(c.userA), toUserRef(c.userB)] as [UserRef, UserRef],
+      title: isDirect(c) ? null : c.title,
+      people: isDirect(c) ? [toUserRef(c.userA), toUserRef(c.userB)] : c.members.map((m) => toUserRef(m.user)),
       lastMessage: last
         ? {
             id: last.id,
             body: last.body,
             kind: last.kind,
             senderId: last.sender_id,
+            senderNickname: last.sender_nickname,
             hasImage: last.image_id !== null,
             deleted: last.deleted_at !== null,
             createdAt: iso(last.created_at),
@@ -447,9 +780,10 @@ async function toObservedChatDTOs(rows: ConversationRow[]): Promise<ObservedChat
 chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   const actor = actorOf(req);
   const c = await loadConversation(actor, idParam(req));
-  if (!canSendIn(c)) throw forbidden('This chat is closed: the other person is no longer available');
-  const { body: text, image, scheduling } = parseBody(chatMessageSchema, req);
-  const other = otherOf(c, actor.id);
+  if (!canSendIn(c, actor.id)) {
+    throw forbidden(isDirect(c) ? 'This chat is closed: the other person is no longer available' : 'You can no longer write in this group');
+  }
+  const { body: text, image, scheduling, replyToId } = parseBody(chatMessageSchema, req);
   if (modeOf(c) === 'scheduling') {
     if (!scheduling) throw forbidden('Between an Expert and the team, only the scheduling messages can be sent');
     const from = SCHEDULING_TEMPLATES[scheduling.key].from;
@@ -457,8 +791,16 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
   } else if (scheduling) {
     throw badRequest('Scheduling messages are only for chats between an Expert and the team');
   }
+  if (replyToId) {
+    const quoted = await prisma.chatMessage.findUnique({ where: { id: replyToId }, select: { conversationId: true, kind: true } });
+    if (!quoted || quoted.conversationId !== c.id || quoted.kind === 'system') {
+      throw badRequest('Reply to a message in this chat', { issues: [{ path: 'replyToId', message: 'Not a message in this chat' }] });
+    }
+  }
   // A scheduling message is kept as the sender reads it; each reader sees it in their own zone.
   const body = scheduling ? renderSchedulingMessage(scheduling, displayZoneFor(actor))! : text;
+  // In a group, "@pixel" calls Pixel in particular.
+  const mentionIds = isDirect(c) ? [] : mentionedIn(body, c.members.filter((m) => m.userId !== actor.id).map((m) => m.user));
   const upload = image ? decodeImageDataUrl(image.dataUrl, CHAT_IMAGE_MAX_BYTES) : null;
   const now = new Date();
   const message = await prisma.$transaction(async (tx) => {
@@ -483,30 +825,43 @@ chatRouter.post('/chat/conversations/:id/messages', async (req, res) => {
         senderId: actor.id,
         body,
         imageId: stored?.id ?? null,
+        replyToId: replyToId ?? null,
+        mentionIds,
         ...(scheduling ? { scheduling: { key: scheduling.key, params: scheduling.params } as Prisma.InputJsonObject } : {}),
         createdAt: now,
       },
       include: messageInclude,
     });
-    // Sending counts as reading everything before it.
-    await tx.conversation.update({
-      where: { id: c.id },
-      data: { lastMessageAt: now, ...(c.userAId === actor.id ? { userALastReadAt: now } : { userBLastReadAt: now }) },
-    });
+    await tx.conversation.update({ where: { id: c.id }, data: { lastMessageAt: now } });
     return m;
   });
+  // Sending counts as reading everything before it.
+  await readMarker(c, actor.id, now);
   const dto = toMessageDTO(message);
-  emitToBoth(c, 'chat:message', dto);
-  // The notification reads in the recipient's zone.
-  const shown = scheduling ? (renderSchedulingMessage(scheduling, displayZoneFor({ role: other.role as Role, timeZone: other.timeZone })) ?? body) : body;
-  void sendWebPush([other.id], {
-    title: actor.nickname,
-    body: image ? `📷 Photo${shown ? `: ${shown.length > 160 ? `${shown.slice(0, 157)}…` : shown}` : ''}` : shown.length > 180 ? `${shown.slice(0, 177)}…` : shown,
-    url: `/chat/${c.id}`,
-    // One notification per chat: a newer message replaces the older one.
-    tag: `chat:${c.id}`,
-    kind: 'chat',
-  });
+  emitToMembers(c, 'chat:message', dto);
+
+  const clipTo = (t: string, n: number) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+  const said = (t: string) => (image ? `📷 Photo${t ? `: ${clipTo(t, 160)}` : ''}` : clipTo(t, 180));
+  if (isDirect(c)) {
+    // The notification reads in the recipient's zone.
+    const other = otherOf(c, actor.id);
+    const shown = scheduling ? (renderSchedulingMessage(scheduling, displayZoneFor({ role: other.role as Role, timeZone: other.timeZone })) ?? body) : body;
+    void sendWebPush([other.id], {
+      title: actor.nickname,
+      body: said(shown),
+      url: `/chat/${c.id}`,
+      // One notification per chat: a newer message replaces the older one.
+      tag: `chat:${c.id}`,
+      kind: 'chat',
+    });
+  } else {
+    const others = c.members.filter((m) => m.userId !== actor.id && m.user.isActive).map((m) => m.userId);
+    const rest = others.filter((id) => !mentionIds.includes(id));
+    const push = { url: `/chat/${c.id}`, tag: `chat:${c.id}`, kind: 'chat' as const };
+    if (rest.length) void sendWebPush(rest, { ...push, title: c.title ?? 'Group', body: `${actor.nickname}: ${said(body)}` });
+    const called = others.filter((id) => mentionIds.includes(id));
+    if (called.length) void sendWebPush(called, { ...push, title: `${actor.nickname} mentioned you in ${c.title ?? 'a group'}`, body: said(body) });
+  }
   res.status(201).json(dto);
 });
 
@@ -531,6 +886,7 @@ const startingRings = new Set<string>();
 
 const ringDTO = ({ timer: _timer, userAId: _a, userBId: _b, ...dto }: Ring): ChatRingDTO => dto;
 const ringIn = (conversationId: string) => [...rings.values()].find((r) => r.conversationId === conversationId);
+const inRing = (r: Ring, userId: string) => r.userAId === userId || r.userBId === userId;
 
 function endRing(ring: Ring, reason: ChatRingEndReason) {
   if (!rings.delete(ring.id)) return;
@@ -547,8 +903,8 @@ export function stopAllRings() {
 /** Rings the other person; anyone who may write in the chat may ring, one ring at a time. */
 chatRouter.post('/chat/conversations/:id/ring', async (req, res) => {
   const actor = actorOf(req);
-  const c = await loadConversation(actor, idParam(req));
-  if (!canSendIn(c)) throw forbidden('This chat is closed: the other person is no longer available');
+  const c = await loadDirect(actor, idParam(req), 'Ringing');
+  if (!canSendIn(c, actor.id)) throw forbidden('This chat is closed: the other person is no longer available');
   if (ringIn(c.id) || startingRings.has(c.id)) throw conflict('This chat is already ringing');
   startingRings.add(c.id);
   try {
@@ -597,7 +953,7 @@ chatRouter.post('/chat/conversations/:id/ring', async (req, res) => {
 /** The rings sounding now that the caller is in, either side. */
 chatRouter.get('/chat/rings', (req, res) => {
   const actor = actorOf(req);
-  res.json([...rings.values()].filter((r) => isParticipant(r, actor.id)).map(ringDTO));
+  res.json([...rings.values()].filter((r) => inRing(r, actor.id)).map(ringDTO));
 });
 
 /**
@@ -609,7 +965,7 @@ chatRouter.post('/chat/rings/:id/end', (req, res) => {
   const { opened } = parseBody(endRingSchema, req);
   const ring = rings.get(idParam(req) ?? '');
   if (ring) {
-    if (!isParticipant(ring, actor.id)) throw notFound('Ring');
+    if (!inRing(ring, actor.id)) throw notFound('Ring');
     endRing(ring, ring.to.id === actor.id ? (opened ? 'opened' : 'closed') : 'cancelled');
   }
   res.status(204).end();
@@ -621,23 +977,23 @@ chatRouter.post('/chat/conversations/:id/read', async (req, res) => {
   const readAt = new Date();
   // Never move the marker backwards (e.g. a slow request after a newer one).
   const current = myLastReadAt(c, actor.id);
-  if (!current || current < readAt) {
-    await prisma.conversation.update({
-      where: { id: c.id },
-      data: c.userAId === actor.id ? { userALastReadAt: readAt } : { userBLastReadAt: readAt },
-    });
-  }
-  emitToBoth(c, 'chat:read', { conversationId: c.id, userId: actor.id, readAt: iso(readAt) });
+  if (!current || current < readAt) await readMarker(c, actor.id, readAt);
+  // "Seen" is for one-to-one chats; in a group only the reader's other screens need to know.
+  const event = { conversationId: c.id, userId: actor.id, readAt: iso(readAt) };
+  if (isDirect(c)) emitToBoth(c, 'chat:read', event);
+  else emitToUser(actor.id, 'chat:read', event);
   res.status(204).end();
 });
 
 /**
  * Erases the whole history with someone, for both of them: every message, picture and
  * reaction. Tasks that came from this chat are kept, each with the message's words as its title.
+ * In a group only its owner clears it, for everyone.
  */
 chatRouter.delete('/chat/conversations/:id/history', async (req, res) => {
   const actor = actorOf(req);
   const c = await loadConversation(actor, idParam(req));
+  if (!isDirect(c) && roleIn(c, actor.id) !== 'owner') throw forbidden('Only the group’s owner clears its history');
   await prisma.$transaction(async (tx) => {
     const todos = await tx.todo.findMany({
       where: { conversationId: c.id },
@@ -656,12 +1012,14 @@ chatRouter.delete('/chat/conversations/:id/history', async (req, res) => {
     }
     await tx.chatMessage.deleteMany({ where: { conversationId: c.id } });
     await tx.chatImage.deleteMany({ where: { conversationId: c.id } });
+    // A group stays in its members' lists, even with nothing in it.
     await tx.conversation.update({
       where: { id: c.id },
-      data: { lastMessageAt: null, userALastReadAt: null, userBLastReadAt: null },
+      data: { lastMessageAt: isDirect(c) ? null : new Date(), userALastReadAt: null, userBLastReadAt: null },
     });
+    if (!isDirect(c)) await tx.conversationMember.updateMany({ where: { conversationId: c.id }, data: { lastReadAt: null } });
   });
-  emitToBoth(c, 'chat:cleared', { conversationId: c.id });
+  emitToMembers(c, 'chat:cleared', { conversationId: c.id });
   res.status(204).end();
 });
 
@@ -672,7 +1030,7 @@ chatRouter.get('/chat/images/:id', async (req, res) => {
   const image = id
     ? await prisma.chatImage.findUnique({
         where: { id },
-        select: { contentType: true, data: true, conversation: { select: { userAId: true, userBId: true } } },
+        select: { contentType: true, data: true, conversation: { select: { kind: true, userAId: true, userBId: true, members: { select: { userId: true } } } } },
       })
     : null;
   if (!image || !isParticipant(image.conversation, actor.id)) throw notFound('Picture');
@@ -700,9 +1058,12 @@ async function loadMessageForReaction(actor: Actor, id: string | null) {
 chatRouter.delete('/chat/messages/:id', async (req, res) => {
   const actor = actorOf(req);
   const m = await loadMessageForReaction(actor, idParam(req));
-  if (m.senderId !== actor.id) throw forbidden('You can only delete your own messages');
+  // A group's owner and admins also take down anyone's message.
+  const moderates = !isDirect(m.conversation) && runsGroup(roleIn(m.conversation, actor.id));
+  if (m.senderId !== actor.id && !moderates) throw forbidden('You can only delete your own messages');
   if (m.deletedAt) throw conflict('This message is already deleted');
   if (m.kind === 'ring') throw conflict('A ring stays in the chat');
+  if (m.kind === 'system') throw conflict('What happened in a group stays in it');
   if (m.kind !== 'text') throw conflict('A task’s done reply cannot be deleted');
   if (m.todo) throw conflict('This message is a task. Remove the task first.');
   const updated = await prisma.$transaction(async (tx) => {
@@ -717,7 +1078,7 @@ chatRouter.delete('/chat/messages/:id', async (req, res) => {
     return message;
   });
   const dto = toMessageDTO(updated);
-  emitToBoth(m.conversation, 'chat:message-updated', dto);
+  emitToMembers(m.conversation, 'chat:message-updated', dto);
   res.json(dto);
 });
 
@@ -727,7 +1088,8 @@ chatRouter.post('/chat/messages/:id/reactions', async (req, res) => {
   const m = await loadMessageForReaction(actor, idParam(req));
   const { emoji } = parseBody(chatReactionSchema, req);
   if (m.deletedAt) throw conflict('This message was deleted');
-  if (!canSendIn(m.conversation)) throw forbidden('This chat is closed: the other person is no longer available');
+  if (m.kind === 'system') throw conflict('What happened in a group takes no reactions');
+  if (!canSendIn(m.conversation, actor.id)) throw forbidden('This chat is closed: the other person is no longer available');
   const key = { messageId_userId_emoji: { messageId: m.id, userId: actor.id, emoji } };
   const existing = await prisma.chatReaction.findUnique({ where: key });
   if (existing) {
@@ -741,7 +1103,7 @@ chatRouter.post('/chat/messages/:id/reactions', async (req, res) => {
     });
   }
   const dto = toMessageDTO(await prisma.chatMessage.findUniqueOrThrow({ where: { id: m.id }, include: messageInclude }));
-  emitToBoth(m.conversation, 'chat:message-updated', dto);
+  emitToMembers(m.conversation, 'chat:message-updated', dto);
   res.json(dto);
 });
 
@@ -798,6 +1160,7 @@ async function loadTodo(actor: Actor, id: string | null) {
 chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
   const actor = actorOf(req);
   const m = await loadMessageInMyChat(actor, idParam(req));
+  if (!isDirect(m.conversation)) throw badRequest('Tasks come from one-to-one chats');
   const assignee = otherOf(m.conversation, actor.id);
   if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
   if (m.kind !== 'text') throw conflict('Only regular messages can become tasks');
@@ -1330,7 +1693,7 @@ chatRouter.post('/todos/:id/done', async (req, res) => {
     return { todo, message, deliver };
   });
   deliver();
-  if (message && existing.conversation) emitToBoth(existing.conversation, 'chat:message', toMessageDTO(message));
+  if (message && existing.conversation) emitToMembers(existing.conversation, 'chat:message', toMessageDTO(message));
   const dto = toTodoDTO(todo);
   emitTodo(todo, dto);
   res.json(dto);

@@ -140,11 +140,23 @@ export function useReact(message: ChatMessageDTO) {
 }
 
 /** Reactions under a message: each emoji with its count; yours are highlighted and click to undo. */
-export function ReactionChips({ message, conversation, align }: { message: ChatMessageDTO; conversation: ConversationDTO; align: 'left' | 'right' }) {
+export function ReactionChips({
+  message,
+  conversation,
+  align,
+  people = [],
+}: {
+  message: ChatMessageDTO;
+  conversation: ConversationDTO;
+  align: 'left' | 'right';
+  /** A group's members, to name who reacted. */
+  people?: ReadonlyArray<{ id: string; nickname: string }>;
+}) {
   const me = useMe();
   const react = useReact(message);
   if (!message.reactions.length) return null;
-  const name = (id: string) => (id === me.id ? 'You' : id === conversation.other.id ? conversation.other.nickname : 'Someone');
+  const name = (id: string) =>
+    id === me.id ? 'You' : id === conversation.other?.id ? conversation.other.nickname : (people.find((p) => p.id === id)?.nickname ?? 'Someone');
   return (
     <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" justifyContent={align === 'right' ? 'flex-end' : 'flex-start'} sx={{ mt: 0.4, mx: 0.5 }}>
       {message.reactions.map((r) => {

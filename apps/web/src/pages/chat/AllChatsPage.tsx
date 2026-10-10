@@ -84,18 +84,25 @@ function ChatList({ chats, activeId, onOpen }: { chats: ObservedChatDTO[]; activ
     <Card sx={{ height: PANEL_HEIGHT, minHeight: 360, overflow: 'auto' }}>
       <List disablePadding>
         {chats.map((c) => {
-          const [a, b] = c.people;
+          const shown = c.people.slice(0, 2);
+          const title = c.title ?? c.people.map((p) => p.nickname).join(' & ');
           const last = c.lastMessage;
           return (
             <ListItemButton key={c.id} selected={c.id === activeId} onClick={() => onOpen(c.id)} sx={{ alignItems: 'flex-start', py: 1.25 }}>
               <Stack direction="row" spacing={-0.75} sx={{ mr: 1.5, pt: 0.25 }}>
-                <UserAvatar avatarId={a.avatarId} photoId={a.photoId} label={a.nickname} size={28} />
-                <UserAvatar avatarId={b.avatarId} photoId={b.photoId} label={b.nickname} size={28} />
+                {shown.map((p) => (
+                  <UserAvatar key={p.id} avatarId={p.avatarId} photoId={p.photoId} label={p.nickname} size={28} />
+                ))}
               </Stack>
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 <Stack direction="row" justifyContent="space-between" spacing={1}>
                   <Typography variant="body2" fontWeight={550} noWrap>
-                    {a.nickname} &amp; {b.nickname}
+                    {title}
+                    {c.title && (
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        {' '}· {c.people.length} people
+                      </Typography>
+                    )}
                   </Typography>
                   {last && (
                     <Typography variant="caption" color="text.secondary" noWrap>
@@ -119,7 +126,7 @@ function ChatList({ chats, activeId, onOpen }: { chats: ObservedChatDTO[]; activ
 }
 
 const preview = (m: NonNullable<ObservedChatDTO['lastMessage']>) =>
-  m.deleted ? 'Message deleted' : m.kind === 'ring' ? '🔔 Rang' : m.body || (m.hasImage ? 'Picture' : '');
+  m.deleted ? 'Message deleted' : m.kind === 'ring' ? '🔔 Rang' : m.kind === 'system' ? `${m.senderNickname} ${m.body}` : m.body || (m.hasImage ? 'Picture' : '');
 
 /** One chat, oldest at the top, with "Load older" above it. Read only. */
 function Transcript({ chat }: { chat: ObservedChatDTO }) {
@@ -136,9 +143,12 @@ function Transcript({ chat }: { chat: ObservedChatDTO }) {
   return (
     <Card sx={{ height: PANEL_HEIGHT, minHeight: 360, display: 'flex', flexDirection: 'column' }}>
       <Box sx={{ p: 1.75 }}>
-        <Typography variant="subtitle1">
-          {chat.people[0].nickname} &amp; {chat.people[1].nickname}
-        </Typography>
+        <Typography variant="subtitle1">{chat.title ?? chat.people.map((p) => p.nickname).join(' & ')}</Typography>
+        {chat.title && (
+          <Typography variant="caption" color="text.secondary" component="div">
+            {chat.people.map((p) => p.nickname).join(', ')}
+          </Typography>
+        )}
         <Typography variant="caption" color="text.secondary">
           {chat.messageCount} message{chat.messageCount === 1 ? '' : 's'} · started {relativeTime(chat.createdAt)}
         </Typography>

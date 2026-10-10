@@ -28,8 +28,61 @@ export function canChat(a: { id: string; role: Role }, b: { id: string; role: Ro
  * `todo_done` is the reply posted when the assignee marks a to-do done; `ring`
  * records that one person rang the other (see RING_SECONDS).
  */
-export const CHAT_MESSAGE_KINDS = ['text', 'todo_done', 'ring'] as const;
+export const CHAT_MESSAGE_KINDS = ['text', 'todo_done', 'ring', 'system'] as const;
 export type ChatMessageKind = (typeof CHAT_MESSAGE_KINDS)[number];
+
+// --- Groups --------------------------------------------------------------------------
+
+/**
+ * A chat is one-to-one (`direct`) or a `group`: a title, a picture, and any
+ * number of people. Groups are for everyone but Experts, who keep their
+ * one-to-one chats. A `system` message records what happened in a group
+ * ("created the group", "added Pixel", "left"); nobody sends one.
+ */
+export const CONVERSATION_KINDS = ['direct', 'group'] as const;
+export type ConversationKind = (typeof CONVERSATION_KINDS)[number];
+
+/**
+ * The group's creator is its owner. Admins add and remove members, rename it,
+ * change its picture and delete anyone's message; the owner also makes and
+ * unmakes admins and deletes the group.
+ */
+export const GROUP_ROLES = ['owner', 'admin', 'member'] as const;
+export type GroupRole = (typeof GROUP_ROLES)[number];
+
+export const GROUP_TITLE_MAX = 64;
+export const GROUP_MAX_MEMBERS = 200;
+
+/** Who may be in a group, and so start one: everyone but Experts. */
+export const canJoinGroups = (role: Role): boolean => role !== 'expert';
+
+/** Owners and admins run the group. */
+export const runsGroup = (role: GroupRole | null | undefined): boolean => role === 'owner' || role === 'admin';
+
+/**
+ * Who may take someone else out of a group: the owner anyone, an admin plain
+ * members only. Leaving is always one's own choice.
+ */
+export const canRemoveFromGroup = (actor: GroupRole, target: GroupRole): boolean =>
+  actor === 'owner' ? target !== 'owner' : actor === 'admin' && target === 'member';
+
+const MENTION_RE = /@([\p{L}\p{N}_.-]+)/gu;
+
+/**
+ * The people a message @mentions, among those given: "@pixel" names the person
+ * whose nickname is pixel, whatever the case. A dot or dash ending a sentence
+ * ("thanks @pixel.") is not part of the name.
+ */
+export function mentionedIn(body: string, people: ReadonlyArray<{ id: string; nickname: string }>): string[] {
+  const byName = new Map(people.map((p) => [p.nickname.toLowerCase(), p.id]));
+  const found = new Set<string>();
+  for (const m of body.matchAll(MENTION_RE)) {
+    const name = m[1]!.toLowerCase();
+    const id = byName.get(name) ?? byName.get(name.replace(/[.-]+$/, ''));
+    if (id) found.add(id);
+  }
+  return [...found];
+}
 
 /**
  * Ringing is no call: it plays a tune on the other person's screen until they

@@ -50,6 +50,18 @@ enum ChatMessageKind {
   text
   todo_done
   ring
+  system
+}
+
+enum ConversationKind {
+  direct
+  group
+}
+
+enum GroupRole {
+  owner
+  admin
+  member
 }
 
 /// open → done (the taker ticks it) → completed (the giver confirms).
@@ -153,6 +165,8 @@ model User {
   createdBlocks     ScheduleBlock[]       @relation("BlockCreatedBy")
   conversationsA    Conversation[]        @relation("ConversationUserA")
   conversationsB    Conversation[]        @relation("ConversationUserB")
+  groupsCreated     Conversation[]        @relation("ConversationCreatedBy")
+  groupMemberships  ConversationMember[]
   chatMessages      ChatMessage[]         @relation("ChatMessageSender")
   assignedTodos     Todo[]                @relation("TodoAssignee")
   createdTodos      Todo[]                @relation("TodoCreatedBy")
@@ -481,6 +495,7 @@ model Photo {
 
   createdBy User     @relation("PhotoCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
   user      User?    @relation("UserPhoto")
+  group     Conversation? @relation("ConversationPhoto")
   profile   Profile? @relation("ProfilePhoto")
 
   @@map("photos")
@@ -536,24 +551,52 @@ model ProfilePlatformStatus {
 }
 
 /// A one-to-one chat. The pair is stored once with user_a_id < user_b_id.
+/// A chat: one-to-one between `userA` and `userB` (the two in id order), or a
+/// group with a title and its `members`. Groups have neither user column.
 model Conversation {
-  id              String    @id @default(uuid()) @db.Uuid
-  userAId         String    @map("user_a_id") @db.Uuid
-  userBId         String    @map("user_b_id") @db.Uuid
-  userALastReadAt DateTime? @map("user_a_last_read_at") @db.Timestamptz(3)
-  userBLastReadAt DateTime? @map("user_b_last_read_at") @db.Timestamptz(3)
-  lastMessageAt   DateTime? @map("last_message_at") @db.Timestamptz(3)
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  id              String           @id @default(uuid()) @db.Uuid
+  kind            ConversationKind @default(direct)
+  userAId         String?          @map("user_a_id") @db.Uuid
+  userBId         String?          @map("user_b_id") @db.Uuid
+  userALastReadAt DateTime?        @map("user_a_last_read_at") @db.Timestamptz(3)
+  userBLastReadAt DateTime?        @map("user_b_last_read_at") @db.Timestamptz(3)
+  /// A group's name.
+  title           String?
+  /// A group's picture.
+  photoId         String?          @unique @map("photo_id") @db.Uuid
+  /// Who started the group.
+  createdById     String?          @map("created_by") @db.Uuid
+  lastMessageAt   DateTime?        @map("last_message_at") @db.Timestamptz(3)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  userA    User          @relation("ConversationUserA", fields: [userAId], references: [id], onDelete: Cascade)
-  userB    User          @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
-  messages ChatMessage[]
-  todos    Todo[]
-  images   ChatImage[]
+  userA     User?                @relation("ConversationUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User?                @relation("ConversationUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  photo     Photo?               @relation("ConversationPhoto", fields: [photoId], references: [id], onDelete: SetNull)
+  createdBy User?                @relation("ConversationCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  members   ConversationMember[]
+  messages  ChatMessage[]
+  todos     Todo[]
+  images    ChatImage[]
 
   @@unique([userAId, userBId])
   @@index([userBId])
   @@map("conversations")
+}
+
+/// Someone in a group, with their place in it and how far they have read.
+model ConversationMember {
+  conversationId String    @map("conversation_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  role           GroupRole @default(member)
+  lastReadAt     DateTime? @map("last_read_at") @db.Timestamptz(3)
+  joinedAt       DateTime  @default(now()) @map("joined_at") @db.Timestamptz(3)
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, userId])
+  @@index([userId])
+  @@map("conversation_members")
 }
 
 model ChatMessage {
@@ -568,6 +611,8 @@ model ChatMessage {
   /// One of the set scheduling sentences ({ key, params }), the only kind of message
   /// between an Expert and the team; `body` holds it written out in the sender's zone.
   scheduling     Json?
+  /// The people the message @mentions, in a group.
+  mentionIds     String[]        @default([]) @map("mention_ids") @db.Uuid
   /// Set when the sender deleted the message; its text and picture are erased.
   deletedAt      DateTime?       @map("deleted_at") @db.Timestamptz(3)
   createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)

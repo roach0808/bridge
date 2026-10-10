@@ -3,7 +3,7 @@ import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
 import { schedulingMessageSchema } from './scheduling';
 import { PAYEES } from './payouts';
-import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, TODO_IMPORTANCES, TODO_STATUSES, TODO_URGENCIES } from './chat';
+import { CHAT_IMAGE_MAX_BYTES, CHAT_IMAGE_MAX_SIDE, CHAT_MESSAGE_MAX, GROUP_MAX_MEMBERS, GROUP_TITLE_MAX, TODO_IMPORTANCES, TODO_STATUSES, TODO_URGENCIES } from './chat';
 import { ROLES } from './roles';
 import {
   BLOCK_KINDS,
@@ -411,12 +411,27 @@ export const chatMessageSchema = z
       .optional(),
     /** One of the set sentences: the only kind of message between an Expert and the team (scheduling.ts). */
     scheduling: schedulingMessageSchema.optional(),
+    /** The message this one answers, quoted above it. */
+    replyToId: uuid.optional(),
   })
   .refine((m) => m.body !== '' || m.image || m.scheduling, { message: 'Message is required', path: ['body'] })
-  .refine((m) => !m.scheduling || (m.body === '' && !m.image), {
-    message: 'A scheduling message goes on its own, without text or a picture',
+  .refine((m) => !m.scheduling || (m.body === '' && !m.image && !m.replyToId), {
+    message: 'A scheduling message goes on its own, without text, a picture or a reply',
     path: ['scheduling'],
   });
+
+const groupTitle = z.string().trim().min(1, 'Name the group').max(GROUP_TITLE_MAX, `At most ${GROUP_TITLE_MAX} characters`);
+const memberIds = z
+  .array(uuid)
+  .min(1, 'Add at least one person')
+  .max(GROUP_MAX_MEMBERS - 1, `A group holds at most ${GROUP_MAX_MEMBERS} people`)
+  .transform((ids) => [...new Set(ids)]);
+/** A new group: its name and the people in it besides the creator. */
+export const createGroupSchema = z.object({ title: groupTitle, memberIds });
+export const updateGroupSchema = z.object({ title: groupTitle });
+export const addGroupMembersSchema = z.object({ userIds: memberIds });
+/** The owner makes someone an admin, or a plain member again. */
+export const groupMemberRoleSchema = z.object({ role: z.enum(['admin', 'member']) });
 /** One emoji; sending one you already reacted with takes it back. */
 export const chatReactionSchema = z.object({
   emoji: z
