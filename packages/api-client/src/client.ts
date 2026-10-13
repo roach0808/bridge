@@ -10,6 +10,7 @@ import type {
   SchedulingMessage,
   DbDumpDTO,
   TodoDTO,
+  TodoNoteDTO,
   TodoStatus,
   BankDTO,
   BankInput,
@@ -319,6 +320,11 @@ export function createApiClient(options: ClientOptions) {
       assignees: () => get<UserRef[]>('/todos/assignees'),
       create: (input: { assigneeId: string; title: string } & UpdateTodoInput & Partial<TodoQuadrant>) => post<TodoDTO>('/todos', input),
       remove: (id: string) => del<void>(`/todos/${enc(id)}`),
+      /** A task's notes, oldest first. */
+      notes: (id: string) => get<TodoNoteDTO[]>(`/todos/${enc(id)}/notes`),
+      addNote: (id: string, body: string) => post<TodoNoteDTO>(`/todos/${enc(id)}/notes`, { body }),
+      editNote: (id: string, noteId: string, body: string) => patch<TodoNoteDTO>(`/todos/${enc(id)}/notes/${enc(noteId)}`, { body }),
+      removeNote: (id: string, noteId: string) => del<void>(`/todos/${enc(id)}/notes/${enc(noteId)}`),
       /** Changes a task after it was given: wording, dates, deliverable, what it waits for. */
       update: (id: string, input: UpdateTodoInput) => patch<TodoDTO>(`/todos/${enc(id)}`, input),
       /** The owner says where the work stands. `blocked` must say why. */

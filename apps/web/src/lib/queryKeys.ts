@@ -55,6 +55,7 @@ export const qk = {
     all: ['todos'] as const,
     board: (status: string) => ['todos', 'board', status] as const,
     list: (params?: object) => ['todos', 'list', params ?? {}] as const,
+    notes: (id: string) => ['todos', 'notes', id] as const,
   },
   stats: {
     all: ['stats'] as const,

@@ -315,7 +315,7 @@ describe('to-dos', () => {
     expectError(await a2.post(`/todos/${todo.id}/done`), 409);
   });
 
-  it('only the assignee marks it done; the giver can remove it while open', async () => {
+  it('only the assignee marks it done; the Founder can remove it at any stage', async () => {
     const { founder, id } = await founderChatWith(fx.e2);
     const msg = (await send(founder, id, 'Block out next Monday')).body;
     const todo = (await founder.post(`/chat/messages/${msg.id}/todo`)).body;
@@ -329,7 +329,8 @@ describe('to-dos', () => {
     const done = await (await as(fx.e2)).post(`/todos/${again.id}/done`);
     expect(done.body.doneNote).toBeNull();
     expect((await founder.get(`/chat/conversations/${id}/messages`)).body.items.at(-1)).toMatchObject({ kind: 'todo_done', body: 'Done' });
-    expectError(await founder.delete(`/chat/messages/${msg.id}/todo`), 409);
+    // Even while it waits for confirmation.
+    expect((await founder.delete(`/chat/messages/${msg.id}/todo`)).status).toBe(204);
   });
 
   it('status filter and ordering: open first', async () => {
@@ -412,8 +413,10 @@ describe('a task you give yourself', () => {
     expect(done.body.confirmedAt).not.toBeNull();
     expect((await a1.get('/notifications')).body.items).toEqual([]);
 
-    // It can be put back on the list, and cleared away.
+    // It can be put back on the list, and cleared away once it is completed again.
     expect((await a1.post(`/todos/${res.body.id}/reopen`)).body.status).toBe('open');
+    expectError(await a1.delete(`/todos/${res.body.id}`), 409);
+    expect((await a1.post(`/todos/${res.body.id}/done`)).body.status).toBe('completed');
     expect((await a1.delete(`/todos/${res.body.id}`)).status).toBe(204);
   });
 
@@ -620,10 +623,10 @@ describe('tasks without a chat message', () => {
     expect(items.at(-1)).toMatchObject({ kind: 'todo_done', body: 'Rebooked for Wednesday' });
   });
 
-  it('the giver removes an open task; nobody else can', async () => {
+  it('only the Founder removes a task that is not completed', async () => {
     const founder = await as(fx.founder);
     const todo = (await founder.post('/todos', { assigneeId: fx.m2.id, title: 'Plan the offsite' })).body;
-    expectError(await (await as(fx.m2)).delete(`/todos/${todo.id}`), 403);
+    expectError(await (await as(fx.m2)).delete(`/todos/${todo.id}`), 409);
     expectError(await (await as(fx.m1)).delete(`/todos/${todo.id}`), 404);
     expect((await founder.delete(`/todos/${todo.id}`)).status).toBe(204);
     expect((await (await as(fx.m2)).get('/todos')).body).toEqual([]);

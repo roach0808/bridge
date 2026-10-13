@@ -44,6 +44,7 @@ import {
   ROLE_LABELS,
   ROLES,
   canJoinGroups,
+  canRemoveTask,
   isActiveTodo,
   runsGroup,
   type ChatMessageDTO,
@@ -441,7 +442,7 @@ function MessageMenu({
 
   const me = useMe();
   const canMake = !message.todo && conversation.canGiveTask && !message.image && !message.deleted;
-  const canRemove = message.todo !== null && isActiveTodo(message.todo.status) && message.todo.createdBy.id === me.id;
+  const canRemove = message.todo !== null && canRemoveTask(me, message.todo);
   // A group's owner and admins also take down anyone's message.
   const moderates = Boolean(conversation.group) && runsGroup(conversation.group?.myRole) && message.sender.id !== me.id;
   const canDelete = (message.sender.id === me.id || moderates) && !message.todo && !message.deleted;

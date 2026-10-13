@@ -528,6 +528,10 @@ export const todoStatusSchema = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['blockedReason'], message: 'Say what is blocking the task' });
     }
   });
+/** A note on a task. As long as it needs to be: only the request size bounds it. */
+export const todoNoteSchema = z.object({
+  body: z.string().refine((v) => v.trim().length > 0, 'Write the note first'),
+});
 /** Hands a task to someone else (dragged onto their panel), into a quadrant of their board. */
 export const moveTodoSchema = z.object({ assigneeId: uuid }).merge(quadrantSchema);
 

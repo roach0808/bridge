@@ -52,6 +52,7 @@ export function TaskDialog({
   open,
   todo,
   assignee,
+  initialAssigneeId,
   onClose,
 }: {
   open: boolean;
@@ -59,6 +60,8 @@ export function TaskDialog({
   todo?: TodoDTO | null;
   /** Who a new task is for, when the board already knows. */
   assignee?: UserRef;
+  /** Who a new task is for unless the giver picks someone else. */
+  initialAssigneeId?: string;
   onClose: () => void;
 }) {
   const me = useMe();
@@ -95,7 +98,7 @@ export function TaskDialog({
 
   useEffect(() => {
     if (!open) return;
-    setAssigneeId(todo?.assignee.id ?? assignee?.id ?? me.id);
+    setAssigneeId(todo?.assignee.id ?? assignee?.id ?? initialAssigneeId ?? me.id);
     setTitle(todo?.title ?? '');
     setDetails(todo?.details ?? '');
     setStartBy(toWhen(todo?.startByAt ?? null, todo?.startByHasTime ?? false, taskZone));

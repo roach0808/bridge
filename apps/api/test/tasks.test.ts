@@ -183,7 +183,7 @@ describe('what a task waits for', () => {
   it('forgets what it waited for when that task is deleted', async () => {
     const first = await give({});
     const second = (await c.m1.post('/todos', { assigneeId: fx.a1.id, title: 'Second', dependsOn: [first.id] })).body;
-    expect((await c.m1.delete(`/todos/${first.id}`)).status).toBe(204);
+    expect((await c.founder.delete(`/todos/${first.id}`)).status).toBe(204);
     const board = (await c.m1.get('/todos/board')).body;
     const still = board.flatMap((p: { tasks: Array<{ id: string; dependsOn: unknown[] }> }) => p.tasks).find((t: { id: string }) => t.id === second.id);
     expect(still.dependsOn).toEqual([]);
@@ -194,5 +194,88 @@ describe('a task given in the old way still works', () => {
   it('has no dates, and says so rather than guessing', async () => {
     const task = await give({});
     expect(task).toMatchObject({ startByAt: null, completeByAt: null, startByHasTime: false, completeByHasTime: false });
+  });
+});
+
+describe('removing a task', () => {
+  it('the Founder removes any task at any stage, even one they neither gave nor took', async () => {
+    const working = await give({});
+    await c.a1.post(`/todos/${working.id}/status`, { status: 'in_progress' });
+    expect((await c.founder.delete(`/todos/${working.id}`)).status).toBe(204);
+
+    const waiting = await give({});
+    await c.a1.post(`/todos/${waiting.id}/done`);
+    expect((await c.founder.delete(`/todos/${waiting.id}`)).status).toBe(204);
+    expect((await c.a1.get('/todos', { status: 'all' })).body).toEqual([]);
+  });
+
+  it('anyone else waits until it is completed, and then only the giver or the owner may', async () => {
+    const task = await give({});
+    expectError(await c.a1.delete(`/todos/${task.id}`), 409);
+    expectError(await c.m1.delete(`/todos/${task.id}`), 409);
+    await c.a1.post(`/todos/${task.id}/done`);
+    // Ready for Review is not completed yet.
+    expectError(await c.m1.delete(`/todos/${task.id}`), 409);
+    await c.m1.post(`/todos/${task.id}/confirm`);
+    // Another Manager sees the task, but it is not theirs to remove; a teammate does not see it at all.
+    expectError(await c.m2.delete(`/todos/${task.id}`), 403);
+    expectError(await c.a2.delete(`/todos/${task.id}`), 404);
+    expect((await c.a1.delete(`/todos/${task.id}`)).status).toBe(204);
+
+    const second = await give({});
+    await c.a1.post(`/todos/${second.id}/done`);
+    await c.m1.post(`/todos/${second.id}/confirm`);
+    expect((await c.m1.delete(`/todos/${second.id}`)).status).toBe(204);
+  });
+
+  it('takes its notes with it', async () => {
+    const task = await give({});
+    await c.a1.post(`/todos/${task.id}/notes`, { body: 'Halfway there' });
+    expect((await c.founder.delete(`/todos/${task.id}`)).status).toBe(204);
+    expect(await prisma.todoNote.count()).toBe(0);
+  });
+});
+
+describe('notes on a task', () => {
+  it('the owner, the giver and anyone above the owner write them, oldest first, with no length cap', async () => {
+    const task = await give({});
+    const long = 'Called every platform on the list. '.repeat(3000);
+    const first = await c.a1.post(`/todos/${task.id}/notes`, { body: `  ${long}  ` });
+    expect(first.status, first.text).toBe(201);
+    expect(first.body).toMatchObject({ todoId: task.id, author: { id: fx.a1.id }, body: long.trim() });
+    expect((await c.m1.post(`/todos/${task.id}/notes`, { body: 'Thanks — keep going' })).status).toBe(201);
+    expect((await c.founder.post(`/todos/${task.id}/notes`, { body: 'Seen' })).status).toBe(201);
+
+    const notes = (await c.a1.get(`/todos/${task.id}/notes`)).body;
+    expect(notes.map((n: { author: { id: string } }) => n.author.id)).toEqual([fx.a1.id, fx.m1.id, fx.founder.id]);
+    const board = (await c.a1.get('/todos/board')).body;
+    expect(board[0].tasks.find((t: { id: string }) => t.id === task.id).noteCount).toBe(3);
+  });
+
+  it('nobody else reads or writes them, and a blank note says nothing', async () => {
+    const task = await give({});
+    expectError(await c.a2.get(`/todos/${task.id}/notes`), 404);
+    expectError(await c.e1.post(`/todos/${task.id}/notes`, { body: 'Hello' }), 404);
+    expectError(await c.a1.post(`/todos/${task.id}/notes`, { body: '   \n ' }), 400);
+  });
+
+  it('only the writer changes a note; the writer or the Founder deletes it', async () => {
+    const task = await give({});
+    const note = (await c.a1.post(`/todos/${task.id}/notes`, { body: 'Drafted the list' })).body;
+    expectError(await c.m1.patch(`/todos/${task.id}/notes/${note.id}`, { body: 'Mine now' }), 403);
+    const edited = await c.a1.patch(`/todos/${task.id}/notes/${note.id}`, { body: 'Drafted and sent the list' });
+    expect(edited.body.body).toBe('Drafted and sent the list');
+    expect(edited.body.updatedAt > edited.body.createdAt).toBe(true);
+
+    expectError(await c.m1.delete(`/todos/${task.id}/notes/${note.id}`), 403);
+    expect((await c.founder.delete(`/todos/${task.id}/notes/${note.id}`)).status).toBe(204);
+    expectError(await c.a1.delete(`/todos/${task.id}/notes/${note.id}`), 404);
+  });
+
+  it('a note belongs to its own task', async () => {
+    const task = await give({});
+    const other = await give({});
+    const note = (await c.a1.post(`/todos/${task.id}/notes`, { body: 'On the first task' })).body;
+    expectError(await c.a1.patch(`/todos/${other.id}/notes/${note.id}`, { body: 'Moved' }), 404);
   });
 });

@@ -8,7 +8,12 @@ import {
   canChat,
   chatModeOf,
   type ChatMode,
+  TODO_STATUSES,
   canGiveTask,
+  canNoteTask,
+  canRemoveTask,
+  canDeleteTaskNote,
+  canEditTaskNote,
   isSelfTask,
   supervisesWork,
   expectedPrice,
@@ -305,5 +310,38 @@ describe('payouts', () => {
   it('splits the Calls page between calls on their way and calls that took place', () => {
     expect([...ACTIVE_STATUSES, ...FINANCE_STATUSES, 'cancelled'].sort()).toEqual([...CALL_STATUSES].sort());
     expect(ACTIVE_STATUSES.some((s) => FINANCE_STATUSES.includes(s))).toBe(false);
+  });
+});
+
+describe('removing a task and writing notes on it', () => {
+  const founder = { id: 'f', role: 'founder' as const };
+  const manager = { id: 'm', role: 'manager' as const };
+  const otherManager = { id: 'm2', role: 'manager' as const };
+  const associate = { id: 'a', role: 'associate' as const };
+  const task = (status: (typeof TODO_STATUSES)[number]) => ({ status, assignee: associate, createdBy: manager });
+
+  it('the Founder removes any task; the giver and the owner only once it is completed', () => {
+    for (const status of TODO_STATUSES) {
+      expect(canRemoveTask(founder, task(status))).toBe(true);
+      const completed = status === 'completed';
+      expect(canRemoveTask(manager, task(status))).toBe(completed);
+      expect(canRemoveTask(associate, task(status))).toBe(completed);
+      expect(canRemoveTask(otherManager, task(status))).toBe(false);
+    }
+  });
+
+  it('notes are for the owner, the giver and anyone above the owner', () => {
+    const t = { assignee: associate, createdBy: founder };
+    expect([associate, founder, manager, otherManager].every((u) => canNoteTask(u, t))).toBe(true);
+    expect(canNoteTask({ id: 'a2', role: 'associate' }, t)).toBe(false);
+    expect(canNoteTask({ id: 'e', role: 'expert' }, t)).toBe(false);
+  });
+
+  it('a note is its writer’s to change; the Founder may also delete it', () => {
+    const note = { author: { id: 'a' } };
+    expect(canEditTaskNote(associate, note)).toBe(true);
+    expect(canEditTaskNote(founder, note)).toBe(false);
+    expect(canDeleteTaskNote(founder, note)).toBe(true);
+    expect(canDeleteTaskNote(manager, note)).toBe(false);
   });
 });
