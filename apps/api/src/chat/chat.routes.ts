@@ -23,7 +23,12 @@ import {
   RING_SECONDS,
   endRingSchema,
   COMPLETED_TASK_DAYS,
+  canDeleteTaskNote,
+  canEditTask,
+  canEditTaskNote,
   canGiveTask,
+  canNoteTask,
+  canRemoveTask,
   chatMessageSchema,
   chatReactionSchema,
   createTodoSchema,
@@ -38,6 +43,7 @@ import {
   todoBoardQuerySchema,
   TODO_POSITION_STEP,
   todoDoneSchema,
+  todoNoteSchema,
   todoStatusSchema,
   updateTodoSchema,
   type ChatMessageDTO,
@@ -57,6 +63,7 @@ import {
   type TodoUrgency,
   type TodoPanel,
   type TodoRemovedEvent,
+  type TodoNoteDTO,
   type TodoSummary,
   type UserRef,
 } from '@god/shared';
@@ -114,6 +121,7 @@ const todoInclude = {
     select: { dependsOn: { select: { id: true, title: true, status: true, message: { select: { body: true } }, assignee: { select: userRefSelect } } } },
     orderBy: { createdAt: 'asc' },
   },
+  _count: { select: { notes: true } },
 } satisfies Prisma.TodoInclude;
 type TodoRow = Prisma.TodoGetPayload<{ include: typeof todoInclude }>;
 
@@ -182,6 +190,7 @@ const toTodoDTO = (t: TodoRow): TodoDTO => ({
     status: d.dependsOn.status,
     assignee: toUserRef(d.dependsOn.assignee),
   })),
+  noteCount: t._count.notes,
   createdAt: iso(t.createdAt),
   updatedAt: iso(t.updatedAt),
 });
@@ -1193,13 +1202,23 @@ chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
   res.status(201).json(dto);
 });
 
-/** The giver removes a task: an open one, or a completed one they no longer need. */
-async function removeTodo(actor: Actor, t: { id: string; status: string; createdById: string; assigneeId: string; conversationId: string | null; messageId: string | null }) {
-  if (t.createdById !== actor.id) throw forbidden('Only the person who gave the task can remove it');
-  // Before it starts, or once both sides have ticked it off; not while it waits for confirmation.
-  if (t.status === 'done') throw conflict('Confirm or reopen this task before removing it');
-  await prisma.todo.delete({ where: { id: t.id } });
+/**
+ * Deletes a task (`canRemoveTask`): the Founder any task, at any stage; whoever
+ * gave it or is doing it only once it is completed. Its notes go with it.
+ */
+async function removeTodo(
+  actor: Actor,
+  t: { id: string; status: TodoStatus; createdById: string; assigneeId: string; conversationId: string | null; messageId: string | null },
+) {
+  const task = { status: t.status, assignee: { id: t.assigneeId }, createdBy: { id: t.createdById } };
+  if (!canRemoveTask(actor, task)) {
+    if (t.assigneeId !== actor.id && t.createdById !== actor.id) throw forbidden('You cannot remove this task');
+    throw conflict('A task can be removed once it is completed. Until then, only the Founder can remove it');
+  }
+  // Gone already (a double click, or someone else first) is still gone.
+  await prisma.todo.deleteMany({ where: { id: t.id } });
   emitTodo(t, { id: t.id, conversationId: t.conversationId, messageId: t.messageId, removed: true });
+  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: t.assigneeId });
 }
 
 chatRouter.delete('/chat/messages/:id/todo', async (req, res) => {
@@ -1275,7 +1294,78 @@ chatRouter.post('/todos', async (req, res) => {
 
 chatRouter.delete('/todos/:id', async (req, res) => {
   const actor = actorOf(req);
-  await removeTodo(actor, await loadTodo(actor, idParam(req)));
+  // The Founder sees every task, so may remove one they neither gave nor took.
+  await removeTodo(actor, await loadTodoForEdit(actor, idParam(req)));
+  res.status(204).end();
+});
+
+// --- Notes on a task ---------------------------------------------------------
+
+const noteInclude = { author: { select: userRefSelect } } satisfies Prisma.TodoNoteInclude;
+const toTodoNoteDTO = (n: Prisma.TodoNoteGetPayload<{ include: typeof noteInclude }>): TodoNoteDTO => ({
+  id: n.id,
+  todoId: n.todoId,
+  author: toUserRef(n.author),
+  body: n.body,
+  createdAt: iso(n.createdAt),
+  updatedAt: iso(n.updatedAt),
+});
+
+/** A task the caller may read and write notes on (`canNoteTask`); anyone else gets a 404. */
+async function loadTodoForNotes(actor: Actor, id: string | null) {
+  const t = await loadTodoForEdit(actor, id);
+  if (!canNoteTask(actor, { assignee: t.assignee, createdBy: { id: t.createdById } })) throw notFound('Task');
+  return t;
+}
+
+/** A note changed: everyone who can see the task sees its count move, and open notes reload. */
+async function emitNotesChanged(todoId: string) {
+  const todo = await prisma.todo.findUnique({ where: { id: todoId }, include: todoInclude });
+  if (!todo) return;
+  emitTodo(todo, toTodoDTO(todo));
+  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: todo.assigneeId });
+}
+
+chatRouter.get('/todos/:id/notes', async (req, res) => {
+  const t = await loadTodoForNotes(actorOf(req), idParam(req));
+  const notes = await prisma.todoNote.findMany({ where: { todoId: t.id }, include: noteInclude, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] });
+  res.json(notes.map(toTodoNoteDTO));
+});
+
+chatRouter.post('/todos/:id/notes', async (req, res) => {
+  const actor = actorOf(req);
+  const t = await loadTodoForNotes(actor, idParam(req));
+  const { body } = parseBody(todoNoteSchema, req);
+  const note = await prisma.todoNote.create({ data: { todoId: t.id, authorId: actor.id, body: body.trim() }, include: noteInclude });
+  await emitNotesChanged(t.id);
+  res.status(201).json(toTodoNoteDTO(note));
+});
+
+/** A note of this task, which the caller can see. */
+async function loadNote(actor: Actor, req: Parameters<typeof idParam>[0]) {
+  const t = await loadTodoForNotes(actor, idParam(req));
+  const noteId = idParam(req, 'noteId');
+  const note = noteId ? await prisma.todoNote.findFirst({ where: { id: noteId, todoId: t.id }, include: noteInclude }) : null;
+  if (!note) throw notFound('Note');
+  return note;
+}
+
+chatRouter.patch('/todos/:id/notes/:noteId', async (req, res) => {
+  const actor = actorOf(req);
+  const existing = await loadNote(actor, req);
+  if (!canEditTaskNote(actor, { author: { id: existing.authorId } })) throw forbidden('Only the person who wrote a note can change it');
+  const { body } = parseBody(todoNoteSchema, req);
+  const note = await prisma.todoNote.update({ where: { id: existing.id }, data: { body: body.trim() }, include: noteInclude });
+  await emitNotesChanged(note.todoId);
+  res.json(toTodoNoteDTO(note));
+});
+
+chatRouter.delete('/todos/:id/notes/:noteId', async (req, res) => {
+  const actor = actorOf(req);
+  const existing = await loadNote(actor, req);
+  if (!canDeleteTaskNote(actor, { author: { id: existing.authorId } })) throw forbidden('Only the person who wrote a note can delete it');
+  await prisma.todoNote.delete({ where: { id: existing.id } });
+  await emitNotesChanged(existing.todoId);
   res.status(204).end();
 });
 
@@ -1361,16 +1451,9 @@ async function waitsOn(tx: Db, from: string, target: string): Promise<boolean> {
   return false;
 }
 
-/**
- * Who may change a task: the person who gave it, and anyone above the owner who
- * could have given it to them. Not the owner — a deadline you can move yourself
- * is not a commitment to anyone. A task you gave yourself is yours either way,
- * because you are also the giver.
- */
-function mayEditTask(actor: Actor, todo: { createdById: string; assignee: { id: string; role: string } }): boolean {
-  if (todo.createdById === actor.id) return true;
-  return todo.assignee.id !== actor.id && canGiveTask(actor, asTaker(todo.assignee));
-}
+/** Who may change a task (`canEditTask`): the giver, and anyone above the owner. */
+const mayEditTask = (actor: Actor, todo: { createdById: string; assignee: { id: string; role: Role } }): boolean =>
+  canEditTask(actor, { assignee: todo.assignee, createdBy: { id: todo.createdById } });
 
 /** Changing a task after it was given: its wording, its dates, what it should produce. */
 chatRouter.patch('/todos/:id', async (req, res) => {
@@ -1600,17 +1683,17 @@ chatRouter.get('/todos/board', async (req, res) => {
     actor.role === 'founder'
       ? await prisma.user.findMany({
           where: { deletedAt: null, id: { not: actor.id } },
-          select: { ...userRefSelect, isActive: true, managerId: true },
+          select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } },
           orderBy: [{ isActive: 'desc' }, { role: 'asc' }, { nickname: 'asc' }],
         })
       : actor.role === 'manager'
         ? await prisma.user.findMany({
             where: { deletedAt: null, role: 'associate' },
-            select: { ...userRefSelect, isActive: true, managerId: true },
+            select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } },
             orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
           })
         : [];
-  const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: { ...userRefSelect, isActive: true, managerId: true } });
+  const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } } });
   const people = [me, ...below];
 
   const rows = await prisma.todo.findMany({
@@ -1630,7 +1713,7 @@ chatRouter.get('/todos/board', async (req, res) => {
   });
 
   const body: TodoPanel[] = people.map((person) => ({
-    person: { ...toUserRef(person), isActive: person.isActive },
+    person: { ...toUserRef(person), isActive: person.isActive, manager: person.manager ? toUserRef(person.manager) : null },
     isMe: person.id === actor.id,
     canGive: canGiveTask(actor, asTaker(person)),
     tasks: rows.filter((t) => t.assigneeId === person.id).map(toTodoDTO),

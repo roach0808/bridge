@@ -31,6 +31,7 @@ const TABLES = {
   conversation_members: () => prisma.conversationMember.findMany(),
   chat_messages: () => prisma.chatMessage.findMany(),
   todos: () => prisma.todo.findMany(),
+  todo_notes: () => prisma.todoNote.findMany(),
   notifications: () => prisma.notification.findMany(),
   device_tokens: () => prisma.deviceToken.findMany(),
   web_push_subscriptions: () => prisma.webPushSubscription.findMany(),

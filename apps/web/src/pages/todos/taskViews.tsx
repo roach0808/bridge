@@ -1,6 +1,7 @@
 import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ChecklistRounded from '@mui/icons-material/ChecklistRounded';
 import DragIndicatorRounded from '@mui/icons-material/DragIndicatorRounded';
+import NotesRounded from '@mui/icons-material/NotesRounded';
 import {
   Box,
   Card,
@@ -70,7 +71,6 @@ export const allTasks = (panels: TodoPanel[]): TodoDTO[] => panels.flatMap((p) =
 type Column = 'order' | 'owner' | 'start' | 'complete' | 'urgency' | 'status';
 
 interface Filters {
-  owner: string;
   /** A day: tasks starting on or after it. */
   start: string;
   /** A day: tasks due on or before it. */
@@ -85,9 +85,20 @@ interface Filters {
   status: string;
 }
 
-export const NO_FILTERS: Filters = { owner: 'all', start: '', complete: '', text: '', status: 'active' };
+export const NO_FILTERS: Filters = { start: '', complete: '', text: '', status: 'active' };
 
-export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t: TodoDTO) => void }) {
+export function TaskTable({
+  panels,
+  onOpen,
+  minWidth = 1020,
+  showOwner = true,
+}: {
+  panels: TodoPanel[];
+  onOpen: (t: TodoDTO) => void;
+  minWidth?: number;
+  /** Off when the table is one person's, whose name is already above it. */
+  showOwner?: boolean;
+}) {
   const me = useMe();
   const { zone } = useAuth();
   const toast = useToast();
@@ -97,7 +108,6 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
   const [sort, setSort] = useState<{ by: Column; desc: boolean }>({ by: 'urgency', desc: true });
   const [dragging, setDragging] = useState<TodoDTO | null>(null);
   const tasks = useMemo(() => allTasks(panels), [panels]);
-  const owners = useMemo(() => panels.map((p) => p.person), [panels]);
 
   const set = (key: keyof Filters, value: string) => setFilters((f) => ({ ...f, [key]: value }));
   const filtered = useMemo(() => tasks.filter((t) => matches(t, filters, zone)), [tasks, filters, zone]);
@@ -212,7 +222,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
           </Card>
         ) : null}
       </DragOverlay>
-      <TableSurface minWidth={1020}>
+      <TableSurface minWidth={minWidth}>
       <Table size="small" stickyHeader>
         <TableHead>
           <TableRow>
@@ -228,25 +238,17 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
                 </TableSortLabel>
               </Tooltip>
             </TableCell>
-            {heading('owner', 'Owner', 150)}
+            {showOwner && heading('owner', 'Owner', 150)}
             {heading('start', 'Start', 130)}
             {heading('complete', 'End date', 140)}
             {heading('urgency', 'Urgency', 84)}
-            <TableCell sx={{ minWidth: 280 }}>Description</TableCell>
+            <TableCell sx={{ minWidth: minWidth < 1020 ? 200 : 280 }}>Description</TableCell>
             {heading('status', 'Status', 150)}
           </TableRow>
           <TableRow>
             <TableCell sx={{ py: 0.5 }} />
-            <TableCell sx={{ py: 0.5 }}>
-              <Filter value={filters.owner} onChange={(v) => set('owner', v)} select>
-                <MenuItem value="all">Anyone</MenuItem>
-                {owners.map((o) => (
-                  <MenuItem key={o.id} value={o.id}>
-                    {o.nickname}
-                  </MenuItem>
-                ))}
-              </Filter>
-            </TableCell>
+            {/* Whose tasks these are is picked in the people list beside the table. */}
+            {showOwner && <TableCell sx={{ py: 0.5 }} />}
             <TableCell sx={{ py: 0.5 }}>
               <Filter type="date" value={filters.start} onChange={(v) => set('start', v)} title="Starting on or after" />
             </TableCell>
@@ -287,7 +289,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
         <TableBody>
           {rows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={7} sx={{ border: 0 }}>
+              <TableCell colSpan={showOwner ? 7 : 6} sx={{ border: 0 }}>
                 <Card variant="outlined">
                   <EmptyState
                     icon={<ChecklistRounded />}
@@ -300,7 +302,7 @@ export function TaskTable({ panels, onOpen }: { panels: TodoPanel[]; onOpen: (t:
           ) : (
             <SortableContext items={rows.map((t) => t.id)} strategy={verticalListSortingStrategy}>
               {rows.map((t) => (
-                <TaskRow key={t.id} todo={t} draggable={draggable} onOpen={() => onOpen(t)} />
+                <TaskRow key={t.id} todo={t} draggable={draggable} showOwner={showOwner} onOpen={() => onOpen(t)} />
               ))}
             </SortableContext>
           )}
@@ -349,7 +351,7 @@ function Filter({
   );
 }
 
-function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boolean; onOpen: () => void }) {
+function TaskRow({ todo: t, draggable, showOwner, onOpen }: { todo: TodoDTO; draggable: boolean; showOwner: boolean; onOpen: () => void }) {
   const { zone } = useAuth();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.id, disabled: !draggable });
   const overdue = t.completeByAt !== null && isActiveTodo(t.status) && new Date(t.completeByAt).getTime() < Date.now();
@@ -377,9 +379,11 @@ function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boo
           </Tooltip>
         ) : null}
       </TableCell>
-      <TableCell>
-        <UserChip user={t.assignee} size={22} showRole={false} />
-      </TableCell>
+      {showOwner && (
+        <TableCell>
+          <UserChip user={t.assignee} size={22} showRole={false} />
+        </TableCell>
+      )}
       <TableCell>
         <Typography variant="body2" color={t.startByAt ? 'text.primary' : 'text.disabled'} noWrap>
           {t.startByAt ? formatWhen(t.startByAt, t.startByHasTime, zone) : '—'}
@@ -399,18 +403,30 @@ function TaskRow({ todo: t, draggable, onOpen }: { todo: TodoDTO; draggable: boo
       <TableCell>
         <UrgencyScore score={urgencyOf(t, zone)} />
       </TableCell>
-      <TableCell>
-        <Typography
-          variant="body2"
-          noWrap
-          title={t.details ? `${text}\n\n${t.details}` : text}
-          sx={{
-            textDecoration: t.status === 'completed' ? 'line-through' : 'none',
-            color: t.status === 'completed' ? 'text.secondary' : 'text.primary',
-          }}
-        >
-          {text}
-        </Typography>
+      {/* Takes what room is left, and cuts the words short rather than the columns beside it. */}
+      <TableCell sx={{ maxWidth: 0 }}>
+        <Stack direction="row" spacing={0.75} alignItems="center">
+          <Typography
+            variant="body2"
+            noWrap
+            title={t.details ? `${text}\n\n${t.details}` : text}
+            sx={{
+              minWidth: 0,
+              textDecoration: t.status === 'completed' ? 'line-through' : 'none',
+              color: t.status === 'completed' ? 'text.secondary' : 'text.primary',
+            }}
+          >
+            {text}
+          </Typography>
+          {t.noteCount > 0 && (
+            <Tooltip title={`${t.noteCount} ${t.noteCount === 1 ? 'note' : 'notes'}`}>
+              <Stack direction="row" spacing={0.25} alignItems="center" sx={{ color: 'text.secondary', flexShrink: 0 }}>
+                <NotesRounded sx={{ fontSize: 15 }} />
+                <Typography variant="caption">{t.noteCount}</Typography>
+              </Stack>
+            </Tooltip>
+          )}
+        </Stack>
       </TableCell>
       <TableCell onClick={(e) => e.stopPropagation()}>
         <StatusControl todo={t} />
@@ -435,7 +451,6 @@ const startOfDayMs = (day: string, zone: string) => {
 };
 
 function matches(t: TodoDTO, f: Filters, zone: string): boolean {
-  if (f.owner !== 'all' && t.assignee.id !== f.owner) return false;
   if (f.status === 'active') {
     if (t.status === 'completed' && !justCompleted(t)) return false;
   } else if (f.status !== 'all' && t.status !== f.status) return false;

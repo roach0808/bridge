@@ -115,6 +115,51 @@ export function isSelfTask(t: { assignee: { id: string }; createdBy: { id: strin
   return t.assignee.id === t.createdBy.id;
 }
 
+/**
+ * Who may change a task (its wording, dates and details): whoever gave it, and
+ * anyone above the owner who could have given it to them. Not the owner — a
+ * deadline you can move yourself is not a commitment to anyone — unless they
+ * gave it to themselves.
+ */
+export function canEditTask(
+  actor: { id: string; role: Role },
+  t: { assignee: { id: string; role: Role }; createdBy: { id: string } },
+): boolean {
+  if (t.createdBy.id === actor.id) return true;
+  return t.assignee.id !== actor.id && canGiveTask(actor, t.assignee);
+}
+
+/**
+ * Who may delete a task. The Founder may delete any task, at any stage. Anyone
+ * else must wait until it is completed (the giver has confirmed it), and then
+ * only the two people it concerns may: whoever gave it and whoever it is for.
+ * Until then a task is a record of work owed, and only the Founder strikes it.
+ */
+export function canRemoveTask(
+  actor: { id: string; role: Role },
+  t: { status: TodoStatus; assignee: { id: string }; createdBy: { id: string } },
+): boolean {
+  if (actor.role === 'founder') return true;
+  if (t.status !== 'completed') return false;
+  return t.assignee.id === actor.id || t.createdBy.id === actor.id;
+}
+
+/**
+ * Who may write notes on a task: whoever it is for, whoever gave it, and anyone
+ * who could have given it to them — everyone who can see the task.
+ */
+export function canNoteTask(
+  actor: { id: string; role: Role },
+  t: { assignee: { id: string; role: Role }; createdBy: { id: string } },
+): boolean {
+  return t.assignee.id === actor.id || t.createdBy.id === actor.id || canGiveTask(actor, t.assignee);
+}
+
+/** A note is its writer's to change; the Founder may also delete it. */
+export const canEditTaskNote = (actor: { id: string }, note: { author: { id: string } }): boolean => note.author.id === actor.id;
+export const canDeleteTaskNote = (actor: { id: string; role: Role }, note: { author: { id: string } }): boolean =>
+  note.author.id === actor.id || actor.role === 'founder';
+
 /** A Manager runs the work of every Associate, and of themselves. */
 export function supervisesWork(actor: { id: string; role: Role }, owner: { id: string; role: Role }): boolean {
   if (actor.role === 'founder') return true;

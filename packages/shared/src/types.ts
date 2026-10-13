@@ -660,7 +660,20 @@ export interface TodoDTO extends TodoSummary {
   definitionOfDone: string | null;
   /** Tasks that must happen first; this one is waiting while any is unfinished. */
   dependsOn: TodoDependency[];
+  /** How many notes the task has (`TodoNoteDTO`, loaded with the task's detail). */
+  noteCount: number;
   createdAt: string;
+  updatedAt: string;
+}
+
+/** A note on a task: the work as it goes. No length cap. */
+export interface TodoNoteDTO {
+  id: string;
+  todoId: string;
+  author: UserRef;
+  body: string;
+  createdAt: string;
+  /** Later than `createdAt` once the writer changed it. */
   updatedAt: string;
 }
 
@@ -816,7 +829,8 @@ export interface FinanceCallsPage extends Paginated<CallDTO> {
 
 /** One person's tasks on the task board. */
 export interface TodoPanel {
-  person: UserRef & { isActive: boolean };
+  /** `manager` places an Associate in their Manager's team on the board. */
+  person: UserRef & { isActive: boolean; manager: UserRef | null };
   /** True for the panel of the person looking at the board. */
   isMe: boolean;
   /** The caller may give this person tasks. */

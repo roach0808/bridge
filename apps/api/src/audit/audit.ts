@@ -124,6 +124,7 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^todos\/:id\/confirm$/, 'todo.confirm', true],
   [/^todos\/:id\/reopen$/, 'todo.reopen', true],
   [/^todos\/:id\/move$/, 'todo.move', true],
+  [/^todos\/:id\/notes/, 'todo.note'],
   [/^todos/, 'todo'],
   [/^chat/, 'chat'],
   [/^db-dumps/, 'dump'],
@@ -193,6 +194,9 @@ const SUMMARIES: Record<string, string> = {
   'todo.confirm': 'confirmed a task complete',
   'todo.reopen': 'reopened a task',
   'todo.move': 'handed a task to someone else',
+  'todo.note.create': 'added a note to a task',
+  'todo.note.update': 'changed a note on a task',
+  'todo.note.delete': 'deleted a note on a task',
   // No longer recorded; kept so entries written before still read well.
   'audit.read': 'read the audit trail',
   'stats.profiles': 'looked at profile statistics (emails and banks)',
