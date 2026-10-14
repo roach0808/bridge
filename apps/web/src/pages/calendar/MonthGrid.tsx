@@ -1,6 +1,6 @@
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded';
 import { Box, ButtonBase, Stack, Tooltip, Typography } from '@mui/material';
-import type { Occurrence } from '@god/shared';
+import type { Occurrence, PersonalEventOccurrence } from '@god/shared';
 import { DateTime } from 'luxon';
 import { useMemo } from 'react';
 import { STATUS_COLORS, StatusBadge } from '@/components/StatusChip';
@@ -14,7 +14,8 @@ const MAX_ITEMS = 3;
 
 type DayItem =
   | { kind: 'event'; event: TimedEvent }
-  | { kind: 'allday'; occurrence: Occurrence };
+  | { kind: 'allday'; occurrence: Occurrence }
+  | { kind: 'allday-personal'; occurrence: PersonalEventOccurrence };
 
 export function MonthGrid({
   days,
@@ -27,6 +28,8 @@ export function MonthGrid({
   onDateClick,
   onOpenCall,
   onEditTimeOff,
+  eventTitles,
+  onEditEvent,
   dayClickLabel,
 }: {
   days: DateTime[];
@@ -41,6 +44,9 @@ export function MonthGrid({
   onDateClick: (day: DateTime) => void;
   onOpenCall: (id: string) => void;
   onEditTimeOff?: (o: Occurrence) => void;
+  /** Titles of the viewer's own events, by id. */
+  eventTitles?: Map<string, string>;
+  onEditEvent?: (o: PersonalEventOccurrence) => void;
   dayClickLabel?: string;
 }) {
   const now = useNow();
@@ -57,9 +63,11 @@ export function MonthGrid({
       days.map((day) =>
         perColumn.map((p) => {
           const iso = day.toISODate();
-          const allDay: DayItem[] = p.allDay
-            .filter((o) => DateTime.fromISO(o.startsAt).setZone(zone).toISODate() === iso)
-            .map((occurrence) => ({ kind: 'allday', occurrence }));
+          const onDay = (o: { startsAt: string }) => DateTime.fromISO(o.startsAt).setZone(zone).toISODate() === iso;
+          const allDay: DayItem[] = [
+            ...p.allDayEvents.filter(onDay).map((occurrence) => ({ kind: 'allday-personal' as const, occurrence })),
+            ...p.allDay.filter(onDay).map((occurrence) => ({ kind: 'allday' as const, occurrence })),
+          ];
           const timed: DayItem[] = p.timed
             .filter((e) => overlapsDay(e.start, e.end, day))
             .sort((a, b) => a.start.toMillis() - b.start.toMillis())
@@ -147,8 +155,10 @@ export function MonthGrid({
                     items={dayCells[0]?.items ?? []}
                     zone={zone}
                     notes={notes}
+                    eventTitles={eventTitles}
                     onOpenCall={onOpenCall}
                     onEditTimeOff={onEditTimeOff}
+                    onEditEvent={onEditEvent}
                     onMore={() => onDateClick(day)}
                   />
                 )}
@@ -165,22 +175,40 @@ function SingleDayList({
   items,
   zone,
   notes,
+  eventTitles,
   onOpenCall,
   onEditTimeOff,
+  onEditEvent,
   onMore,
 }: {
   items: DayItem[];
   zone: string;
   notes?: Map<string, string | null>;
+  eventTitles?: Map<string, string>;
   onOpenCall: (id: string) => void;
   onEditTimeOff?: (o: Occurrence) => void;
+  onEditEvent?: (o: PersonalEventOccurrence) => void;
   onMore: () => void;
 }) {
+  const eventTitle = (id: string) => eventTitles?.get(id) ?? 'Event';
   const visible = items.length > MAX_ITEMS ? items.slice(0, MAX_ITEMS - 1) : items;
   const hidden = items.length - visible.length;
   return (
     <Stack spacing={0.25}>
       {visible.map((item, i) => {
+        if (item.kind === 'allday-personal') {
+          const title = eventTitle(item.occurrence.eventId);
+          return (
+            <EventPill
+              key={`p${i}`}
+              kind="event"
+              title={title}
+              repeat={item.occurrence.isRecurring}
+              tooltip={`${title} · all day · only you see this`}
+              onClick={onEditEvent ? () => onEditEvent(item.occurrence) : undefined}
+            />
+          );
+        }
         if (item.kind === 'allday') {
           const title = timeOffTitle(item.occurrence.blockId ? notes?.get(item.occurrence.blockId) : null);
           return (
@@ -213,6 +241,26 @@ function SingleDayList({
               badge={<StatusBadge status={ev.call.status} compact />}
               tooltip={<CallTooltip call={ev.call} zone={zone} />}
               onClick={() => onOpenCall(ev.call.id)}
+            />
+          );
+        }
+        if (ev.type === 'event') {
+          const title = eventTitle(ev.occurrence.eventId);
+          return (
+            <EventPill
+              key={ev.key}
+              kind="event"
+              title={
+                <>
+                  <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500 }}>
+                    {time}
+                  </Box>{' '}
+                  {title}
+                </>
+              }
+              repeat={ev.occurrence.isRecurring}
+              tooltip={`${title} · only you see this`}
+              onClick={onEditEvent ? () => onEditEvent(ev.occurrence) : undefined}
             />
           );
         }

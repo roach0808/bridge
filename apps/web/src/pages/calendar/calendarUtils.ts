@@ -4,6 +4,7 @@ import {
   type BusyInterval,
   type CalendarCall,
   type Occurrence,
+  type PersonalEventOccurrence,
 } from '@god/shared';
 import { DateTime } from 'luxon';
 
@@ -191,12 +192,15 @@ export function newCallHref(start: DateTime, minutes: number, expertId?: string 
 export type TimedEvent =
   | { type: 'call'; key: string; start: DateTime; end: DateTime; call: CalendarCall; tint?: string }
   | { type: 'busy'; key: string; start: DateTime; end: DateTime; busy: BusyInterval }
-  | { type: 'timeoff'; key: string; start: DateTime; end: DateTime; occurrence: Occurrence };
+  | { type: 'timeoff'; key: string; start: DateTime; end: DateTime; occurrence: Occurrence }
+  | { type: 'event'; key: string; start: DateTime; end: DateTime; occurrence: PersonalEventOccurrence };
 
 export interface CalendarSource {
   calls: CalendarCall[];
   busy: BusyInterval[];
   occurrences: Occurrence[];
+  /** The viewer's own events (§6.9b), on their own calendar only. */
+  events?: PersonalEventOccurrence[];
 }
 
 const utc = (iso: string, zone: string) => DateTime.fromISO(iso, { zone: 'utc' }).setZone(zone);
@@ -206,7 +210,7 @@ const utc = (iso: string, zone: string) => DateTime.fromISO(iso, { zone: 'utc' }
  * zone. Otherwise (the Expert is in another zone) it is drawn as a timed block
  * so the hours it actually covers are honest.
  */
-export function isAllDayInZone(o: Occurrence, zone: string): boolean {
+export function isAllDayInZone(o: Pick<Occurrence, 'allDay' | 'startsAt'>, zone: string): boolean {
   if (!o.allDay) return false;
   const s = utc(o.startsAt, zone);
   return s.hour === 0 && s.minute === 0;
@@ -215,6 +219,7 @@ export function isAllDayInZone(o: Occurrence, zone: string): boolean {
 export function buildEvents(source: CalendarSource, zone: string, availabilityEnabled: boolean, tint?: string) {
   const timed: TimedEvent[] = [];
   const allDay: Occurrence[] = [];
+  const allDayEvents: PersonalEventOccurrence[] = [];
   const available: Occurrence[] = [];
   for (const call of source.calls) {
     timed.push({ type: 'call', key: `c:${call.id}`, start: utc(call.scheduledAt, zone), end: utc(call.endsAt, zone), call, tint });
@@ -231,7 +236,11 @@ export function buildEvents(source: CalendarSource, zone: string, availabilityEn
     else
       timed.push({ type: 'timeoff', key: `o:${o.blockId}:${o.date}:${i}`, start: utc(o.startsAt, zone), end: utc(o.endsAt, zone), occurrence: o });
   });
-  return { timed, allDay, available };
+  (source.events ?? []).forEach((o, i) => {
+    if (isAllDayInZone(o, zone)) allDayEvents.push(o);
+    else timed.push({ type: 'event', key: `p:${o.eventId}:${o.date}:${i}`, start: utc(o.startsAt, zone), end: utc(o.endsAt, zone), occurrence: o });
+  });
+  return { timed, allDay, allDayEvents, available };
 }
 
 export interface PlacedEvent {
@@ -307,7 +316,7 @@ export function layoutDay(events: TimedEvent[], day: DateTime, minHeight = 18): 
   return placed;
 }
 
-const typeOrder = (e: TimedEvent) => (e.type === 'timeoff' ? 0 : e.type === 'busy' ? 1 : 2);
+const typeOrder = (e: TimedEvent) => (e.type === 'timeoff' ? 0 : e.type === 'busy' ? 1 : e.type === 'event' ? 2 : 3);
 
 // ---------------------------------------------------------------------------
 // Who is free (all-experts mode)

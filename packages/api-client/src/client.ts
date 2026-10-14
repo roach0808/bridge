@@ -20,6 +20,11 @@ import type {
   BlockBodyInput,
   BlockPatchInput,
   CalendarResponse,
+  PersonalEventBodyInput,
+  PersonalEventDTO,
+  PersonalEventMutationResult,
+  PersonalEventPatchInput,
+  PersonalEventsResponse,
   CallDetailDTO,
   CallDTO,
   CallStatus,
@@ -415,6 +420,15 @@ export function createApiClient(options: ClientOptions) {
       update: (id: string, body: BlockPatchInput) => patch<BlockMutationResult>(`/schedule-blocks/${enc(id)}`, body),
       remove: (id: string, scope: EditScope = 'all', date?: string) =>
         del<BlockMutationResult>(`/schedule-blocks/${enc(id)}`, { scope, date }),
+    },
+
+    /** The Founder's own events (§6.9b). */
+    personalEvents: {
+      list: (query: { from: string; to: string }) => get<PersonalEventsResponse>('/personal-events', query),
+      create: (body: PersonalEventBodyInput) => post<PersonalEventDTO>('/personal-events', body),
+      update: (id: string, body: PersonalEventPatchInput) => patch<PersonalEventMutationResult>(`/personal-events/${enc(id)}`, body),
+      remove: (id: string, scope: EditScope = 'all', date?: string) =>
+        del<PersonalEventMutationResult>(`/personal-events/${enc(id)}`, { scope, date }),
     },
 
     dashboard: {

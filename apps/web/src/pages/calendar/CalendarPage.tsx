@@ -2,6 +2,7 @@ import AddRounded from '@mui/icons-material/AddRounded';
 import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded';
+import EventNoteRounded from '@mui/icons-material/EventNoteRounded';
 import VideoCallRounded from '@mui/icons-material/VideoCallRounded';
 import {
   Box,
@@ -21,8 +22,16 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { CalendarCall, CalendarResponse, ExpertRef, ExpertsCalendarResponse, Occurrence } from '@god/shared';
-import { useQuery } from '@tanstack/react-query';
+import {
+  PERSONAL_CALENDAR_ROLES,
+  type CalendarCall,
+  type CalendarResponse,
+  type ExpertRef,
+  type ExpertsCalendarResponse,
+  type Occurrence,
+  type PersonalEventOccurrence,
+} from '@god/shared';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -52,7 +61,7 @@ import {
   zoneLabel,
   type CalendarView,
 } from './calendarUtils';
-import { pal } from './EventBlocks';
+import { PERSONAL_EVENT_COLOR, pal } from './EventBlocks';
 import { FreeExpertsPanel, type RangeSelection } from './FreeExpertsPanel';
 import { MonthGrid } from './MonthGrid';
 import { TimeGrid, type ExtraZone, type GridColumn, type GridSelection } from './TimeGrid';
@@ -81,6 +90,8 @@ export default function CalendarPage() {
 
   const isExpert = user?.role === 'expert';
   const isFounder = user?.role === 'founder';
+  /** Keeps their own events beside the calls (§6.9b). */
+  const hasOwnEvents = Boolean(user && PERSONAL_CALENDAR_ROLES.includes(user.role));
 
   // ---- view state ------------------------------------------------------------
   const [view, setViewState] = useState<CalendarView>(loadView);
@@ -150,6 +161,17 @@ export default function CalendarPage() {
 
   const notes = useMemo(() => new Map((singleData?.rules ?? []).map((r) => [r.id, r.note])), [singleData]);
 
+  // The viewer's own events, on their single-column calendar (not beside the Experts).
+  const showOwnEvents = hasOwnEvents && !allMode;
+  const personal = useQuery({
+    queryKey: qk.calendar.personal(range.fromIso, range.toIso),
+    queryFn: () => api.personalEvents.list({ from: range.fromIso, to: range.toIso }),
+    enabled: showOwnEvents,
+    placeholderData: keepPreviousData,
+  });
+  const ownEvents = showOwnEvents ? personal.data : undefined;
+  const eventTitles = useMemo(() => new Map((ownEvents?.events ?? []).map((e) => [e.id, e.title])), [ownEvents]);
+
   /** The Expert columns ticked in the Experts filter, in their usual order. */
   const expertParam = subjectParam(subject);
   const shownExperts = useMemo(() => {
@@ -176,8 +198,13 @@ export default function CalendarPage() {
       }));
     }
     const source = singleData ?? EMPTY_SOURCE;
-    return [{ key: 'main', source: { ...source, calls: source.calls.filter((call) => matches(call)) } }];
-  }, [allMode, shownExperts, singleData, matches]);
+    return [
+      {
+        key: 'main',
+        source: { ...source, calls: source.calls.filter((call) => matches(call)), events: ownEvents?.occurrences ?? [] },
+      },
+    ];
+  }, [allMode, shownExperts, singleData, matches, ownEvents]);
 
   /** Every call in view before the Profiles and Managers filters: what those filters offer and count. */
   const callsInView = useMemo<CalendarCall[]>(
@@ -190,7 +217,8 @@ export default function CalendarPage() {
     : Boolean(singleData) &&
       !columns[0]!.source.calls.length &&
       !singleData!.busy.length &&
-      !singleData!.occurrences.some((o) => o.kind === 'unavailable');
+      !singleData!.occurrences.some((o) => o.kind === 'unavailable') &&
+      !ownEvents?.occurrences.length;
 
   // ---- clocks & gutters ----------------------------------------------------------
   const clocks = useMemo<Clock[]>(() => {
@@ -221,21 +249,22 @@ export default function CalendarPage() {
   const [freePanel, setFreePanel] = useState<RangeSelection | null>(null);
   const [choice, setChoice] = useState<{ start: DateTime; end: DateTime; point: { x: number; y: number } } | null>(null);
 
+  /** Time off for an Expert, or (`null`) an event of the viewer's own. */
   const openCreate = useCallback(
-    (expert: ExpertRef, start: DateTime, end: DateTime, allDay: boolean) => {
-      const local = start.setZone(expert.timeZone);
+    (expert: ExpertRef | null, start: DateTime, end: DateTime, allDay: boolean) => {
+      const local = start.setZone(expert?.timeZone ?? zone);
       const minutes = Math.max(15, Math.round(end.diff(start, 'minutes').minutes));
       setDialogKey((k) => k + 1);
       setDialog({
         mode: 'create',
-        expert,
+        target: expert ? { type: 'timeoff', expert } : { type: 'event', timeZone: zone },
         startDate: local.toISODate()!,
         allDay,
         startMinute: allDay ? 540 : local.hour * 60 + local.minute,
         durationMinutes: allDay ? 60 : Math.min(1440, minutes),
       });
     },
-    [],
+    [zone],
   );
 
   const openEdit = useCallback(
@@ -246,9 +275,22 @@ export default function CalendarPage() {
         return;
       }
       setDialogKey((k) => k + 1);
-      setDialog({ mode: 'edit', expert: singleData.expert, rule, occurrence: o });
+      setDialog({ mode: 'edit', target: { type: 'timeoff', expert: singleData.expert }, rule, occurrence: o });
     },
     [singleData, toast],
+  );
+
+  const openEditEvent = useCallback(
+    (o: PersonalEventOccurrence) => {
+      const rule = ownEvents?.events.find((e) => e.id === o.eventId);
+      if (!rule) {
+        toast.error('This event can no longer be edited. Refresh and try again.');
+        return;
+      }
+      setDialogKey((k) => k + 1);
+      setDialog({ mode: 'edit', target: { type: 'event', timeZone: rule.timeZone }, rule, occurrence: o });
+    },
+    [ownEvents, toast],
   );
 
   const openCall = useCallback((id: string) => navigate(`/calls/${id}`), [navigate]);
@@ -257,7 +299,7 @@ export default function CalendarPage() {
     ? 'free'
     : isExpert
       ? 'timeoff'
-      : isFounder && canEditBlocks
+      : (isFounder && canEditBlocks) || showOwnEvents
         ? 'choice'
         : 'call';
   const selectable = !(isExpert && !canEditBlocks) && !(active.isLoading && !active.data);
@@ -379,8 +421,18 @@ export default function CalendarPage() {
     : allMode
       ? 'Experts side by side. Drag across a time to see who is free.'
       : subject.type === 'expert'
-        ? 'Drag across a time to start a call with this Expert.'
-        : 'Calls you can see across all Experts.';
+        ? showOwnEvents
+          ? 'This Expert’s calendar, with your own events. Drag across a time to start a call or add an event.'
+          : 'Drag across a time to start a call with this Expert.'
+        : showOwnEvents
+          ? 'Your calls and your own events. Drag across a time to add an event or start a call.'
+          : 'Calls you can see across all Experts.';
+
+  const addEventNow = () => {
+    const now = DateTime.now().setZone(zone);
+    const base = anchor.hasSame(now, 'day') ? now.plus({ hours: 1 }).startOf('hour') : anchor.set({ hour: 9 });
+    openCreate(null, base, base.plus({ hours: 1 }), false);
+  };
 
   const addTimeOffNow = () => {
     if (!singleData?.expert) return;
@@ -405,18 +457,27 @@ export default function CalendarPage() {
         title="Calendar"
         subtitle={subtitle}
         actions={
-          canEditBlocks ? (
-            <Button variant="contained" startIcon={<EventBusyRounded />} onClick={addTimeOffNow}>
-              Add time off
-            </Button>
-          ) : !isExpert ? (
-            <Button
-              variant="contained"
-              startIcon={<AddRounded />}
-              onClick={() => navigate(subject.type === 'expert' ? `/calls/new?expertId=${subject.id}` : '/calls/new')}
-            >
-              New call
-            </Button>
+          canEditBlocks || !isExpert ? (
+            <Stack direction="row" spacing={1}>
+              {hasOwnEvents && (
+                <Button variant="outlined" color="inherit" startIcon={<EventNoteRounded sx={{ color: PERSONAL_EVENT_COLOR }} />} onClick={addEventNow}>
+                  Add event
+                </Button>
+              )}
+              {canEditBlocks ? (
+                <Button variant="contained" startIcon={<EventBusyRounded />} onClick={addTimeOffNow}>
+                  Add time off
+                </Button>
+              ) : (
+                <Button
+                  variant="contained"
+                  startIcon={<AddRounded />}
+                  onClick={() => navigate(subject.type === 'expert' ? `/calls/new?expertId=${subject.id}` : '/calls/new')}
+                >
+                  New call
+                </Button>
+              )}
+            </Stack>
           ) : undefined
         }
       />
@@ -534,11 +595,17 @@ export default function CalendarPage() {
         </Stack>
 
         <Box sx={{ position: 'relative' }}>
-          {active.isFetching && <LinearProgress sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, zIndex: 20 }} />}
+          {(active.isFetching || personal.isFetching) && (
+            <LinearProgress sx={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, zIndex: 20 }} />
+          )}
 
           {active.error ? (
             <Box sx={{ p: 2 }}>
               <ErrorState error={active.error} onRetry={() => void active.refetch()} />
+            </Box>
+          ) : showOwnEvents && personal.error ? (
+            <Box sx={{ p: 2 }}>
+              <ErrorState error={personal.error} onRetry={() => void personal.refetch()} />
             </Box>
           ) : null}
 
@@ -558,6 +625,8 @@ export default function CalendarPage() {
               }}
               onOpenCall={openCall}
               onEditTimeOff={canEditBlocks ? openEdit : undefined}
+              eventTitles={eventTitles}
+              onEditEvent={showOwnEvents ? openEditEvent : undefined}
             />
           ) : (
             <TimeGrid
@@ -580,6 +649,8 @@ export default function CalendarPage() {
               onOpenCall={openCall}
               onEditTimeOff={canEditBlocks ? openEdit : undefined}
               notes={notes}
+              eventTitles={eventTitles}
+              onEditEvent={showOwnEvents ? openEditEvent : undefined}
               onDayHeaderClick={(d) => {
                 goTo(d);
                 setView('day');
@@ -625,7 +696,9 @@ export default function CalendarPage() {
                 ? 'Nothing booked in this range — every Expert is free.'
                 : isExpert
                   ? 'Nothing scheduled in this range.' + (canEditBlocks ? ' Drag on the grid to add time off.' : '')
-                  : 'No calls in this range.'
+                  : showOwnEvents
+                    ? 'No calls or events in this range. Drag on the grid to add an event.'
+                    : 'No calls in this range.'
               : `Times in ${zoneLabel(zone, anchor)}.`}
           </Typography>
           <Typography variant="caption" color="text.disabled" sx={{ display: { xs: 'none', sm: 'block' } }}>
@@ -639,7 +712,7 @@ export default function CalendarPage() {
           key={dialogKey}
           state={dialog}
           viewerZone={zone}
-          showExpert={dialog.expert.id !== user.id}
+          showExpert={dialog.target.type === 'timeoff' && dialog.target.expert.id !== user.id}
           onClose={() => {
             setDialog(null);
             setGridSelection(null);
@@ -682,7 +755,24 @@ export default function CalendarPage() {
             />
           </MenuItem>
         )}
-        {choice && selectedExpert && (
+        {choice && showOwnEvents && (
+          <MenuItem
+            onClick={() => {
+              const c = choice;
+              setChoice(null);
+              openCreate(null, c.start, c.end, false);
+            }}
+          >
+            <ListItemIcon>
+              <EventNoteRounded fontSize="small" sx={{ color: PERSONAL_EVENT_COLOR }} />
+            </ListItemIcon>
+            <ListItemText
+              primary="Add my event"
+              secondary={`${choice.start.toFormat('h:mm a')} – ${choice.end.toFormat('h:mm a')} · only you see it`}
+            />
+          </MenuItem>
+        )}
+        {choice && selectedExpert && canEditBlocks && (
           <MenuItem
             onClick={() => {
               const c = choice;

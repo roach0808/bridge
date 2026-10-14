@@ -163,6 +163,7 @@ model User {
   reviewedProfiles  Profile[]             @relation("ProfileReviewedBy")
   scheduleBlocks    ScheduleBlock[]       @relation("BlockExpert")
   createdBlocks     ScheduleBlock[]       @relation("BlockCreatedBy")
+  personalEvents    PersonalEvent[]
   conversationsA    Conversation[]        @relation("ConversationUserA")
   conversationsB    Conversation[]        @relation("ConversationUserB")
   groupsCreated     Conversation[]        @relation("ConversationCreatedBy")
@@ -360,6 +361,36 @@ model ScheduleBlock {
 
   @@index([expertId, startDate])
   @@map("schedule_blocks")
+}
+
+/// A Founder's own event: their schedule beside the calls, seen only by them.
+/// Repeats like a ScheduleBlock, but never blocks an Expert or a call.
+model PersonalEvent {
+  id              String    @id @default(uuid()) @db.Uuid
+  ownerId         String    @map("owner_id") @db.Uuid
+  title           String
+  note            String?
+  timeZone        String    @map("time_zone")
+  startDate       DateTime  @map("start_date") @db.Date
+  allDay          Boolean   @default(false) @map("all_day")
+  startMinute     Int       @map("start_minute")
+  durationMinutes Int       @map("duration_minutes")
+  frequency       Frequency @default(none)
+  interval        Int       @default(1)
+  weekdays        Int[]     @default([])
+  monthDay        Int?      @map("month_day")
+  setPosition     Int?      @map("set_position")
+  weekday         Int?
+  month           Int?
+  untilDate       DateTime? @map("until_date") @db.Date
+  exceptionDates  String[]  @default([]) @map("exception_dates")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  owner User @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+
+  @@index([ownerId, startDate])
+  @@map("personal_events")
 }
 
 model CallStatusHistory {

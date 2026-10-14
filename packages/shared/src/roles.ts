@@ -16,4 +16,7 @@ export const CREATABLE_ROLES: Record<Role, readonly Role[]> = {
   expert: [],
 };
 
+/** Who keeps their own events on the calendar, beside the calls (§6.9b). */
+export const PERSONAL_CALENDAR_ROLES: readonly Role[] = ['founder'];
+
 export const TEAM_TIME_ZONE = 'America/New_York';

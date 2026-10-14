@@ -19,6 +19,7 @@ export const qk = {
     all: ['calendar'] as const,
     expert: (from: string, to: string, expertId?: string) => ['calendar', 'expert', from, to, expertId ?? null] as const,
     experts: (from: string, to: string) => ['calendar', 'experts', from, to] as const,
+    personal: (from: string, to: string) => ['calendar', 'personal', from, to] as const,
   },
   users: {
     all: ['users'] as const,

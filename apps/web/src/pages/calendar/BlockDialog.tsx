@@ -33,7 +33,7 @@ import {
   type EditScope,
   type ExpertRef,
   type Frequency,
-  type Occurrence,
+  type PersonalEventDTO,
   type ScheduleBlockDTO,
 } from '@god/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
@@ -49,16 +49,20 @@ import { qk } from '@/lib/queryKeys';
 import { formatDuration, zoneLabel } from './calendarUtils';
 import { ScopeDialog } from './ScopeDialog';
 
+/** Whose calendar the dialog writes to: an Expert's time off, or the viewer's own event (§6.9b). */
+export type DialogTarget = { type: 'timeoff'; expert: ExpertRef } | { type: 'event'; timeZone: string };
+
 export type BlockDialogState =
   | {
       mode: 'create';
-      expert: ExpertRef;
+      target: DialogTarget;
       startDate: string;
       allDay: boolean;
       startMinute: number;
       durationMinutes: number;
     }
-  | { mode: 'edit'; expert: ExpertRef; rule: ScheduleBlockDTO; occurrence: Occurrence };
+  | { mode: 'edit'; target: { type: 'timeoff'; expert: ExpertRef }; rule: ScheduleBlockDTO; occurrence: { date: string } }
+  | { mode: 'edit'; target: { type: 'event'; timeZone: string }; rule: PersonalEventDTO; occurrence: { date: string } };
 
 type MonthlyMode = 'day' | 'nth' | 'last';
 type EndPreset = '1w' | '1m' | '3m' | '6m' | '1y' | 'date';
@@ -79,6 +83,8 @@ const QUICK_DURATIONS = [30, 60, 120, 240, 480];
 
 interface FormState {
   kind: BlockKind;
+  /** Events only. */
+  title: string;
   allDay: boolean;
   date: string;
   startMinute: number;
@@ -105,6 +111,7 @@ function initialForm(state: BlockDialogState): FormState {
   if (state.mode === 'create') {
     return {
       kind: 'unavailable',
+      title: '',
       allDay: state.allDay,
       date: state.startDate,
       startMinute: state.startMinute,
@@ -121,7 +128,8 @@ function initialForm(state: BlockDialogState): FormState {
   const { rule, occurrence } = state;
   const r = rule.repeat;
   return {
-    kind: rule.kind,
+    kind: 'kind' in rule ? rule.kind : 'unavailable',
+    title: 'title' in rule ? rule.title : '',
     allDay: rule.allDay,
     date: occurrence.date,
     startMinute: rule.startMinute,
@@ -176,11 +184,12 @@ function fieldFor(path: string): string {
 export function BlockDialog({
   state,
   viewerZone,
-  showExpert,
+  showExpert: showExpertProp,
   onClose,
 }: {
   state: BlockDialogState | null;
   viewerZone: string;
+  /** Name the Expert whose time off this is (when it is not the viewer's own). */
   showExpert: boolean;
   onClose: () => void;
 }) {
@@ -206,9 +215,18 @@ export function BlockDialog({
     }
   }, [state]);
 
-  const blockZone = state?.mode === 'edit' ? state.rule.timeZone : (state?.expert.timeZone ?? viewerZone);
+  const target = state?.target;
+  const isEvent = target?.type === 'event';
+  const expert = target?.type === 'timeoff' ? target.expert : null;
+  const showExpert = showExpertProp && Boolean(expert);
+  const noun = isEvent ? 'event' : 'time off';
+  const blockZone =
+    state?.mode === 'edit' ? state.rule.timeZone : target?.type === 'event' ? target.timeZone : (expert?.timeZone ?? viewerZone);
   const rule = useMemo(() => (form ? buildRule(form, blockZone) : null), [form, blockZone]);
-  const issues = useMemo(() => (rule ? validateBlock(rule) : []), [rule]);
+  const issues = useMemo(() => {
+    const found = rule ? validateBlock(rule) : [];
+    return isEvent && form && !form.title.trim() ? [{ path: 'title', message: 'Give the event a title' }, ...found] : found;
+  }, [rule, isEvent, form]);
   const clientErrors = useMemo(() => {
     const out: Record<string, string> = {};
     for (const i of issues) out[fieldFor(i.path)] ??= i.message;
@@ -232,8 +250,20 @@ export function BlockDialog({
   const save = useMutation({
     mutationFn: async (scope: EditScope | null) => {
       if (!state || !form || !rule) throw new Error('Nothing to save');
+      const when = {
+        startDate: rule.startDate,
+        allDay: rule.allDay,
+        startMinute: rule.startMinute,
+        durationMinutes: rule.durationMinutes,
+        repeat: rule.repeat,
+        note: rule.note ?? null,
+      };
+      if (state.mode === 'create' && state.target.type === 'event') {
+        return api.personalEvents.create({ title: form.title.trim(), ...when });
+      }
       if (state.mode === 'create') {
-        return api.scheduleBlocks.create(state.expert.id, {
+        if (state.target.type !== 'timeoff') throw new Error('Nothing to save');
+        return api.scheduleBlocks.create(state.target.expert.id, {
           kind: rule.kind,
           startDate: rule.startDate,
           allDay: rule.allDay,
@@ -252,21 +282,16 @@ export function BlockDialog({
         const shift = dateOf(form.date).diff(dateOf(state.occurrence.date), 'days').days;
         startDate = dateOf(original.startDate).plus({ days: Math.round(shift) }).toISODate()!;
       }
-      return api.scheduleBlocks.update(original.id, {
+      const which = {
         scope: effectiveScope,
         ...(repeating && effectiveScope !== 'all' ? { occurrenceDate: state.occurrence.date } : {}),
-        changes: {
-          kind: rule.kind,
-          startDate,
-          allDay: rule.allDay,
-          startMinute: rule.startMinute,
-          durationMinutes: rule.durationMinutes,
-          repeat: rule.repeat,
-          note: rule.note ?? null,
-        },
-      });
+      };
+      if (state.target.type === 'event') {
+        return api.personalEvents.update(original.id, { ...which, changes: { ...when, title: form.title.trim(), startDate } });
+      }
+      return api.scheduleBlocks.update(original.id, { ...which, changes: { ...when, kind: rule.kind, startDate } });
     },
-    onSuccess: () => done(state?.mode === 'create' ? 'Time off added' : 'Time off updated'),
+    onSuccess: () => done(`${isEvent ? 'Event' : 'Time off'} ${state?.mode === 'create' ? 'added' : 'updated'}`),
     onError: (err) => {
       setScopeFor(null);
       onMutationError(err);
@@ -277,9 +302,10 @@ export function BlockDialog({
     mutationFn: async (scope: EditScope) => {
       if (state?.mode !== 'edit') throw new Error('Nothing to delete');
       const repeating = state.rule.repeat.frequency !== 'none';
-      return api.scheduleBlocks.remove(state.rule.id, repeating ? scope : 'all', repeating && scope !== 'all' ? state.occurrence.date : undefined);
+      const args = [state.rule.id, repeating ? scope : 'all', repeating && scope !== 'all' ? state.occurrence.date : undefined] as const;
+      return state.target.type === 'event' ? api.personalEvents.remove(...args) : api.scheduleBlocks.remove(...args);
     },
-    onSuccess: () => done('Time off deleted'),
+    onSuccess: () => done(`${isEvent ? 'Event' : 'Time off'} deleted`),
     onError: (err) => {
       setScopeFor(null);
       onMutationError(err);
@@ -303,7 +329,8 @@ export function BlockDialog({
   const editing = state.mode === 'edit';
   const originalRepeating = editing && state.rule.repeat.frequency !== 'none';
   const repeatChanged =
-    editing && JSON.stringify(normalizeBlock({ ...state.rule, note: null }).repeat) !== JSON.stringify(rule.repeat);
+    editing &&
+    JSON.stringify(normalizeBlock({ ...state.rule, kind: rule.kind, note: null }).repeat) !== JSON.stringify(rule.repeat);
   const busy = save.isPending || remove.isPending;
 
   const submit = () => {
@@ -341,15 +368,29 @@ export function BlockDialog({
       <Dialog open={Boolean(state)} onClose={busy ? undefined : onClose} maxWidth="sm" fullWidth fullScreen={fullScreen}>
         <DialogTitle sx={{ pb: 1 }}>
           <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
-            <span>{editing ? 'Edit time off' : 'Add time off'}</span>
-            {showExpert && <UserChip user={state.expert} size={24} showRole={false} />}
+            <span>{`${editing ? 'Edit' : 'Add'} ${noun}`}</span>
+            {showExpert && expert && <UserChip user={expert} size={24} showRole={false} />}
           </Stack>
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2.25} sx={{ pt: 1 }}>
             {serverError && !Object.keys(serverErrors).some((k) => knownFields[k]) && <Alert severity="error">{serverError}</Alert>}
 
-            {AVAILABILITY_ENABLED && (
+            {isEvent && (
+              <TextField
+                label="Title"
+                value={form.title}
+                onChange={(e) => set({ title: e.target.value })}
+                autoFocus={!editing}
+                required
+                error={Boolean(errors.title)}
+                helperText={errors.title}
+                placeholder="Board meeting, dentist, flight…"
+                slotProps={{ htmlInput: { maxLength: 200 } }}
+              />
+            )}
+
+            {AVAILABILITY_ENABLED && !isEvent && (
               <ToggleButtonGroup
                 exclusive
                 size="small"
@@ -367,7 +408,7 @@ export function BlockDialog({
                 label="All day"
               />
               <Typography variant="caption" color="text.secondary">
-                {`${showExpert ? `${state.expert.nickname}'s time` : 'Your time'} · ${zoneLabel(blockZone, localStart)}`}
+                {`${showExpert && expert ? `${expert.nickname}'s time` : 'Your time'} · ${zoneLabel(blockZone, localStart)}`}
               </Typography>
             </Stack>
 
@@ -625,7 +666,7 @@ sx={{
               multiline
               minRows={2}
               error={Boolean(errors.note)}
-              helperText={errors.note ?? 'Only you and the Founder can see this'}
+              helperText={errors.note ?? (isEvent ? 'Only you can see this event' : 'Only you and the Founder can see this')}
               slotProps={{ htmlInput: { maxLength: 1000 } }}
             />
 
@@ -644,7 +685,7 @@ sx={{
             Cancel
           </Button>
           <Button variant="contained" onClick={submit} disabled={busy || (submitted && issues.length > 0)}>
-            {save.isPending && !scopeFor ? <CircularProgress size={18} color="inherit" /> : editing ? 'Save' : 'Add time off'}
+            {save.isPending && !scopeFor ? <CircularProgress size={18} color="inherit" /> : editing ? 'Save' : `Add ${noun}`}
           </Button>
         </DialogActions>
       </Dialog>
@@ -652,6 +693,7 @@ sx={{
       <ScopeDialog
         open={scopeFor !== null}
         action={scopeFor ?? 'edit'}
+        noun={noun}
         allowThis={scopeFor === 'delete' || !repeatChanged}
         busy={busy}
         onClose={() => setScopeFor(null)}
@@ -660,8 +702,8 @@ sx={{
 
       <ConfirmDialog
         open={confirmDelete}
-        title="Delete time off?"
-        description="This removes the time off from the calendar."
+        title={`Delete ${noun}?`}
+        description={`This removes the ${noun} from the calendar.`}
         confirmLabel="Delete"
         destructive
         onClose={() => setConfirmDelete(false)}
@@ -672,6 +714,7 @@ sx={{
 }
 
 const knownFields: Record<string, true> = {
+  title: true,
   startDate: true,
   startMinute: true,
   durationMinutes: true,

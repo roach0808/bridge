@@ -594,14 +594,18 @@ export const deviceSchema = z.object({
 
 export const MAX_CALENDAR_RANGE_DAYS = 62;
 
+function checkRange(v: { from: string; to: string }, ctx: z.RefinementCtx) {
+  const span = (Date.parse(v.to) - Date.parse(v.from)) / 86_400_000;
+  if (span <= 0) ctx.addIssue({ code: 'custom', path: ['to'], message: '`to` must be after `from`' });
+  if (span > MAX_CALENDAR_RANGE_DAYS)
+    ctx.addIssue({ code: 'custom', path: ['to'], message: `Range can be at most ${MAX_CALENDAR_RANGE_DAYS} days` });
+}
+
 export const calendarQuerySchema = z
   .object({ from: isoDateTime, to: isoDateTime, expertId: uuid.optional() })
-  .superRefine((v, ctx) => {
-    const span = (Date.parse(v.to) - Date.parse(v.from)) / 86_400_000;
-    if (span <= 0) ctx.addIssue({ code: 'custom', path: ['to'], message: '`to` must be after `from`' });
-    if (span > MAX_CALENDAR_RANGE_DAYS)
-      ctx.addIssue({ code: 'custom', path: ['to'], message: `Range can be at most ${MAX_CALENDAR_RANGE_DAYS} days` });
-  });
+  .superRefine(checkRange);
+
+export const calendarRangeSchema = z.object({ from: isoDateTime, to: isoDateTime }).superRefine(checkRange);
 
 export const repeatSchema = z.object({
   frequency: z.enum(FREQUENCIES).default('none'),
@@ -641,6 +645,31 @@ export const blockPatchSchema = z.object({
 export const blockDeleteQuerySchema = z.object({
   scope: z.enum(EDIT_SCOPES).default('all'),
   date: isoDate.optional(),
+});
+
+/** A Founder's own event (§6.9b): when it is, like a schedule block, and what it is. */
+export const personalEventBodySchema = z.object({
+  title: trimmed('Title', 200),
+  startDate: isoDate,
+  allDay: z.boolean().default(false),
+  startMinute: z.number().int().default(0),
+  durationMinutes: z.number().int().default(60),
+  repeat: repeatSchema.default({}),
+  note: optionalText(1000).optional(),
+});
+
+export const personalEventPatchSchema = z.object({
+  scope: z.enum(EDIT_SCOPES).default('all'),
+  occurrenceDate: isoDate.optional(),
+  changes: z.object({
+    title: trimmed('Title', 200).optional(),
+    startDate: isoDate.optional(),
+    allDay: z.boolean().optional(),
+    startMinute: z.number().int().optional(),
+    durationMinutes: z.number().int().optional(),
+    repeat: repeatSchema.partial().optional(),
+    note: optionalText(1000).optional(),
+  }),
 });
 
 // --- Banks & photos ------------------------------------------------------------
@@ -705,3 +734,5 @@ export type PaymentStatsQuery = z.input<typeof paymentStatsQuerySchema>;
 export type ListCallsQuery = z.input<typeof listCallsQuerySchema>;
 export type BlockBodyInput = z.input<typeof blockBodySchema>;
 export type BlockPatchInput = z.input<typeof blockPatchSchema>;
+export type PersonalEventBodyInput = z.input<typeof personalEventBodySchema>;
+export type PersonalEventPatchInput = z.input<typeof personalEventPatchSchema>;

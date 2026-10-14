@@ -22,6 +22,7 @@ const LABELS: Record<EditScope, string> = {
 export function ScopeDialog({
   open,
   action,
+  noun = 'time off',
   allowThis = true,
   busy,
   onConfirm,
@@ -29,6 +30,8 @@ export function ScopeDialog({
 }: {
   open: boolean;
   action: 'edit' | 'delete';
+  /** What repeats: "time off" or "event". */
+  noun?: string;
   allowThis?: boolean;
   busy?: boolean;
   onConfirm: (scope: EditScope) => void;
@@ -42,7 +45,7 @@ export function ScopeDialog({
   const options: EditScope[] = allowThis ? ['this', 'following', 'all'] : ['following', 'all'];
   return (
     <Dialog open={open} onClose={busy ? undefined : onClose} maxWidth="xs" fullWidth>
-      <DialogTitle>{action === 'edit' ? 'Edit recurring time off' : 'Delete recurring time off'}</DialogTitle>
+      <DialogTitle>{`${action === 'edit' ? 'Edit' : 'Delete'} recurring ${noun}`}</DialogTitle>
       <DialogContent>
         <RadioGroup value={scope} onChange={(_, v) => setScope(v as EditScope)}>
           {options.map((s) => (
