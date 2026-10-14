@@ -1,5 +1,5 @@
 import { Box, Stack, Tooltip, Typography, alpha } from '@mui/material';
-import type { ExpertRef, Occurrence } from '@god/shared';
+import type { ExpertRef, Occurrence, PersonalEventOccurrence } from '@god/shared';
 import { DateTime } from 'luxon';
 import { useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { AVAILABILITY_ENABLED } from '@/lib/features';
@@ -21,7 +21,7 @@ import {
   snapFloor,
   type CalendarSource,
 } from './calendarUtils';
-import { BusyBlock, CallBlock, EventPill, TimeOffBlock, pal, timeOffTitle } from './EventBlocks';
+import { BusyBlock, CallBlock, EventPill, PersonalEventBlock, TimeOffBlock, pal, timeOffTitle } from './EventBlocks';
 import { useNow } from './useNow';
 
 export interface GridColumn {
@@ -61,6 +61,8 @@ export function TimeGrid({
   onOpenCall,
   onEditTimeOff,
   notes,
+  eventTitles,
+  onEditEvent,
   onDayHeaderClick,
   height,
 }: {
@@ -78,10 +80,14 @@ export function TimeGrid({
   onOpenCall: (id: string) => void;
   onEditTimeOff?: (o: Occurrence) => void;
   notes?: Map<string, string | null>;
+  /** Titles of the viewer's own events, by id. */
+  eventTitles?: Map<string, string>;
+  onEditEvent?: (o: PersonalEventOccurrence) => void;
   onDayHeaderClick?: (day: DateTime) => void;
   height: string | number;
 }) {
   const now = useNow();
+  const eventTitle = (id: string) => eventTitles?.get(id) ?? 'Event';
   const scrollRef = useRef<HTMLDivElement>(null);
   const multi = columns.length > 1 || Boolean(columns[0]?.expert);
 
@@ -105,15 +111,15 @@ export function TimeGrid({
     () =>
       days.map((day) => {
         const iso = day.toISODate();
-        return prepared.flatMap((p) =>
-          p.allDay
-            .filter((o) => DateTime.fromISO(o.startsAt).setZone(zone).toISODate() === iso)
-            .map((o) => ({ o, column: p.column })),
-        );
+        const onDay = (o: { startsAt: string }) => DateTime.fromISO(o.startsAt).setZone(zone).toISODate() === iso;
+        return {
+          timeOff: prepared.flatMap((p) => p.allDay.filter(onDay).map((o) => ({ o, column: p.column }))),
+          events: prepared.flatMap((p) => p.allDayEvents.filter(onDay)),
+        };
       }),
     [days, prepared, zone],
   );
-  const hasAllDay = allDayByDay.some((d) => d.length > 0);
+  const hasAllDay = allDayByDay.some((d) => d.timeOff.length > 0 || d.events.length > 0);
 
   const todayIndex = days.findIndex((d) => d.hasSame(now.setZone(zone), 'day'));
   const refDay = days[todayIndex >= 0 ? todayIndex : 0]!;
@@ -256,13 +262,23 @@ export function TimeGrid({
                   All day
                 </Typography>
               </Box>
-              {allDayByDay.map((items, i) => (
+              {allDayByDay.map(({ timeOff, events }, i) => (
                 <Stack
                   key={days[i]!.toISODate()}
                   spacing={0.25}
                   sx={(t) => ({ flex: 1, minWidth: 0, p: 0.25, borderLeft: `1px solid ${pal(t).divider}`, minHeight: 26 })}
                 >
-                  {items.map(({ o, column }, j) => {
+                  {events.map((o, j) => (
+                    <EventPill
+                      key={`${o.eventId}-${j}`}
+                      kind="event"
+                      repeat={o.isRecurring}
+                      title={eventTitle(o.eventId)}
+                      tooltip={`${eventTitle(o.eventId)} · all day · only you see this`}
+                      onClick={onEditEvent ? () => onEditEvent(o) : undefined}
+                    />
+                  ))}
+                  {timeOff.map(({ o, column }, j) => {
                     const note = o.blockId ? notes?.get(o.blockId) : undefined;
                     const title = timeOffTitle(note);
                     return (
@@ -390,6 +406,15 @@ export function TimeGrid({
                           )}
                           {ev.type === 'busy' && (
                             <BusyBlock start={ev.busy.startsAt} end={ev.busy.endsAt} zone={zone} heightPx={hPx} tentative={ev.busy.tentative} />
+                          )}
+                          {ev.type === 'event' && (
+                            <PersonalEventBlock
+                              occurrence={ev.occurrence}
+                              zone={zone}
+                              heightPx={hPx}
+                              title={eventTitle(ev.occurrence.eventId)}
+                              onEdit={onEditEvent}
+                            />
                           )}
                           {ev.type === 'timeoff' && (
                             <TimeOffBlock

@@ -1,8 +1,9 @@
 import BlockRounded from '@mui/icons-material/BlockRounded';
 import EventBusyRounded from '@mui/icons-material/EventBusyRounded';
+import EventNoteRounded from '@mui/icons-material/EventNoteRounded';
 import RepeatRounded from '@mui/icons-material/RepeatRounded';
 import { Box, ButtonBase, Stack, Tooltip, Typography, alpha, type Theme } from '@mui/material';
-import { STATUS_LABELS, type CalendarCall, type Occurrence } from '@god/shared';
+import { STATUS_LABELS, type CalendarCall, type Occurrence, type PersonalEventOccurrence } from '@god/shared';
 import { DateTime } from 'luxon';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { STATUS_COLORS, StatusBadge, StatusChip } from '@/components/StatusChip';
@@ -252,6 +253,48 @@ export function TimeOffBlock({
   );
 }
 
+/** The viewer's own events (§6.9b): a hue no call status or time off uses. */
+export const PERSONAL_EVENT_COLOR = '#e0679a';
+
+export function PersonalEventBlock({
+  occurrence,
+  zone,
+  title,
+  heightPx,
+  onEdit,
+}: {
+  occurrence: PersonalEventOccurrence;
+  zone: string;
+  title: string;
+  heightPx: number;
+  onEdit?: (o: PersonalEventOccurrence) => void;
+}) {
+  const range = occurrence.allDay ? 'All day' : formatRange(occurrence.startsAt, occurrence.endsAt, zone);
+  return (
+    <BlockShell
+      accent={PERSONAL_EVENT_COLOR}
+      background={alpha(PERSONAL_EVENT_COLOR, 0.14)}
+      hoverBackground={alpha(PERSONAL_EVENT_COLOR, 0.24)}
+      onClick={onEdit ? () => onEdit(occurrence) : undefined}
+      label={`${title}, ${range}`}
+      tooltip={`${title} · ${range}${occurrence.isRecurring ? ' · repeats' : ''} · only you see this`}
+    >
+      <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
+        <EventNoteRounded sx={{ fontSize: 13, color: PERSONAL_EVENT_COLOR }} />
+        <Typography variant="caption" noWrap sx={{ fontWeight: 600, fontSize: 11.5, flex: 1, minWidth: 0 }}>
+          {title}
+        </Typography>
+        {occurrence.isRecurring && <RepeatRounded sx={{ fontSize: 12, color: 'text.secondary' }} />}
+      </Stack>
+      {heightPx >= 34 && (
+        <Typography className="cal-sub" variant="caption" noWrap component="div" sx={{ color: 'text.secondary', fontSize: 11 }}>
+          {range}
+        </Typography>
+      )}
+    </BlockShell>
+  );
+}
+
 /** One-line pill for the all-day row and month cells. */
 export function EventPill({
   kind,
@@ -263,7 +306,7 @@ export function EventPill({
   tooltip,
   repeat,
 }: {
-  kind: 'call' | 'timeoff' | 'busy';
+  kind: 'call' | 'timeoff' | 'busy' | 'event';
   title: ReactNode;
   /** Shown at the end of the pill, e.g. a call's status badge. */
   badge?: ReactNode;
@@ -293,7 +336,9 @@ export function EventPill({
             ? { bg: t.alpha(pal(t).warning.main, 0.12), hover: t.alpha(pal(t).warning.main, 0.2), bar: pal(t).warning.main }
             : kind === 'busy'
               ? { bg: `${hatch(t)}, ${t.alpha(pal(t).text.primary, 0.04)}`, hover: undefined, bar: t.alpha(pal(t).text.primary, 0.25) }
-              : { bg: alpha(tint ?? accent ?? '#64748b', 0.16), hover: alpha(tint ?? accent ?? '#64748b', 0.26), bar: accent ?? '#64748b' };
+              : kind === 'event'
+                ? { bg: alpha(PERSONAL_EVENT_COLOR, 0.14), hover: alpha(PERSONAL_EVENT_COLOR, 0.24), bar: PERSONAL_EVENT_COLOR }
+                : { bg: alpha(tint ?? accent ?? '#64748b', 0.16), hover: alpha(tint ?? accent ?? '#64748b', 0.26), bar: accent ?? '#64748b' };
         return {
           display: 'flex',
           alignItems: 'center',
@@ -313,6 +358,7 @@ export function EventPill({
       }}
     >
       {kind === 'timeoff' && <EventBusyRounded sx={{ fontSize: 12, color: 'warning.main' }} />}
+      {kind === 'event' && <EventNoteRounded sx={{ fontSize: 12, color: PERSONAL_EVENT_COLOR }} />}
       <Typography variant="caption" noWrap sx={{ fontSize: 11, fontWeight: 600, flex: 1, minWidth: 0, lineHeight: 1 }}>
         {title}
       </Typography>

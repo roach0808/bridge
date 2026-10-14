@@ -136,6 +136,7 @@ const NAMES: Array<[RegExp, string, boolean?]> = [
   [/^auth\/logout$/, 'auth.logout', true],
   [/^audit/, 'audit'],
   [/^schedule-blocks|^experts\/:id\/schedule-blocks/, 'schedule'],
+  [/^personal-events/, 'personal_event'],
   [/^push/, 'push'],
   [/^stats\/profiles$/, 'stats.profiles', true],
 ];
@@ -197,6 +198,9 @@ const SUMMARIES: Record<string, string> = {
   'todo.note.create': 'added a note to a task',
   'todo.note.update': 'changed a note on a task',
   'todo.note.delete': 'deleted a note on a task',
+  'personal_event.create': 'added an event to their own calendar',
+  'personal_event.update': 'changed an event on their own calendar',
+  'personal_event.delete': 'removed an event from their own calendar',
   // No longer recorded; kept so entries written before still read well.
   'audit.read': 'read the audit trail',
   'stats.profiles': 'looked at profile statistics (emails and banks)',

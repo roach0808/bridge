@@ -416,6 +416,40 @@ export interface ExpertsCalendarResponse {
   experts: ExpertColumn[];
 }
 
+/** A Founder's own event (§6.9b): a repeat rule like a schedule block, with a title. */
+export interface PersonalEventDTO extends Omit<BlockRule, 'kind'> {
+  id: string;
+  title: string;
+  note: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One date of a personal event, expanded for the range asked for. */
+export interface PersonalEventOccurrence {
+  eventId: string;
+  /** Local date of the occurrence in the event's zone. */
+  date: string;
+  startsAt: string;
+  endsAt: string;
+  allDay: boolean;
+  isRecurring: boolean;
+}
+
+export interface PersonalEventsResponse {
+  from: string;
+  to: string;
+  occurrences: PersonalEventOccurrence[];
+  /** The rules behind the occurrences, for titles, notes and editing. */
+  events: PersonalEventDTO[];
+}
+
+export interface PersonalEventMutationResult {
+  updated: PersonalEventDTO | null;
+  deleted: string[];
+  created: PersonalEventDTO[];
+}
+
 /** A signed-in session: one browser or app, until the user signs out. */
 export interface SessionDTO {
   id: string;

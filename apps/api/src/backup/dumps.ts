@@ -27,6 +27,7 @@ const TABLES = {
   call_status_history: () => prisma.callStatusHistory.findMany(),
   messages: () => prisma.message.findMany(),
   schedule_blocks: () => prisma.scheduleBlock.findMany(),
+  personal_events: () => prisma.personalEvent.findMany(),
   conversations: () => prisma.conversation.findMany(),
   conversation_members: () => prisma.conversationMember.findMany(),
   chat_messages: () => prisma.chatMessage.findMany(),
