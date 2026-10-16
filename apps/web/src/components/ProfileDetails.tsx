@@ -34,6 +34,7 @@ import { DateTime } from 'luxon';
 import { useEffect, useState, type ReactNode } from 'react';
 import { useMe } from '@/auth/AuthProvider';
 import { ProfileBanks } from '@/components/BanksDialog';
+import { CredentialList } from '@/components/Credentials';
 import { ErrorState, Field } from '@/components/common';
 import { UserAvatar } from '@/components/identity';
 import { useToast } from '@/components/ToastProvider';
@@ -402,6 +403,20 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
             Banks
           </Typography>
           <ProfileBanks profileId={p.id} />
+        </Box>
+      )}
+
+      {/* Passwords (§6.17): the Profile's saved logins, for Founders and the team handling it; never Experts. */}
+      {role !== 'expert' && (
+        <Box>
+          <Typography variant="subtitle2" sx={{ mb: 0.25 }}>
+            Passwords
+          </Typography>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
+            This profile’s logins — its platforms, its email and the rest. Only Founders and the team handling the profile see
+            them.
+          </Typography>
+          <CredentialList owner={{ kind: 'profile', id: p.id }} emptyText="No saved login yet." />
         </Box>
       )}
 

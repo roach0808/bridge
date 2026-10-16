@@ -97,6 +97,7 @@ grouped under Managers; they are assigned per Call.
 | Add, edit, delete a Profile's banks; the Banks page | ✓ | | | |
 | See a Profile's banks (§6.9a) | every field | all but the password and where it is signed in (Profiles they can see) | same | nothing |
 | Reveal a bank's password (audited) | ✓ | | | |
+| Saved logins (password managers, §6.17): see, reveal (audited), add, change, delete | ✓ every Profile's and every team's | own team's and its Profiles' | own team's and its Profiles' | |
 | Choose the bank an invoice is submitted to | ✓ | | | |
 | Upload own photo | ✓ | ✓ | ✓ | ✓ |
 | Upload a Profile photo | ✓ | | | |
@@ -718,6 +719,20 @@ copy). The newest 7 are kept; older rows are deleted after each run.
 | subject | text | Google's permanent account id (`sub`); unique per provider |
 | email | text, nullable | The Google address when linked or last used |
 | created_at, last_used_at | timestamptz | |
+
+#### Credential (password managers) **[Implementation]**
+
+| Field | Type | Notes |
+|---|---|---|
+| id | uuid | |
+| profile_id | uuid → Profile, nullable | A Profile's login. Deleted with the Profile, and erased when a Profile with calls is deleted |
+| team_id | uuid → User (a Manager), nullable | A team's own login. Exactly one of profile_id and team_id is set |
+| nickname | text | What the team calls it, e.g. "Main GLG login" (≤ 80) |
+| platform | text | Where it signs in, free text: GLG, Gmail, LinkedIn… (≤ 120) |
+| login | text, nullable | The email or username (≤ 200) |
+| password_enc | text, nullable | Encrypted like bank passwords (AES-256-GCM); never returned except by the audited reveal |
+| created_by, updated_by | uuid → User | |
+| created_at, updated_at | timestamptz | |
 
 #### AuditLog
 
@@ -1691,6 +1706,29 @@ Entries are kept 365 days, trimmed after each nightly dump. Web: **Audit**
 
 ---
 
+### 6.17 Password managers **[Implementation]**
+
+Saved logins, like a browser's password manager, in two places: each
+Profile's (its expert-network platforms, its email and the rest) and each
+team's (accessory platforms the team shares). Founders use every one; a
+Manager and their Associates use their own team's and those of the Profiles
+their team handles (§2.4); Experts none. Everyone who sees a login may also
+add, change and delete it. Anyone else gets 404.
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /profiles/:id/credentials | Founder, the Profile's team | The Profile's logins, by platform then nickname |
+| POST | /profiles/:id/credentials | same | { nickname, platform, login?, password? } |
+| GET | /teams/:managerId/credentials | Founder, that team | A team is named by its Manager |
+| POST | /teams/:managerId/credentials | same | As above |
+| GET | /credentials/:id/password | whoever sees the login | { password } — audited (`credential.password`) |
+| PATCH | /credentials/:id | same | Any of the fields; leave `password` out to keep it, `null` or "" to remove it |
+| DELETE | /credentials/:id | same | |
+
+A login comes back as { id, profileId, teamId, nickname, platform, login,
+hasPassword, createdBy, updatedBy, createdAt, updatedAt } — never with its
+password. Moving a Profile to another team moves its logins with it.
+
 ## 7. Real-time (Socket.IO)
 
 ### 7.1 Connection
@@ -1840,6 +1878,7 @@ Everyone sees whether the people they may chat with are at their screen.
 | Team | Manager | Own Associates, create (with their share), deactivate; each card shows the Associate's portion of the Manager's share, which the Manager edits |
 | Users | Founder | All users, create any role, with a **Pay** column (an Expert's hourly rate, an Associate's share) set in the create and edit dialogs; editing an Expert's rate can also price their finished calls that have none. Edit user has a **Sign-in** section (shown on request, audited: sign-in email, linked Google account, Unlink) and **Delete user** |
 | Invoicing | Founder | Calls in `finished` and invoice stages with expected price and real income, batch transitions; paying asks for the real income per call (starting at the expected price). Rows say "No bank yet" for a Profile with no open bank account. Submitting invoices asks, for each Profile, which of its active banks they are paid into, by nickname (the only one is chosen already; none offers **Add bank**) |
+| Passwords | Founder, Manager, Associate | A team's shared logins (§6.17): nickname, platform, email or username, the password hidden until shown or copied (both audited), with edit and delete for each and **Add login**. A Founder picks the team (`?team=`). A Profile's own logins are a **Passwords** section on the Profile's page, after Banks |
 | Banks | Founder | Every bank of every Profile in one table: nickname, Profile, type, bank name and address, routing, account and SWIFT numbers, the login (email, password behind **Show**, where it is signed in) and status, filtered by Profile, type, bank name and status (active ones by default) and searched by any field; add (choosing the Profile first), edit, activate or deactivate, delete. A Profile's banks also show in its details: every field for the Founder, who manages them there too, and all but the login secrets for Managers and Associates |
 | Statistics | Founder, Manager, Associate | §6.14. Not in the sidebar for now (since 2026-10-05); the page still opens at `/stats` |
 | Audit | Founder | §6.16, including the **Device** column (`US-desktop-01`) |
@@ -2207,6 +2246,7 @@ Container alternative:
 | 2026-10-13 | **Removing a task**: a Founder removes any task, at any stage; anyone else only once it is completed, and then only whoever gave it or whoever it is for (before, the giver could remove an open one). **Notes on a task**, with no length cap, kept by the people who can see it, in a panel that a row now opens beside the table. A Founder's or a Manager's Tasks page has the **people as a tree** beside the table — teams under their Managers, the Experts, the rest — in place of the Owner filter |
 | 2026-10-14 | **The Founder's own calendar**: events of their own — not consultation calls — on the Calendar beside the calls, with a title, a note and the same repeats and this / following / all edits as time off. Only the Founder sees them, and they never block an Expert or a call |
 | 2026-10-16 | **Teams are closed to each other** (§2.4): a Manager and their Associates see only their own team's Profiles (approved ones are no longer shared; a Profile with no team is the Founder's), Calls, calendar details, people, statistics and tasks. A Call's Profile must be its team's, so Calls stay inside their team. Chat, presence and groups stay inside the team too (Managers still talk to each other, everyone to the Founders), and Associates may now chat with their teammates. On a shared Expert's calendar, other teams' Calls show only as busy time |
+| 2026-10-16 | **Password managers**: saved logins (nickname, platform, email or username, password) for each Profile, on its page, and for each team, on a new Passwords page. The team concerned and the Founders see, copy and keep them; passwords are encrypted, and every one shown or copied is in the audit trail |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

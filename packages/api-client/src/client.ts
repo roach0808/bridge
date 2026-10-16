@@ -20,6 +20,9 @@ import type {
   BlockBodyInput,
   BlockPatchInput,
   CalendarResponse,
+  CredentialDTO,
+  CredentialInput,
+  UpdateCredentialInput,
   PersonalEventBodyInput,
   PersonalEventDTO,
   PersonalEventMutationResult,
@@ -215,6 +218,19 @@ export function createApiClient(options: ClientOptions) {
       signIn: (id: string) => get<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`),
       setSignInEmail: (id: string, email: string) => patch<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`, { email }),
       unlinkGoogle: (id: string) => del<SignInDetailsDTO>(`/users/${enc(id)}/google`),
+    },
+
+    /** Password managers (§6.17): a Profile's saved logins, or a team's. Never Experts. */
+    credentials: {
+      forProfile: (profileId: string) => get<CredentialDTO[]>(`/profiles/${enc(profileId)}/credentials`),
+      createForProfile: (profileId: string, body: CredentialInput) => post<CredentialDTO>(`/profiles/${enc(profileId)}/credentials`, body),
+      /** A team is named by its Manager. */
+      forTeam: (managerId: string) => get<CredentialDTO[]>(`/teams/${enc(managerId)}/credentials`),
+      createForTeam: (managerId: string, body: CredentialInput) => post<CredentialDTO>(`/teams/${enc(managerId)}/credentials`, body),
+      /** The saved password, recorded in the audit trail. */
+      password: (id: string) => get<{ password: string | null }>(`/credentials/${enc(id)}/password`),
+      update: (id: string, body: UpdateCredentialInput) => patch<CredentialDTO>(`/credentials/${enc(id)}`, body),
+      remove: (id: string) => del<void>(`/credentials/${enc(id)}`),
     },
 
     platforms: {

@@ -28,6 +28,7 @@ const TABLES = {
   messages: () => prisma.message.findMany(),
   schedule_blocks: () => prisma.scheduleBlock.findMany(),
   personal_events: () => prisma.personalEvent.findMany(),
+  credentials: () => prisma.credential.findMany(),
   conversations: () => prisma.conversation.findMany(),
   conversation_members: () => prisma.conversationMember.findMany(),
   chat_messages: () => prisma.chatMessage.findMany(),

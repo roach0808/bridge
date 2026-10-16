@@ -707,6 +707,26 @@ export const updateBankSchema = z
   .partial()
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 
+// --- Password managers (§6.17) -------------------------------------------------
+
+const credentialFields = {
+  /** What the team calls this login, e.g. "Main GLG login". */
+  nickname: trimmed('Nickname', 80),
+  /** Where it signs in: free text, e.g. GLG, Gmail, LinkedIn. */
+  platform: trimmed('Platform', 120),
+  /** The email or username. */
+  login: optionalText(200).optional(),
+  /** On an edit, leave it out to keep it; send null or "" to remove it. */
+  password: z.string().max(500, 'Password is too long').nullish(),
+};
+
+export const credentialSchema = z.object(credentialFields);
+
+export const updateCredentialSchema = z
+  .object(credentialFields)
+  .partial()
+  .refine((v) => Object.values(v).some((x) => x !== undefined), 'Nothing to change');
+
 export const PHOTO_MAX_BYTES = 400 * 1024;
 export const PHOTO_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
@@ -734,5 +754,7 @@ export type PaymentStatsQuery = z.input<typeof paymentStatsQuerySchema>;
 export type ListCallsQuery = z.input<typeof listCallsQuerySchema>;
 export type BlockBodyInput = z.input<typeof blockBodySchema>;
 export type BlockPatchInput = z.input<typeof blockPatchSchema>;
+export type CredentialInput = z.input<typeof credentialSchema>;
+export type UpdateCredentialInput = z.input<typeof updateCredentialSchema>;
 export type PersonalEventBodyInput = z.input<typeof personalEventBodySchema>;
 export type PersonalEventPatchInput = z.input<typeof personalEventPatchSchema>;
