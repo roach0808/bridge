@@ -23,9 +23,9 @@ export interface CallAccessShape {
 
 type Viewer = Pick<Actor, 'id' | 'role' | 'managerId'>;
 
-/** The Founder oversees every call; a Manager every Associate's call, and their own. */
-const supervisesCall = (actor: Pick<Actor, 'id' | 'role'>, call: CallAccessShape) =>
-  supervisesWork(actor, { id: call.associateId, role: call.associate.role as Role });
+/** The Founder oversees every call; a Manager their own team's: their Associates' calls, and their own. */
+const supervisesCall = (actor: Viewer, call: CallAccessShape) =>
+  supervisesWork(actor, { id: call.associateId, role: call.associate.role as Role, managerId: call.associate.managerId });
 
 /** The team a call belongs to, by its Manager: the Manager who runs it, or the Manager of the Associate who does. */
 export const callTeamOf = (call: Pick<CallAccessShape, 'associateId' | 'associate'>): string | null =>
@@ -44,8 +44,8 @@ export function visibleCallsWhere(actor: Viewer): Prisma.CallWhereInput {
     case 'founder':
       return {};
     case 'manager':
-      // Every Associate's calls, and the calls they run themselves.
-      return { OR: [{ associate: { role: 'associate' } }, { associateId: actor.id }] };
+      // Their own team's: their Associates' calls, and the calls they run themselves.
+      return { OR: [{ associate: { role: 'associate', managerId: actor.id } }, { associateId: actor.id }] };
     case 'associate':
       // Their own calls, their teammates' and their Manager's.
       return actor.managerId

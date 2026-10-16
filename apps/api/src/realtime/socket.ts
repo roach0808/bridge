@@ -27,6 +27,7 @@ export function createSocketServer(httpServer: HttpServer): IoServer {
       if (!actor) return next(new Error('unauthenticated'));
       socket.data.userId = actor.id;
       socket.data.role = actor.role;
+      socket.data.managerId = actor.managerId;
       next();
     } catch {
       next(new Error('unauthenticated'));
@@ -38,8 +39,9 @@ export function createSocketServer(httpServer: HttpServer): IoServer {
     void socket.join(userRoom(userId));
 
     // Presence (§7.6): tell the others this user is here, and send them the current list.
-    void markConnected(userId, socket.data.role, socket.id);
-    void presenceFor({ id: userId, role: socket.data.role }).then((list) => socket.emit('presence:update', list));
+    const member = { id: userId, role: socket.data.role, managerId: socket.data.managerId };
+    void markConnected(member, socket.id);
+    void presenceFor(member).then((list) => socket.emit('presence:update', list));
     socket.on('presence:active', () => markActivity(userId, false));
     socket.on('presence:away', () => markActivity(userId, true));
     socket.on('disconnect', () => markDisconnected(userId, socket.id));

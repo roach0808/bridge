@@ -16,6 +16,9 @@ import {
   canEditTaskNote,
   isSelfTask,
   supervisesWork,
+  sameTeam,
+  teamIdOf,
+  type TeamMember,
   expectedPrice,
   transitionSchema,
   stagesForRole,
@@ -184,74 +187,89 @@ describe('schemas', () => {
   });
 });
 
-describe('canChat', () => {
-  const u = (id: string, role: Role) => ({ id, role });
-  it.each<[Role, Role, boolean]>([
-    ['founder', 'founder', true],
-    ['founder', 'manager', true],
-    ['founder', 'associate', true],
-    ['founder', 'expert', true],
-    ['manager', 'manager', true],
-    ['associate', 'associate', false],
-    ['expert', 'expert', false],
-    ['associate', 'manager', true],
-    ['manager', 'associate', true],
-    ['associate', 'expert', true],
-    ['manager', 'expert', true],
-    ['expert', 'associate', true],
-    ['expert', 'manager', true],
-  ])('%s ↔ %s → %s', (a, b, expected) => {
-    expect(canChat(u('a', a), u('b', b))).toBe(expected);
-    expect(canChat(u('b', b), u('a', a))).toBe(expected);
+// Two teams: Manager m with Associates a and b, Manager m2 with Associate c.
+const people = {
+  f: { id: 'f', role: 'founder', managerId: null },
+  m: { id: 'm', role: 'manager', managerId: null },
+  a: { id: 'a', role: 'associate', managerId: 'm' },
+  b: { id: 'b', role: 'associate', managerId: 'm' },
+  m2: { id: 'm2', role: 'manager', managerId: null },
+  c: { id: 'c', role: 'associate', managerId: 'm2' },
+  e: { id: 'e', role: 'expert', managerId: null },
+  e2: { id: 'e2', role: 'expert', managerId: null },
+} as const satisfies Record<string, TeamMember>;
+type Who = keyof typeof people;
+
+describe('teams', () => {
+  it('a team is named by its Manager; the Founder and Experts are in none', () => {
+    expect(teamIdOf(people.m)).toBe('m');
+    expect(teamIdOf(people.a)).toBe('m');
+    expect(teamIdOf(people.f)).toBeNull();
+    expect(teamIdOf(people.e)).toBeNull();
+    expect(sameTeam(people.a, people.b)).toBe(true);
+    expect(sameTeam(people.m, people.a)).toBe(true);
+    expect(sameTeam(people.a, people.c)).toBe(false);
+    expect(sameTeam(people.f, people.f)).toBe(false);
+    expect(sameTeam(people.e, people.e2)).toBe(false);
   });
-  it.each<[Role, Role, ChatMode | null]>([
-    ['founder', 'expert', 'free'],
-    ['manager', 'associate', 'free'],
-    ['manager', 'expert', 'scheduling'],
-    ['associate', 'expert', 'scheduling'],
-    ['expert', 'expert', null],
-  ])('%s ↔ %s chat as %s', (a, b, mode) => {
-    expect(chatModeOf(u('a', a), u('b', b))).toBe(mode);
-    expect(chatModeOf(u('b', b), u('a', a))).toBe(mode);
+});
+
+describe('canChat', () => {
+  it.each<[Who, Who, ChatMode | null]>([
+    ['f', 'm', 'free'],
+    ['f', 'c', 'free'],
+    ['f', 'e', 'free'],
+    // Managers with Managers; everyone in a team with their own team.
+    ['m', 'm2', 'free'],
+    ['m', 'a', 'free'],
+    ['a', 'b', 'free'],
+    // Never into another team.
+    ['m', 'c', null],
+    ['m2', 'a', null],
+    ['a', 'c', null],
+    // Experts work for every team, to schedule calls only.
+    ['m', 'e', 'scheduling'],
+    ['c', 'e', 'scheduling'],
+    ['e', 'e2', null],
+  ])('%s ↔ %s chat as %s', (x, y, mode) => {
+    expect(chatModeOf(people[x], people[y])).toBe(mode);
+    expect(chatModeOf(people[y], people[x])).toBe(mode);
+    expect(canChat(people[x], people[y])).toBe(mode !== null);
   });
   it('nobody chats with themselves', () => {
-    expect(canChat(u('a', 'founder'), u('a', 'founder'))).toBe(false);
+    expect(canChat(people.f, people.f)).toBe(false);
   });
 });
 
 describe('canGiveTask', () => {
   it('the founder gives tasks to anyone', () => {
-    for (const role of ['founder', 'manager', 'associate', 'expert'] as const) {
-      expect(canGiveTask({ id: 'f', role: 'founder' }, { id: 'x', role })).toBe(true);
-    }
+    for (const who of Object.values(people)) expect(canGiveTask(people.f, who)).toBe(true);
   });
-  it('a manager gives tasks to any associate, and to nobody else', () => {
-    const m = { id: 'm', role: 'manager' as const };
-    expect(canGiveTask(m, { id: 'a', role: 'associate' })).toBe(true);
-    expect(canGiveTask(m, { id: 'b', role: 'associate' })).toBe(true);
-    expect(canGiveTask(m, { id: 'm2', role: 'manager' })).toBe(false);
-    expect(canGiveTask(m, { id: 'e', role: 'expert' })).toBe(false);
+  it('a manager gives tasks to their own team’s associates, and to nobody else', () => {
+    expect(canGiveTask(people.m, people.a)).toBe(true);
+    expect(canGiveTask(people.m, people.b)).toBe(true);
+    expect(canGiveTask(people.m, people.c)).toBe(false);
+    expect(canGiveTask(people.m, people.m2)).toBe(false);
+    expect(canGiveTask(people.m, people.e)).toBe(false);
   });
   it('anyone gives themselves a task, whatever their role', () => {
-    for (const role of ['founder', 'manager', 'associate', 'expert'] as const) {
-      expect(canGiveTask({ id: 'x', role }, { id: 'x', role })).toBe(true);
-      expect(isSelfTask({ assignee: { id: 'x' }, createdBy: { id: 'x' } })).toBe(true);
-      expect(isSelfTask({ assignee: { id: 'x' }, createdBy: { id: 'y' } })).toBe(false);
-    }
+    for (const who of Object.values(people)) expect(canGiveTask(who, who)).toBe(true);
+    expect(isSelfTask({ assignee: { id: 'x' }, createdBy: { id: 'x' } })).toBe(true);
+    expect(isSelfTask({ assignee: { id: 'x' }, createdBy: { id: 'y' } })).toBe(false);
   });
 
-  it('supervisesWork: the founder over everyone, a manager over associates and their own work', () => {
-    const m = { id: 'm', role: 'manager' as const };
-    expect(supervisesWork({ id: 'f', role: 'founder' }, { id: 'm2', role: 'manager' })).toBe(true);
-    expect(supervisesWork(m, { id: 'a', role: 'associate' })).toBe(true);
-    expect(supervisesWork(m, m)).toBe(true);
-    expect(supervisesWork(m, { id: 'm2', role: 'manager' })).toBe(false);
-    expect(supervisesWork(m, { id: 'e', role: 'expert' })).toBe(false);
-    expect(supervisesWork({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate' })).toBe(false);
+  it('supervisesWork: the founder over everyone, a manager over their own team’s associates and their own work', () => {
+    expect(supervisesWork(people.f, people.m2)).toBe(true);
+    expect(supervisesWork(people.m, people.a)).toBe(true);
+    expect(supervisesWork(people.m, people.m)).toBe(true);
+    expect(supervisesWork(people.m, people.c)).toBe(false);
+    expect(supervisesWork(people.m, people.m2)).toBe(false);
+    expect(supervisesWork(people.m, people.e)).toBe(false);
+    expect(supervisesWork(people.a, people.b)).toBe(false);
   });
   it('associates and experts give no tasks', () => {
-    expect(canGiveTask({ id: 'a', role: 'associate' }, { id: 'b', role: 'associate' })).toBe(false);
-    expect(canGiveTask({ id: 'e', role: 'expert' }, { id: 'f', role: 'founder' })).toBe(false);
+    expect(canGiveTask(people.a, people.b)).toBe(false);
+    expect(canGiveTask(people.e, people.f)).toBe(false);
   });
 });
 
@@ -314,10 +332,7 @@ describe('payouts', () => {
 });
 
 describe('removing a task and writing notes on it', () => {
-  const founder = { id: 'f', role: 'founder' as const };
-  const manager = { id: 'm', role: 'manager' as const };
-  const otherManager = { id: 'm2', role: 'manager' as const };
-  const associate = { id: 'a', role: 'associate' as const };
+  const { f: founder, m: manager, m2: otherManager, a: associate } = people;
   const task = (status: (typeof TODO_STATUSES)[number]) => ({ status, assignee: associate, createdBy: manager });
 
   it('the Founder removes any task; the giver and the owner only once it is completed', () => {
@@ -332,9 +347,11 @@ describe('removing a task and writing notes on it', () => {
 
   it('notes are for the owner, the giver and anyone above the owner', () => {
     const t = { assignee: associate, createdBy: founder };
-    expect([associate, founder, manager, otherManager].every((u) => canNoteTask(u, t))).toBe(true);
-    expect(canNoteTask({ id: 'a2', role: 'associate' }, t)).toBe(false);
-    expect(canNoteTask({ id: 'e', role: 'expert' }, t)).toBe(false);
+    expect([associate, founder, manager].every((u) => canNoteTask(u, t))).toBe(true);
+    // Another team's Manager is not above them.
+    expect(canNoteTask(otherManager, t)).toBe(false);
+    expect(canNoteTask(people.b, t)).toBe(false);
+    expect(canNoteTask(people.e, t)).toBe(false);
   });
 
   it('a note is its writer’s to change; the Founder may also delete it', () => {

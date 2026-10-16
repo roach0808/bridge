@@ -81,7 +81,7 @@ export function ProfileTeamField({ profile }: { profile: ProfileDTO }) {
           </>
         ) : (
           <Typography variant="body2" color="text.disabled">
-            No team yet
+            No team yet — only Founders see it
           </Typography>
         )}
         {profile.canAssign && (
@@ -96,7 +96,8 @@ export function ProfileTeamField({ profile }: { profile: ProfileDTO }) {
         <DialogTitle>Which team handles {profile.name}?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-            Choose a Manager: they and every Associate on their team handle the profile.
+            Choose a Manager: only they and the Associates on their team see and book the profile; no other team
+            does. With no team, only Founders see it.
           </Typography>
           <Autocomplete
             options={managers.data}

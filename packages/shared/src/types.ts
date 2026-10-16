@@ -586,7 +586,8 @@ export interface TodoSummary {
   /** Which quadrant of the board it sits in. */
   urgency: TodoUrgency;
   importance: TodoImportance;
-  assignee: UserRef;
+  /** With their team (`managerId`), which decides who above them may change the task. */
+  assignee: UserRef & { managerId: string | null };
   createdBy: UserRef;
   doneAt: string | null;
   /** When the giver confirmed it; the task is then completed. */

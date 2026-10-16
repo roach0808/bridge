@@ -75,10 +75,11 @@ describe('changing a task after it was given', () => {
 
     // The owner reports progress; they do not move their own deadline.
     expectError(await c.a1.patch(`/todos/${task.id}`, { completeByAt: FRI_6PM }), 403);
-    // Any Manager may give any Associate tasks (§6.11 canGiveTask), so any
-    // Manager may change one; an Expert is not in this at all.
-    expect((await c.m2.patch(`/todos/${task.id}`, { details: 'Use the new template' })).status).toBe(200);
+    // A Manager gives tasks only to their own team's Associates (§2.4 canGiveTask), so
+    // another team's Manager neither sees nor changes one; nor does an Expert.
+    expectError(await c.m2.patch(`/todos/${task.id}`, { details: 'Use the new template' }), 404);
     expectError(await c.e1.patch(`/todos/${task.id}`, { title: 'Mine now' }), 404);
+    expect((await prisma.todo.findUniqueOrThrow({ where: { id: task.id } })).details).toBeNull();
   });
 
   it('a personal to-do is the owner’s to change', async () => {
@@ -217,8 +218,8 @@ describe('removing a task', () => {
     // Ready for Review is not completed yet.
     expectError(await c.m1.delete(`/todos/${task.id}`), 409);
     await c.m1.post(`/todos/${task.id}/confirm`);
-    // Another Manager sees the task, but it is not theirs to remove; a teammate does not see it at all.
-    expectError(await c.m2.delete(`/todos/${task.id}`), 403);
+    // Another team's Manager and a teammate do not see the task at all.
+    expectError(await c.m2.delete(`/todos/${task.id}`), 404);
     expectError(await c.a2.delete(`/todos/${task.id}`), 404);
     expect((await c.a1.delete(`/todos/${task.id}`)).status).toBe(204);
 
@@ -255,6 +256,9 @@ describe('notes on a task', () => {
   it('nobody else reads or writes them, and a blank note says nothing', async () => {
     const task = await give({});
     expectError(await c.a2.get(`/todos/${task.id}/notes`), 404);
+    // Not another team's Manager either.
+    expectError(await c.m2.get(`/todos/${task.id}/notes`), 404);
+    expectError(await c.m2.post(`/todos/${task.id}/notes`, { body: 'Hello' }), 404);
     expectError(await c.e1.post(`/todos/${task.id}/notes`, { body: 'Hello' }), 404);
     expectError(await c.a1.post(`/todos/${task.id}/notes`, { body: '   \n ' }), 400);
   });
@@ -277,5 +281,42 @@ describe('notes on a task', () => {
     const other = await give({});
     const note = (await c.a1.post(`/todos/${task.id}/notes`, { body: 'On the first task' })).body;
     expectError(await c.a1.patch(`/todos/${other.id}/notes/${note.id}`, { body: 'Moved' }), 404);
+  });
+});
+
+describe('another team’s Manager (§2.4 team isolation)', () => {
+  it('cannot give a task to someone outside their team, nor find them to give one', async () => {
+    expectError(await c.m2.post('/todos', { assigneeId: fx.a1.id, title: 'Help us out' }), 403);
+    expectError(await c.m2.post('/todos', { assigneeId: fx.a2.id, title: 'Help us out' }), 403);
+    // Handing over a task of their own is refused too.
+    const own = (await c.m2.post('/todos', { assigneeId: fx.m2.id, title: 'Mine' })).body;
+    expectError(await c.m2.post(`/todos/${own.id}/move`, { assigneeId: fx.a1.id }), 403);
+    expect(await prisma.todo.count({ where: { assigneeId: fx.a1.id } })).toBe(0);
+    // Their own team still takes them.
+    expect((await c.m2.post('/todos', { assigneeId: fx.a3.id, title: 'Help us out' })).status).toBe(201);
+
+    const assignees = (await c.m2.get('/todos/assignees')).body.map((u: { id: string }) => u.id);
+    expect(assignees).not.toContain(fx.a1.id);
+    expect(assignees.sort()).toEqual([fx.m2.id, fx.a3.id, fx.a4.id].sort());
+  });
+
+  it('does not see the other team’s panels or tasks, nor arrange or change them', async () => {
+    const task = await give({ title: 'Team one only' });
+    // The task names its owner's Manager.
+    expect(task.assignee).toMatchObject({ id: fx.a1.id, managerId: fx.m1.id });
+
+    const board = (await c.m2.get('/todos/board')).body as Array<{ person: { id: string }; tasks: Array<{ id: string }> }>;
+    expect(board.map((p) => p.person.id).sort()).toEqual([fx.m2.id, fx.a3.id, fx.a4.id].sort());
+    expect(board.flatMap((p) => p.tasks).map((t) => t.id)).not.toContain(task.id);
+    expect(JSON.stringify(board)).not.toContain('Team one only');
+
+    expectError(await c.m2.post('/todos/reorder', { assigneeId: fx.a1.id, ids: [task.id] }), 403);
+    expectError(await c.m2.post(`/todos/${task.id}/move`, { assigneeId: fx.a1.id, urgency: 'can_wait', importance: 'strategic' }), 404);
+    expectError(await c.m2.post(`/todos/${task.id}/reopen`), 404);
+    expectError(await c.m2.post(`/todos/${task.id}/status`, { status: 'in_progress' }), 404);
+    expect(await prisma.todo.findUniqueOrThrow({ where: { id: task.id } })).toMatchObject({ status: 'open', urgency: 'need_action' });
+
+    // Their own Manager still does all of it.
+    expect((await c.m1.get('/todos/board')).body.find((p: { person: { id: string } }) => p.person.id === fx.a1.id).tasks).toHaveLength(1);
   });
 });

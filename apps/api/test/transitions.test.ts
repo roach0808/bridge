@@ -140,10 +140,17 @@ describe('cancelling a call (§4.5)', () => {
     },
   );
 
-  it('any manager and the founder may call it off; the expert may not', async () => {
-    const mine = await makeCall(fx, { associate: fx.a3, status: 'scheduled' });
-    // m1 manages a1/a2, but every Manager runs every Associate's calls.
+  it('the call’s own team and the founder may call it off; another team’s manager and the expert may not', async () => {
+    const mine = await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
+    // Another team's Manager does not even see it.
+    expectError(await transition(await as(fx.m2), mine.id, 'cancelled'), 404);
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: mine.id } })).status).toBe('scheduled');
+    // m1 manages a1/a2, so their calls are m1's to call off.
     await expectMoved(await as(fx.m1), fx.m1, mine.id, 'scheduled', 'cancelled', true);
+
+    // A teammate handles the call as its own Associate would.
+    const teammates = await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: '2027-02-04T09:00:00Z' });
+    await expectMoved(await as(fx.a2), fx.a2, teammates.id, 'scheduled', 'cancelled', false);
 
     const theirs = await makeCall(fx, { associate: fx.a1, status: 'confirmed', scheduledAt: '2027-02-02T09:00:00Z' });
     await expectMoved(await as(fx.founder), fx.founder, theirs.id, 'confirmed', 'cancelled', true);

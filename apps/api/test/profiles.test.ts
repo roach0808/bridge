@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, expectError, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
+import { as, expectError, makeBank, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -114,27 +114,67 @@ describe('POST /profiles', () => {
 describe('GET /profiles visibility', () => {
   const names = (res: { body: Array<{ name: string }> }) => res.body.map((p) => p.name).sort();
 
-  it('founder sees everything', async () => {
-    expect(names(await (await as(fx.founder)).get('/profiles'))).toEqual(['Dana Approved', 'Pat Pending', 'Quinn Pending']);
+  it('founder sees everything, every team’s', async () => {
+    expect(names(await (await as(fx.founder)).get('/profiles'))).toEqual(['Dana Approved', 'Pat Pending', 'Quinn Pending', 'Rowan Approved']);
   });
 
-  it('associate sees approved plus their own pending', async () => {
+  it('associate sees their own team’s profiles, approved or pending, and no other team’s', async () => {
     const a1 = await as(fx.a1);
     expect(names(await a1.get('/profiles'))).toEqual(['Dana Approved', 'Pat Pending']);
     expectError(await a1.get(`/profiles/${fx.pendingProfileTeam2.id}`), 404);
+    expectError(await a1.get(`/profiles/${fx.approvedProfileTeam2.id}`), 404);
   });
 
-  it('manager sees approved plus their team’s pending', async () => {
+  it('manager sees their own team’s profiles only, approved or pending', async () => {
     expect(names(await (await as(fx.m1)).get('/profiles'))).toEqual(['Dana Approved', 'Pat Pending']);
-    expect(names(await (await as(fx.m2)).get('/profiles'))).toEqual(['Dana Approved', 'Quinn Pending']);
+    expect(names(await (await as(fx.m2)).get('/profiles'))).toEqual(['Quinn Pending', 'Rowan Approved']);
   });
 
-  it('another associate on the same team does not see a1’s pending profile', async () => {
-    expect(names(await (await as(fx.a2)).get('/profiles'))).toEqual(['Dana Approved']);
+  it('a teammate sees a1’s pending profile; the other team does not', async () => {
+    expect(names(await (await as(fx.a2)).get('/profiles'))).toEqual(['Dana Approved', 'Pat Pending']);
+    expect(names(await (await as(fx.a3)).get('/profiles'))).toEqual(['Quinn Pending', 'Rowan Approved']);
+    expectError(await (await as(fx.a3)).get(`/profiles/${fx.pendingProfile.id}`), 404);
   });
 
   it('filters by status', async () => {
     expect(names(await (await as(fx.founder)).get('/profiles', { status: 'pending' }))).toEqual(['Pat Pending', 'Quinn Pending']);
+  });
+});
+
+describe('team isolation', () => {
+  it('another team’s approved profile is absent from the list and 404 on every route', async () => {
+    const id = fx.approvedProfileTeam2.id;
+    await makeBank(fx, { profileId: id });
+    for (const who of ['m1', 'a1'] as const) {
+      const c = await as(fx[who]);
+      const list = await c.get('/profiles');
+      expect(list.status).toBe(200);
+      expect(list.body.some((p: { id: string }) => p.id === id), who).toBe(false);
+      expectError(await c.get(`/profiles/${id}`), 404);
+      expectError(await c.patch(`/profiles/${id}`, { name: 'Hijacked', phone: '+1 555 0199' }), 404);
+      expectError(await c.put(`/profiles/${id}/platforms/${fx.platform.id}`, { status: 'banned' }), 404);
+      expectError(await c.get(`/profiles/${id}/banks`), 404);
+    }
+    const row = await prisma.profile.findUniqueOrThrow({ where: { id }, include: { platformStatuses: true } });
+    expect(row).toMatchObject({ name: 'Rowan Approved', phone: null });
+    expect(row.platformStatuses).toEqual([]);
+    // Its own team still works with it.
+    expect((await (await as(fx.a3)).get(`/profiles/${id}`)).status).toBe(200);
+    expect((await (await as(fx.m2)).get(`/profiles/${id}/banks`)).body).toHaveLength(1);
+  });
+
+  it('a profile no team handles is the Founder’s alone', async () => {
+    const orphan = await prisma.profile.create({
+      data: { name: 'Nora Nobody', avatarId: 'profile-05', status: 'approved', managerId: null, createdById: fx.founder.id, reviewedById: fx.founder.id, reviewedAt: new Date() },
+    });
+    const founder = await as(fx.founder);
+    expect((await founder.get('/profiles')).body.some((p: { id: string }) => p.id === orphan.id)).toBe(true);
+    expect((await founder.get(`/profiles/${orphan.id}`)).status).toBe(200);
+    for (const who of ['m1', 'm2', 'a1', 'a3', 'e1'] as const) {
+      const c = await as(fx[who]);
+      expect((await c.get('/profiles')).body.some((p: { id: string }) => p.id === orphan.id), who).toBe(false);
+      expectError(await c.get(`/profiles/${orphan.id}`), 404);
+    }
   });
 });
 
@@ -174,17 +214,22 @@ describe('approve / reject', () => {
 });
 
 describe('PATCH /profiles/:id', () => {
-  it('anyone but an Expert edits a profile, whoever wrote it', async () => {
+  it('anyone on the profile’s team but an Expert edits it, whoever wrote it; another team cannot', async () => {
     const path = `/profiles/${fx.approvedProfile.id}`;
-    // An Associate who did not write it, and a Manager of another team.
+    // An Associate of the team who did not write it, and the team's Manager.
     for (const [who, name] of [
-      [await as(fx.a3), 'Dana Corrected'],
+      [await as(fx.a2), 'Dana Corrected'],
       [await as(fx.m1), 'Dana Corrected Again'],
     ] as const) {
       const res = await who.patch(path, { name, phone: '+1 555 0100' });
       expect(res.status, res.text).toBe(200);
       expect(res.body).toMatchObject({ name, status: 'approved' });
     }
+    // The other team does not even see it.
+    for (const who of ['m2', 'a3'] as const) {
+      expectError(await (await as(fx[who])).patch(path, { name: 'Taken Over' }), 404);
+    }
+    expect((await prisma.profile.findUniqueOrThrow({ where: { id: fx.approvedProfile.id } })).name).toBe('Dana Corrected Again');
     // The Expert on a call with the Profile reads it and no more.
     await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
     expectError(await (await as(fx.e1)).patch(path, { name: 'Hacked' }), 403);
@@ -295,12 +340,19 @@ describe('platform statuses', () => {
 
     const m1 = await as(fx.m1);
     expect((await m1.get('/profiles')).body.find((p: { id: string }) => p.id === fx.approvedProfile.id).platformStatuses[1].status).toBe('registered');
-    // No team handles this Profile; anyone who works with Profiles sets its statuses all the same.
+    // The team handling the Profile sets its statuses, whoever on it.
     expect((await m1.put(url, { status: 'banned' })).status).toBe(200);
-    const a3 = await as(fx.a3);
-    expect((await a3.put(url, { status: 'not_registered' })).body.platformStatuses[1]).toMatchObject({ status: 'not_registered', rate: null });
-    expectError(await a3.put(url, { rate: 100 }), 403);
+    const a2 = await as(fx.a2);
+    expect((await a2.put(url, { status: 'not_registered' })).body.platformStatuses[1]).toMatchObject({ status: 'not_registered', rate: null });
+    expectError(await a2.put(url, { rate: 100 }), 403);
     expectError(await (await as(fx.e1)).put(url, { status: 'banned' }), 403);
+    // Another team cannot touch it.
+    for (const who of ['m2', 'a3'] as const) {
+      expectError(await (await as(fx[who])).put(url, { status: 'banned' }), 404);
+    }
+    expect((await prisma.profilePlatformStatus.findUniqueOrThrow({
+      where: { profileId_platformId: { profileId: fx.approvedProfile.id, platformId: fx.platform2.id } },
+    })).status).toBe('not_registered');
   });
 
   it('validates the status and the ids', async () => {
@@ -328,6 +380,8 @@ describe('addresses are founder-only', () => {
     const patched = await f.patch(`/profiles/${created.body.id}`, { addresses: [{ label: 'Mailing', address: 'PO Box 9, Seoul' }] });
     expect(patched.body.addresses.map((a: { label: string; address: string }) => [a.label, a.address])).toEqual([['Mailing', 'PO Box 9, Seoul']]);
 
+    // The Founder's own Profile reaches a team once handed to it.
+    expect((await f.put(`/profiles/${created.body.id}/manager`, { managerId: fx.m1.id })).status).toBe(200);
     for (const who of ['m1', 'a1'] as const) {
       const res = await (await as(fx[who])).get(`/profiles/${created.body.id}`);
       expect(res.status).toBe(200);
@@ -347,6 +401,8 @@ describe('profile email, phone and onboard date', () => {
     const res = await f.post('/profiles', profileBody({ email: 'Dana.Morgan@Example.com', phone: '+44 20 7946 0958' }));
     expect(res.status, res.text).toBe(201);
     expect(res.body).toMatchObject({ email: 'dana.morgan@example.com', phone: '+44 20 7946 0958' });
+    // Handed to a1's team, which then sees them.
+    expect((await f.put(`/profiles/${res.body.id}/manager`, { managerId: fx.m1.id })).status).toBe(200);
     expect((await (await as(fx.a1)).get(`/profiles/${res.body.id}`)).body).toMatchObject({ email: 'dana.morgan@example.com' });
 
     await prisma.call.create({

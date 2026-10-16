@@ -1,5 +1,7 @@
 import {
   ERROR_CODES,
+  teamIdOf,
+  type Role,
   FEATURES,
   STATUS_LABELS,
   canTransition,
@@ -120,14 +122,30 @@ function assertNotInThePast(scheduledAt: string) {
  * A Manager chooses themselves or any Associate.
  */
 async function assertCallOwner(actor: Actor, id: string) {
-  const user = await prisma.user.findUnique({ where: { id }, select: { role: true, isActive: true, managerId: true } });
+  const user = await prisma.user.findUnique({ where: { id }, select: { id: true, role: true, isActive: true, managerId: true } });
   if (!user || !user.isActive || (user.role !== 'associate' && user.role !== 'manager')) {
     throw badRequest('Choose an active Associate or Manager', { issues: [{ path: 'associateId', message: 'Not an active Associate or Manager' }] });
   }
-  if (actor.role === 'manager' && id !== actor.id && user.role !== 'associate') {
-    throw forbidden('Managers choose themselves or an Associate');
+  // Each team is closed to the others (§2.4): a Manager hands calls only within their own team.
+  if (actor.role === 'manager' && id !== actor.id && (user.role !== 'associate' || user.managerId !== actor.id)) {
+    throw forbidden('Managers choose themselves or an Associate of their own team');
   }
   return user;
+}
+
+/**
+ * A call's Profile is one its team handles (§2.4): teams never book each other's
+ * Profiles. A call the Founder runs may use any Profile.
+ */
+async function assertProfileOfTeam(owner: { id: string; role: string; managerId: string | null }, profileId: string) {
+  if (owner.role === 'founder') return;
+  const profile = await prisma.profile.findUnique({ where: { id: profileId }, select: { managerId: true } });
+  const team = teamIdOf({ id: owner.id, role: owner.role as Role, managerId: owner.managerId });
+  if (team === null || profile?.managerId !== team) {
+    throw badRequest('This Profile is handled by another team', {
+      issues: [{ path: 'profileId', message: 'Choose a Profile your team handles' }],
+    });
+  }
 }
 
 /** Re-throws database conflicts inside a transaction with a typed error. */
@@ -208,22 +226,22 @@ export async function getCallForActor(actor: Actor, id: string | null): Promise<
 export async function createCall(actor: Actor, input: CreateCallInput): Promise<CallDTO> {
   if (actor.role === 'expert') throw forbidden('Experts do not create calls');
 
-  let associateId: string;
+  let owner: { id: string; role: string; managerId: string | null };
   if (actor.role === 'associate') {
     if (input.associateId && input.associateId !== actor.id) {
       throw forbidden('Associates create calls for themselves');
     }
-    associateId = actor.id;
+    owner = actor;
   } else if (actor.role === 'manager' && (!input.associateId || input.associateId === actor.id)) {
     // Managers run calls themselves too.
-    associateId = actor.id;
+    owner = actor;
   } else {
     if (!input.associateId) {
       throw badRequest('Choose the Associate for this call', { issues: [{ path: 'associateId', message: 'Required' }] });
     }
-    await assertCallOwner(actor, input.associateId);
-    associateId = input.associateId;
+    owner = await assertCallOwner(actor, input.associateId);
   }
+  const associateId = owner.id;
   assertNotInThePast(input.scheduledAt);
   if (input.expertId) await assertActiveUser(input.expertId, 'expert', 'expertId');
 
@@ -239,6 +257,7 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
   if (!profile.isActive) {
     throw conflict('That profile is deactivated', ERROR_CODES.profileNotApproved);
   }
+  await assertProfileOfTeam(owner, profile.id);
 
   const { call, delivers } = await prisma.$transaction(async (tx) => {
     const created = await tx.call.create({
@@ -297,7 +316,8 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
   }
   if (input.associateId !== undefined && input.associateId !== current.associateId) {
     if (!perms.reassignAssociate) throw forbidden('You cannot reassign the Associate');
-    await assertCallOwner(actor, input.associateId);
+    // The Profile stays with its team, so the call does too.
+    await assertProfileOfTeam(await assertCallOwner(actor, input.associateId), current.profileId);
   }
   if (input.expertId !== undefined && input.expertId !== current.expertId) {
     if (!perms.reassignExpert) throw forbidden('You cannot reassign the Expert at this stage');

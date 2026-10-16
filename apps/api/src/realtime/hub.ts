@@ -4,6 +4,8 @@ import type { Server } from 'socket.io';
 export interface SocketData {
   userId: string;
   role: Role;
+  /** An Associate's Manager (their team), as of connecting. */
+  managerId: string | null;
 }
 
 export type IoServer = Server<ClientToServerEvents, ServerToClientEvents, Record<string, never>, SocketData>;

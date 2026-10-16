@@ -28,12 +28,18 @@ describe('GET /users', () => {
     }
   });
 
-  it('manager sees every associate and every expert, no managers or founders', async () => {
-    const res = await (await as(fx.m1)).get('/users');
-    expect(res.body.map((u: { id: string }) => u.id).sort()).toEqual(
-      [fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id, fx.e1.id, fx.e2.id, fx.e3.id].sort(),
+  it('manager sees their own team’s associates and every expert, no other team, managers or founders', async () => {
+    const m1 = await as(fx.m1);
+    const res = await m1.get('/users');
+    expect(res.body.map((u: { id: string }) => u.id).sort()).toEqual([fx.a1.id, fx.a2.id, fx.e1.id, fx.e2.id, fx.e3.id].sort());
+    expect((await m1.get(`/users/${fx.a1.id}`)).status).toBe(200);
+    expect((await m1.get(`/users/${fx.e1.id}`)).status).toBe(200);
+    // Another team's Associates are closed to them.
+    expectError(await m1.get(`/users/${fx.a3.id}`), 404);
+    expectError(await m1.get(`/users/${fx.a4.id}`), 404);
+    expect((await (await as(fx.m2)).get('/users')).body.map((u: { id: string }) => u.id).sort()).toEqual(
+      [fx.a3.id, fx.a4.id, fx.e1.id, fx.e2.id, fx.e3.id].sort(),
     );
-    expect((await (await as(fx.m1)).get(`/users/${fx.a3.id}`)).status).toBe(200);
     expectError(await (await as(fx.m1)).get(`/users/${fx.m2.id}`), 404);
     expectError(await (await as(fx.m1)).get(`/users/${fx.founder.id}`), 404);
   });
@@ -150,9 +156,10 @@ describe('PATCH /users/:id and deactivation', () => {
   it('manager may deactivate own associate but not another team’s or an expert', async () => {
     const m1 = await as(fx.m1);
     expect((await m1.patch(`/users/${fx.a1.id}`, { isActive: false })).status).toBe(200);
-    // Another team's Associate is visible, but not theirs to change.
-    expectError(await m1.patch(`/users/${fx.a3.id}`, { isActive: false }), 403);
+    // Another team's Associate is not even visible to them; an Expert is visible but not theirs to change.
+    expectError(await m1.patch(`/users/${fx.a3.id}`, { isActive: false }), 404);
     expectError(await m1.patch(`/users/${fx.e1.id}`, { isActive: false }), 403);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: fx.a3.id } })).isActive).toBe(true);
     expect((await prisma.user.findUniqueOrThrow({ where: { id: fx.e1.id } })).isActive).toBe(true);
   });
 

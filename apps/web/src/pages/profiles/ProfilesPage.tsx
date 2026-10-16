@@ -99,8 +99,9 @@ export default function ProfilesPage() {
   // Non-founders only see the statuses they actually have (their own submissions).
   const filterOptions = (['all', 'mine', 'pending', 'approved', 'rejected', 'needs_bank', 'deactivated'] as const)
     .filter((f) =>
+      // Everyone outside the Founder sees only their own team's Profiles, so "My team" would be "All".
       f === 'mine'
-        ? me.role === 'associate' || me.role === 'manager'
+        ? false
         : f === 'needs_bank' || f === 'deactivated'
           ? isFounder
           : isFounder || f === 'all' || (!isExpert && (f === 'approved' || counts[f] > 0)),
@@ -179,7 +180,7 @@ export default function ProfilesPage() {
           <Hint icon={<InfoOutlined sx={{ fontSize: 17 }} />}>
             {isExpert
               ? 'Open a profile to read its personal details and history.'
-              : 'Profiles you submit are reviewed by a Founder before they can be used for calls.'}
+              : 'You see your own team’s profiles only. Profiles you submit are reviewed by a Founder before they can be used for calls.'}
           </Hint>
         </Box>
       )}
@@ -217,7 +218,7 @@ export default function ProfilesPage() {
             <EmptyState
               icon={<AccountTreeRounded />}
               title="No profiles yet"
-              description={isFounder ? 'Add the first profile to start booking calls.' : 'Profiles appear here once they are approved.'}
+              description={isFounder ? 'Add the first profile to start booking calls.' : 'Your team’s profiles appear here once the Founder approves them or hands them to your team.'}
               action={
                 canAdd && (
                   <Button variant="contained" startIcon={<AddRounded />} onClick={() => setAdding(true)}>
@@ -235,7 +236,8 @@ export default function ProfilesPage() {
               <TableRow>
                 <TableCell sx={{ minWidth: 200 }}>Profile</TableCell>
                 <TableCell>Status</TableCell>
-                {!isExpert && <TableCell sx={{ minWidth: 130 }}>Team</TableCell>}
+                {/* Everyone else sees only their own team's Profiles. */}
+                {isFounder && <TableCell sx={{ minWidth: 130 }}>Team</TableCell>}
                 <TableCell sx={{ minWidth: 190 }}>Pending</TableCell>
                 {!isExpert && <TableCell sx={{ minWidth: 230 }}>Platforms</TableCell>}
                 <TableCell align="right" width={96}>
@@ -245,7 +247,7 @@ export default function ProfilesPage() {
             </TableHead>
             <TableBody>
               {visible.map((p) => (
-                <ProfileRow key={p.id} profile={p} isExpert={isExpert} onOpen={(edit) => navigate(`/profiles/${p.id}${edit ? '?edit=1' : ''}`)} />
+                <ProfileRow key={p.id} profile={p} isExpert={isExpert} showTeam={isFounder} onOpen={(edit) => navigate(`/profiles/${p.id}${edit ? '?edit=1' : ''}`)} />
               ))}
             </TableBody>
           </Table>
@@ -257,7 +259,17 @@ export default function ProfilesPage() {
   );
 }
 
-function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isExpert: boolean; onOpen: (edit: boolean) => void }) {
+function ProfileRow({
+  profile: p,
+  isExpert,
+  showTeam,
+  onOpen,
+}: {
+  profile: ProfileDTO;
+  isExpert: boolean;
+  showTeam: boolean;
+  onOpen: (edit: boolean) => void;
+}) {
   const me = useMe();
   const pending = pendingItems(p);
   const mayEdit = p.canEdit;
@@ -285,7 +297,7 @@ function ProfileRow({ profile: p, isExpert, onOpen }: { profile: ProfileDTO; isE
             {!p.isActive && <DeactivatedPill />}
           </Stack>
         </TableCell>
-        {!isExpert && (
+        {showTeam && (
           <TableCell>
             {p.manager ? (
               <UserChip user={p.manager} size={22} showRole={false} />

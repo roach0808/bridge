@@ -1,5 +1,5 @@
 import type { Prisma } from '@prisma/client';
-import { BLOCKING_STATUSES, statusForRole } from '@god/shared';
+import { BLOCKING_STATUSES, statusForRole, teamIdOf } from '@god/shared';
 import type {
   MeDTO,
   MessageDTO,
@@ -109,8 +109,7 @@ type ProfileCounts = {
 };
 
 /** The team someone works in, by its Manager: their own for a Manager, their Manager's for an Associate. */
-export const teamOf = (viewer: { id: string; role: Role; managerId: string | null }): string | null =>
-  viewer.role === 'manager' ? viewer.id : viewer.role === 'associate' ? viewer.managerId : null;
+export const teamOf = teamIdOf;
 
 /** Who may choose which Manager's team handles a Profile: the Founder only. */
 export const canAssignProfile = (viewer: { role: Role }): boolean => viewer.role === 'founder';
@@ -124,9 +123,9 @@ export const canAssignProfile = (viewer: { role: Role }): boolean => viewer.role
 export const canEditProfile = (viewer: { role: Role }): boolean => viewer.role !== 'expert';
 
 /**
- * Who may set a Profile's status on the platforms: the Founder, and every
- * Manager and Associate, whichever team handles the Profile. Rates stay the
- * Founder's (§6.4).
+ * Who may set a Profile's status on the platforms: the Founder, and the
+ * Managers and Associates who can see it — its own team's (§2.4). Rates stay
+ * the Founder's (§6.4).
  */
 export const canEditProfilePlatforms = (viewer: { role: Role }): boolean => viewer.role !== 'expert';
 
