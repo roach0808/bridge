@@ -7,6 +7,7 @@ import DashboardRounded from '@mui/icons-material/DashboardRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import HubRounded from '@mui/icons-material/HubRounded';
+import KeyRounded from '@mui/icons-material/KeyRounded';
 import ManageAccountsRounded from '@mui/icons-material/ManageAccountsRounded';
 import NotificationsRounded from '@mui/icons-material/NotificationsRounded';
 import PhoneInTalkRounded from '@mui/icons-material/PhoneInTalkRounded';
@@ -38,6 +39,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/invoicing', label: 'Invoicing', icon: ReceiptLongRounded, roles: ['founder'], section: 'work' },
   { to: '/profiles', label: 'Profiles', icon: AccountTreeRounded, roles: ALL, section: 'admin' },
   { to: '/banks', label: 'Banks', icon: AccountBalanceRounded, roles: ['founder'], section: 'admin' },
+  { to: '/passwords', label: 'Passwords', icon: KeyRounded, roles: ['founder', 'manager', 'associate'], section: 'admin' },
   { to: '/platforms', label: 'Platforms', icon: HubRounded, roles: ['founder', 'manager'], section: 'admin' },
   { to: '/team', label: 'Team', icon: GroupsRounded, roles: ['manager'], section: 'admin' },
   { to: '/users', label: 'Users', icon: ManageAccountsRounded, roles: ['founder'], section: 'admin' },

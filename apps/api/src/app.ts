@@ -11,6 +11,7 @@ import { avatarsRouter } from './avatars/avatars.routes';
 import { banksRouter } from './banks/banks.routes';
 import { calendarRouter } from './calendar/calendar.routes';
 import { personalEventsRouter } from './calendar/personalEvents';
+import { credentialsRouter } from './credentials/credentials.routes';
 import { callsRouter } from './calls/calls.routes';
 import { chatRouter } from './chat/chat.routes';
 import { dumpsRouter } from './backup/dumps.routes';
@@ -85,6 +86,7 @@ export function createApp() {
   api.use(dumpsRouter);
   api.use(calendarRouter);
   api.use(personalEventsRouter);
+  api.use(credentialsRouter);
   api.use(notificationsRouter);
   api.use(dashboardRouter);
   api.use(statsRouter);

@@ -164,6 +164,10 @@ model User {
   scheduleBlocks    ScheduleBlock[]       @relation("BlockExpert")
   createdBlocks     ScheduleBlock[]       @relation("BlockCreatedBy")
   personalEvents    PersonalEvent[]
+  /// A Manager's team's saved logins (§6.17).
+  teamCredentials   Credential[]          @relation("TeamCredentials")
+  credentialsMade   Credential[]          @relation("CredentialCreatedBy")
+  credentialsEdited Credential[]          @relation("CredentialUpdatedBy")
   conversationsA    Conversation[]        @relation("ConversationUserA")
   conversationsB    Conversation[]        @relation("ConversationUserB")
   groupsCreated     Conversation[]        @relation("ConversationCreatedBy")
@@ -252,6 +256,7 @@ model Profile {
   avatar           Avatar                  @relation(fields: [avatarId], references: [id])
   photo            Photo?                  @relation("ProfilePhoto", fields: [photoId], references: [id], onDelete: SetNull)
   banks            ProfileBank[]
+  credentials      Credential[]
   platformStatuses ProfilePlatformStatus[]
   addresses        ProfileAddress[]
   createdBy        User                    @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
@@ -391,6 +396,37 @@ model PersonalEvent {
 
   @@index([ownerId, startDate])
   @@map("personal_events")
+}
+
+/// A saved login (§6.17): a password manager entry for a Profile or for a team.
+/// Exactly one of profileId and teamId is set.
+model Credential {
+  id          String   @id @default(uuid()) @db.Uuid
+  /// A Profile's login, kept by whichever team handles the Profile.
+  profileId   String?  @map("profile_id") @db.Uuid
+  /// A team's own login, by the team's Manager.
+  teamId      String?  @map("team_id") @db.Uuid
+  /// What the team calls it, e.g. "Main GLG login".
+  nickname    String
+  /// Where it signs in: free text, e.g. GLG, Gmail, LinkedIn.
+  platform    String
+  /// The email or username.
+  login       String?
+  /// Encrypted (AES-256-GCM, `src/banks/secret.ts`), revealed only on request and audited.
+  passwordEnc String?  @map("password_enc")
+  createdById String   @map("created_by") @db.Uuid
+  updatedById String   @map("updated_by") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  profile   Profile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  team      User?    @relation("TeamCredentials", fields: [teamId], references: [id], onDelete: Cascade)
+  createdBy User     @relation("CredentialCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  updatedBy User     @relation("CredentialUpdatedBy", fields: [updatedById], references: [id], onDelete: Restrict)
+
+  @@index([profileId])
+  @@index([teamId])
+  @@map("credentials")
 }
 
 model CallStatusHistory {

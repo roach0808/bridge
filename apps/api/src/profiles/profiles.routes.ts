@@ -282,6 +282,7 @@ profilesRouter.delete('/profiles/:id', requireRole('founder'), async (req, res) 
       await tx.profile.delete({ where: { id: profile.id } });
     } else {
       await tx.profileBank.deleteMany({ where: { profileId: profile.id } });
+      await tx.credential.deleteMany({ where: { profileId: profile.id } });
       await tx.profileAddress.deleteMany({ where: { profileId: profile.id } });
       await tx.profile.update({
         where: { id: profile.id },

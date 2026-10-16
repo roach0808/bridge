@@ -416,6 +416,27 @@ export interface ExpertsCalendarResponse {
   experts: ExpertColumn[];
 }
 
+/**
+ * A saved login (§6.17), in a Profile's password manager or a team's. The
+ * password is never in it: `hasPassword` says whether one is saved, and
+ * revealing it is a separate, audited request.
+ */
+export interface CredentialDTO {
+  id: string;
+  /** Set for a Profile's login. */
+  profileId: string | null;
+  /** Set for a team's own login: the team's Manager. */
+  teamId: string | null;
+  nickname: string;
+  platform: string;
+  login: string | null;
+  hasPassword: boolean;
+  createdBy: UserRef;
+  updatedBy: UserRef;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A Founder's own event (§6.9b): a repeat rule like a schedule block, with a title. */
 export interface PersonalEventDTO extends Omit<BlockRule, 'kind'> {
   id: string;

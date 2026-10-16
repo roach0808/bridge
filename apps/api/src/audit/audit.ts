@@ -76,6 +76,7 @@ const SENSITIVE_READS = [
   /^profiles\/:id\/banks$/,
   /^banks$/,
   /^banks\/:id\/password$/,
+  /^credentials\/:id\/password$/,
   /^db-dumps/,
   /^users\/:id\/sessions$/,
   // Reading other people's chats is the most sensitive read there is.
@@ -95,6 +96,9 @@ const SKIP = [/^auth\/refresh$/, /^notifications\/read$/, /^chat\/conversations\
  * happened; the others take the verb from the method.
  */
 const NAMES: Array<[RegExp, string, boolean?]> = [
+  // Before /^profiles/: a Profile's saved logins are their own kind of entry.
+  [/^credentials\/:id\/password$/, 'credential.password', true],
+  [/^credentials|^(profiles|teams)\/:id\/credentials$/, 'credential'],
   [/^calls\/:id\/transition$/, 'call.transition', true],
   [/^finance\/payouts$/, 'payout.mark', true],
   [/^calls\/:id\/messages/, 'call.message', true],
@@ -171,6 +175,10 @@ const SUMMARIES: Record<string, string> = {
   'profile.delete': 'deleted a profile',
   'bank.read': 'looked at bank details',
   'bank.password': 'revealed a bank password',
+  'credential.password': 'revealed a saved login’s password',
+  'credential.create': 'saved a login',
+  'credential.update': 'changed a saved login',
+  'credential.delete': 'deleted a saved login',
   'chat.observed.list': 'listed everyone’s chats',
   'chat.observed.thread': 'read a chat between two other people',
   'bank.create': 'added bank details',
