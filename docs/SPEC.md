@@ -42,7 +42,7 @@ PC browser and a mobile app.
 | Role | Description | Managed by |
 |---|---|---|
 | **Founder** | Owner of the system. Full access. Handles invoice stages. Creates Managers. | — |
-| **Manager** | Manages a team of Associates (creates, edits and deactivates their accounts). Works with **every** Associate's Calls, and can run Calls themselves like an Associate. | Founder |
+| **Manager** | Manages a team of Associates (creates, edits and deactivates their accounts). Works with their own team's Profiles and Calls, and can run Calls themselves like an Associate. | Founder |
 | **Associate** | Creates and schedules Calls. Owns the scheduling stages. | Manager |
 | **Expert** | Confirms and performs the Call. Owns the execution stages. Never sees invoicing or a call's income; sees only their own pay. | Founder |
 
@@ -79,7 +79,7 @@ grouped under Managers; they are assigned per Call.
 | Action | Founder | Manager | Associate | Expert |
 |---|---|---|---|---|
 | Create Manager | ✓ | | | |
-| View users | all | every Associate and Expert | | |
+| View users | all | own team's Associates, every Expert | | |
 | Create Associate | ✓ | ✓ (own team) | | |
 | Create Expert | ✓ | | | |
 | Deactivate user | ✓ | ✓ (own team) | | |
@@ -88,8 +88,8 @@ grouped under Managers; they are assigned per Call.
 | Create / edit Platform | ✓ | ✓ | | |
 | Add Profile | ✓ (approved at once) | ✓ (pending until a Founder approves) | ✓ (pending until a Founder approves) | |
 | Edit Profile | ✓ | ✓ (a pending or rejected one goes back for review) | ✓ (a pending or rejected one goes back for review) | |
-| View Profile details | all | shared + own team's submissions | shared + own submissions | Profiles of assigned Calls, without platform statuses |
-| Set a Profile's status on a platform | ✓ | ✓ (every Profile) | ✓ (every Profile) | |
+| View Profile details | all | own team's (§2.4) | own team's (§2.4) | Profiles of assigned Calls, without platform statuses |
+| Set a Profile's status on a platform | ✓ | ✓ (own team's Profiles) | ✓ (own team's Profiles) | |
 | Set a Profile's rate on a platform | ✓ | | | |
 | Deactivate a Profile / see deactivated ones | ✓ | | | |
 | Delete a Profile | ✓ | | | |
@@ -103,26 +103,26 @@ grouped under Managers; they are assigned per Call.
 | Approve / reject a pending Profile | ✓ | | | |
 | Choose own avatar (from own role's set) | ✓ | ✓ | ✓ | ✓ |
 | Create Call | ✓ | ✓ | ✓ | |
-| View Call | all | every Associate's + own | their team's (own, teammates', their Manager's) | assigned |
-| Reassign Associate on a Call | ✓ (to any Associate or Manager) | ✓ (to themselves or any Associate) | | |
-| Reassign Expert on a Call | ✓ | ✓ (every Associate's + own) | ✓ (their team's, whole scheduling stage) | |
+| View Call | all | own team's (their Associates' + own) | their team's (own, teammates', their Manager's) | assigned |
+| Reassign Associate on a Call | ✓ (to any Associate or Manager in the Profile's team) | ✓ (to themselves or an Associate of their team) | | |
+| Reassign Expert on a Call | ✓ | ✓ (own team's) | ✓ (their team's, whole scheduling stage) | |
 | Set scheduling statuses | override | override (own calls: ✓) | ✓ (their team's) | request rescheduling only |
 | Confirm a scheduled Call | override | | | ✓ |
 | Set execution statuses | override | | | ✓ |
 | Set invoice statuses | ✓ | | | |
 | Delete a Call | ✓ | | | |
-| See invoice statuses | ✓ | ✓ (every Associate's) | their team's | |
-| See a call's income and rate (expected price, real income) | ✓ | ✓ (every Associate's) | | |
+| See invoice statuses | ✓ | ✓ (own team's) | their team's | |
+| See a call's income and rate (expected price, real income) | ✓ | ✓ (own team's) | | |
 | See a Profile's platform rates | ✓ | ✓ | | |
 | Activate or deactivate a bank | ✓ | | | |
-| Set a special rate for one Call | ✓ | ✓ (every Associate's + own) | | |
+| Set a special rate for one Call | ✓ | ✓ (own team's) | | |
 | Set the Call's research data link, mark the research data ready | ✓ | | | |
 | Read the Call's research data link and Ninja link; see the "research data ready" step | ✓ | | | ✓ (assigned) |
-| Add or change a Call's meeting details | ✓ | ✓ (every Associate's + own) | their team's, until it took place | |
+| Add or change a Call's meeting details | ✓ | ✓ (own team's) | their team's, until it took place | |
 | Read a Call's meeting details | ✓ | ✓ | ✓ | ✓ |
 | Read the Call's Ninja (meeting) link | ✓ | | | ✓ (assigned; the Expert adds it when starting) |
 | Set an Expert's hourly rate, a Profile's Manager share | ✓ | | | |
-| Correct a finished Call's actual duration, until the Expert is paid for it | ✓ | ✓ (every Associate's + own) | | |
+| Correct a finished Call's actual duration, until the Expert is paid for it | ✓ | ✓ (own team's) | | |
 | Set an Associate's share (of the Manager's share) | ✓ | ✓ (own team) | | |
 | See own pay (§3.1 "Who is paid what") | ✓ (everyone's) | own share and the Associate's part they pass on | their Manager's share and their own part | own pay |
 | See the payment records (§6.5a, by week, month or year) | ✓ (all) | own pay | own pay | own pay |
@@ -134,15 +134,15 @@ grouped under Managers; they are assigned per Call.
 | Post message in Call thread (switched off, §6.5) | ✓ | ✓ | ✓ | ✓ |
 | Delete own chat message; react; send pictures | ✓ | ✓ | ✓ | ✓ |
 | Clear a chat's whole history | the two people in it | same | same | same |
-| Chat one-to-one (§6.11) | anyone | Founders, Managers, Associates; Experts in set scheduling messages | Founders, Managers; Experts in set scheduling messages | Founders; Managers and Associates in set scheduling messages |
-| Start a group chat, be in one (§6.11c) | ✓ | ✓ | ✓ | |
-| Give tasks (chat message or New task) | ✓ anyone | ✓ any Associate | | |
+| Chat one-to-one (§6.11) | anyone | Founders, Managers, own team's Associates; Experts in set scheduling messages | Founders, own Manager, teammates; Experts in set scheduling messages | Founders; Managers and Associates in set scheduling messages |
+| Start a group chat, be in one (§6.11c) | ✓ | ✓ (with people they may chat with) | ✓ (with people they may chat with) | |
+| Give tasks (chat message or New task) | ✓ anyone | ✓ own team's Associates | | |
 | Remove a task (§6.11) | ✓ any task, at any stage | once it is completed, if they gave it or it is theirs | same | same |
-| Write notes on a task (§6.11) | ✓ any task | tasks they gave or own, and any Associate's | tasks they gave or own | own tasks |
-| View a Call's status history | ✓ | ✓ (every Associate's + own) | their team's | assigned (without invoicing steps) |
+| Write notes on a task (§6.11) | ✓ any task | tasks they gave or own, and their team's Associates' | tasks they gave or own | own tasks |
+| View a Call's status history | ✓ | ✓ (own team's) | their team's | assigned (without invoicing steps) |
 | View the audit trail (§6.16) | ✓ | | | |
 | See and end own signed-in devices | ✓ | ✓ | ✓ | ✓ |
-| See financial statistics (§6.14) | all | every Associate's + own | | |
+| See financial statistics (§6.14) | all | own team's | | |
 
 **[Implementation]** A Call is always booked in the future: the API refuses a `scheduledAt` more
 than five minutes in the past, on creation and when rescheduling, and the calendar does not offer
@@ -150,9 +150,37 @@ past slots.
 
 **[Implementation]** Managers have every Associate function: a Call's Associate may be a
 Manager, who then runs it exactly like an Associate (no overrides on their own Call), sees
-it in their lists, calendar and statistics, and may hand it on. A Manager oversees **every**
-Associate, not only their own team; only account changes (create, edit, deactivate) stay
-limited to their team. A Manager's own Calls stay theirs: other Managers never see them.
+it in their lists, calendar and statistics, and may hand it on. A Manager oversees their
+**own team** only (§2.4): their Associates' Calls and their own.
+
+### 2.4 Teams are closed to each other **[Implementation]**
+
+A team is one Manager and the Associates under them. The Founder and Experts
+are in no team: the Founder sees everything, and Experts work for every team.
+Nobody in a team sees or touches another team's work:
+
+- **Profiles.** A Manager and their Associates see only the Profiles their team
+  handles (`manager_id`), whatever their review status. A Profile no team
+  handles is the Founder's alone until the Founder hands it to a team. Another
+  team's Profile is 404 everywhere (details, edits, platform statuses, banks).
+- **Calls and scheduling.** A team sees, books and moves only its own Calls. A
+  Call's Profile must be one its team handles (400 at `profileId` otherwise),
+  so a Manager gives Calls only to themselves or their own Associates, and a
+  Call cannot be handed to another team's Associate. On a shared Expert's
+  calendar, other teams' Calls show only as busy time, so nobody double-books
+  the Expert and nothing about the other team shows.
+- **People.** Managers list their own Associates and the Experts; statistics,
+  finance, the dashboard and tasks cover their own team. Tasks go only to one's
+  own team's Associates.
+- **Chat.** One-to-one chats, presence and groups stay inside the team:
+  a Manager with their Associates, Associates with each other; Managers also
+  with each other, and everyone with the Founders. A group holds only people its
+  creator (or whoever adds them) may chat with. A chat across teams from before
+  this rule can be read but no longer written in.
+
+The rules are `teamIdOf`, `sameTeam`, `chatModeOf`, `canGiveTask` and
+`supervisesWork` in `packages/shared/src/chat.ts`, and `visibleCallsWhere` and
+`visibleProfilesWhere` in the API.
 
 "override" means the role may perform the transition on behalf of the normal
 owner. Every override is recorded in the status history with the actor.
@@ -166,9 +194,10 @@ as `permissions` on every Call:
 - `edit` (time, duration, platform, platform associate, project details,
   notes): the call's Associate, their Manager or the Founder while the call is
   in the scheduling stage; the Founder at any stage.
-- `reassignAssociate`: Founder (to any Associate or Manager), or a Manager on
-  any Associate's call or their own (to themselves or any Associate).
-- `reassignExpert`: Founder, a Manager (every Associate's call and their own),
+- `reassignAssociate`: Founder (to any Associate or Manager of the team handling
+  the call's Profile), or a Manager on their own team's call (to themselves or
+  an Associate of their team).
+- `reassignExpert`: Founder, a Manager (their own team's calls),
   or the call's Associate — for as long as the call is in the scheduling stage (through
   `confirmed`), which is where the Associate owns the status. The Expert still
   cannot be removed from a call that is `scheduled` or later.
@@ -265,7 +294,7 @@ app drops the Invoicing stage from their status bar and filters
 | is_active | boolean | Default true. A deactivated Profile is listed for Founders only and cannot be booked (409 `profile_not_approved`); its existing Calls carry on |
 | deleted_at | timestamptz, nullable | Set when the Founder deleted a Profile that had calls: personal details, banks and addresses erased, renamed "Removed profile", hidden everywhere, calls kept |
 | manager_share_percent | numeric(5,2) | The Manager's percent of this Profile's real income. Default 15; set by the Founder |
-| manager_id | uuid → User, nullable | The Manager whose team handles the Profile: the Manager and every Associate under them. A submission goes to the submitter's team (a Manager's own, an Associate's Manager's); a Founder's to none. Only the Founder hands it to another team (`PUT /profiles/:id/manager`). Which team handles it makes no difference to what anyone may do with it: it is the **My team** filter, the Manager column, and who sees it while pending or rejected |
+| manager_id | uuid → User, nullable | The Manager whose team handles the Profile: the Manager and every Associate under them, and nobody in another team (§2.4). A submission goes to the submitter's team (a Manager's own, an Associate's Manager's); a Founder's to none, and a Profile with no team is seen by Founders only. Only the Founder hands it to another team (`PUT /profiles/:id/manager`) |
 | associate_id | uuid → User, nullable | Superseded by `manager_id` (one Associate used to look after a Profile), and unused; kept until the running API no longer reads it |
 | created_by | uuid → User | Who added it |
 | reviewed_by | uuid → User, nullable | Founder who approved or rejected |
@@ -927,7 +956,7 @@ export function canTransition(role, from, to, ctx): boolean
 
 `ctx` carries the relationship check: the Associate must be the Call's
 associate, the Expert must be the Call's expert, and a Manager must oversee the
-Call (any Associate's Call, or one they run themselves; `supervisesWork` in
+Call (their own team's Associates' Calls, or one they run themselves; `supervisesWork` in
 `packages/shared/src/chat.ts`). The server enforces this function; clients use it only to
 decide which buttons to render. Each edge also has its normal owners
 (`EDGE_OWNERS`; rescheduling belongs to both the Associate and the Expert), and
@@ -1119,7 +1148,7 @@ family) that records the device type, browser, OS, IP and country.
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | /users | Founder, Manager | Manager sees every Associate and every Expert. Query: role, q, active |
+| GET | /users | Founder, Manager | Manager sees their own team's Associates and every Expert. Query: role, q, active |
 | POST | /users | Founder, Manager | Manager may create Associates only. time_zone accepted for Experts only |
 | GET | /users/:id | Founder, Manager | |
 | PATCH | /users/:id | Founder, Manager | nickname, manager_id, is_active; time_zone for Experts, Founder only. A Manager changes only their own team's Associates (403 otherwise). Founder only: `hourly_rate` (Experts; with `apply_rate_to_unpriced_calls: true` it also goes to their finished calls without a rate) and `share_percent` (Associates, also by their own Manager: their portion of the Manager's share). Rates and shares are returned to the Founder, an Associate's share also to their own Manager, and to each person on `/me` |
@@ -1144,7 +1173,7 @@ but not shown anywhere else, and are not part of Call payloads.
 
 | Method | Path | Who |
 |---|---|---|
-| GET | /profiles | all. Query: q, status. Approved profiles are shared; pending and rejected ones are visible to the Founder, the author, the author's Manager, and the team handling it. Experts see only the Profiles of Calls assigned to them |
+| GET | /profiles | all. Query: q, status. Managers and Associates see only the Profiles their team handles, in any status (§2.4); Founders every Profile. Experts see only the Profiles of Calls assigned to them |
 | GET | /profiles/:id | same visibility |
 | POST | /profiles | Founder, Manager, Associate. { name, linkedinUrl?, briefExperience?, avatarId, dateOfBirth?, gender?, nationality?, location?, education?, careerHistory?, email?, phone?, onboardedAt? (Founder only), addresses? (Founder only, up to 10 { label, address }) }. A Founder's profile is approved at once; anyone else's is pending and every active Founder gets `profile.submitted` |
 | PATCH | /profiles/:id | Founder, Manager, Associate — anyone who works with Profiles; Experts are refused. A Founder's edit changes nothing else. Anyone else editing a **pending or rejected** Profile sends it back to pending and notifies the Founders; editing an **approved** one leaves it approved, because keeping details current must not take a Profile out of use over a corrected phone number. The onboard date and the Manager's share are the Founder's and are ignored from anyone else |
@@ -1153,7 +1182,7 @@ but not shown anywhere else, and are not part of Call payloads.
 | PATCH | /profiles/:id/active | Founder. { isActive }. A deactivated Profile disappears for everyone else and cannot be booked |
 | DELETE | /profiles/:id | Founder. See "Deleting a Profile" in §6.9a |
 | PUT | /profiles/:id/manager | Founder | { managerId: uuid \| null }. The Manager whose team handles the Profile (an active Manager, 400 otherwise), or none |
-| PUT | /profiles/:id/platforms/:platformId | Founder, Manager, Associate, on any Profile they can see, whichever team handles it (`canEditPlatforms`). { status?: not_registered \| registered \| banned, rate?: USD per hour (Founder only; 403 otherwise), 0–1,000,000, two decimals, or null to clear }. At least one of the two. A Profile can be registered without a rate; invoicing its calls still needs one |
+| PUT | /profiles/:id/platforms/:platformId | Founder, Manager, Associate, on any Profile they can see — for a Manager or an Associate, their own team's (`canEditPlatforms`). { status?: not_registered \| registered \| banned, rate?: USD per hour (Founder only; 403 otherwise), 0–1,000,000, two decimals, or null to clear }. At least one of the two. A Profile can be registered without a rate; invoicing its calls still needs one |
 
 Profile responses include the personal details and `platformStatuses`: one
 entry per platform ({ platform: { id, name, priority }, status, rate }) in priority
@@ -1384,11 +1413,11 @@ One-to-one chats. Who may chat with whom (`canChat` in
 `packages/shared/src/chat.ts`, enforced by the API):
 
 - a Founder with anyone;
-- a Manager with Managers and with any Associate;
-- Associates with Managers and Founders;
+- a Manager with Managers and with their own team's Associates;
+- Associates with their own Manager, their teammates and Founders;
 - Experts with Founders, and with Managers and Associates only to schedule calls.
 
-Associates don't chat with other Associates, nor Experts with Experts. A chat
+Nobody chats with another team's people (§2.4), nor Experts with Experts. A chat
 that the rules no longer allow stays readable, with `canSend: false`.
 
 **Scheduling chats.** Between an Expert and a Manager or Associate
@@ -1457,7 +1486,7 @@ starts at the next tap.
 | POST | /chat/messages/:id/reactions | the two people | { emoji }. Toggles the caller's reaction (up to 10 per person per message); not on deleted messages or closed chats. Emits `chat:message-updated` |
 | POST | /chat/messages/:id/todo | a participant who may give the other person tasks | Turns a regular message into a task for the other person (`todo.assigned`), in **need action · strategic** like any new task. Founder → anyone, Manager → any Associate, anyone → themselves (`canGiveTask`); 403 otherwise, 409 if already a task |
 | DELETE | /chat/messages/:id/todo | as `DELETE /todos/:id` | Removes the task made from the message (the message stays) |
-| GET | /todos/assignees | all | People the caller may give a task to: themselves first, then everyone below them (every Associate for a Manager, everyone for the Founder) |
+| GET | /todos/assignees | all | People the caller may give a task to: themselves first, then everyone below them (their own team's Associates for a Manager, everyone for the Founder) |
 | PATCH | /todos/:id | the giver, and anyone who may give the owner tasks | Changes a task after it was given: `title` (not for a chat task, whose words are the message), `details`, the two dates, `expectedDeliverable`, `definitionOfDone`, the quadrant, `dependsOn`. **Not the owner**: a deadline you can move yourself is not a commitment to anyone, though a task you gave yourself is yours either way |
 | POST | /todos/:id/status | the owner, or anyone who may change the task | { status: open \| in_progress \| blocked, blockedReason? }. Where the work stands. `blocked` must say why (400 otherwise), and tells the giver (`todo.blocked`). Finishing is `done`, not this: that asks the giver for something. 409 once the task is finished |
 | POST | /todos | all | { assigneeId, title, details?, urgency?, importance?, startByAt?, startByHasTime?, completeByAt?, completeByHasTime?, timeZone?, expectedDeliverable?, definitionOfDone?, dependsOn? }: a task without a chat message. Anyone may add one for themselves; nobody is notified about their own. Without a quadrant it lands in **need action · strategic** |
@@ -1468,7 +1497,7 @@ starts at the next tap.
 | POST | /todos/:id/notes | same | { body }: no length cap; blank is 400. The task's `noteCount` changes for everyone who sees it. No bell notification |
 | PATCH | /todos/:id/notes/:noteId | the writer | { body } |
 | DELETE | /todos/:id/notes/:noteId | the writer, or a Founder | |
-| GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (every Associate for a Manager; everyone for the Founder). Each panel: the person (with `isActive` and their `manager`, which places an Associate in a team), whether the caller may give them tasks, their tasks (whoever gave them, each with its `noteCount`) and counts. Query: status as below |
+| GET | /todos/board | all | The task board: the caller's own panel first, then one per person below them (their own team's Associates for a Manager; everyone for the Founder). Each panel: the person (with `isActive` and their `manager`, which places an Associate in a team), whether the caller may give them tasks, their tasks (whoever gave them, each with its `noteCount`) and counts. Query: status as below |
 | GET | /todos | giver or taker | Query: scope = assigned (default) \| created, status = active (default: open, done, and tasks completed within the last 7 days) \| open \| done \| completed \| all. Open first |
 | POST | /todos/:id/done | the taker | { note? }. open → done; for a chat task posts a `todo_done` reply (body = note or "Done"). The giver gets `todo.done`. A task the taker gave themselves goes straight to completed, with nobody to confirm and nobody to tell |
 | POST | /todos/:id/confirm | the giver | done → completed (`confirmed_at`); the taker gets `todo.completed`. Completed tasks leave the default list |
@@ -1625,9 +1654,9 @@ Periods are weeks (Monday start), two-week blocks (aligned on Monday 2026-01-05)
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | /stats/associates | Founder (all Associates, and Managers who ran calls), Manager (every Associate and themselves), Associate (self) | Per Associate and period: calls, finished calls, potential money and unpriced calls, plus totals. Potential money = rate × duration, the real duration once the Expert finished the call and the booked duration before; the rate is the call's special rate or the Profile's platform rate. Calls without a rate count as unpriced. Deactivated Associates appear only with calls in the range. Experts: 403. Associates get their call counts only: `showsMoney: false` and potential 0 |
+| GET | /stats/associates | Founder (all Associates, and Managers who ran calls), Manager (their own team's Associates and themselves), Associate (self) | Per Associate and period: calls, finished calls, potential money and unpriced calls, plus totals. Potential money = rate × duration, the real duration once the Expert finished the call and the booked duration before; the rate is the call's special rate or the Profile's platform rate. Calls without a rate count as unpriced. Deactivated Associates appear only with calls in the range. Experts: 403. Associates get their call counts only: `showsMoney: false` and potential 0 |
 | GET | /stats/profiles | Founder | Every Profile including pending, rejected and deactivated: status, active, onboard date, email, first active bank (name, type, currency, count), calls, paid calls, expected income (finished calls), total income (sum of real income), last call already started. Audited as a sensitive read |
-| GET | /stats/finance | Founder (everyone), Manager (every Associate's calls and their own), Associates and Experts 403 | Per period, and over the range per platform and per Profile: calls, finished calls, paid calls, expected (expected price of finished calls), paidExpected and real (calls with real income), gap = paidExpected − real, unpriced |
+| GET | /stats/finance | Founder (everyone), Manager (their own team's calls), Associates and Experts 403 | Per period, and over the range per platform and per Profile: calls, finished calls, paid calls, expected (expected price of finished calls), paidExpected and real (calls with real income), gap = paidExpected − real, unpriced |
 
 Web: **Statistics** (Founder, Manager, Associate — call counts only for Associates, without the Finance tab) with Weekly / Bi-weekly / Monthly, the *By associate* and *Finance* tabs (Expected, Real income, Gap on paid calls, Not paid yet; tables by period, platform and Profile with expected-vs-real bars), each scoped to the calls the viewer can see. Founders also get the *By profile* table (filters All / Active / Deactivated / Pending / Rejected, sort, search).
 
@@ -2113,7 +2142,7 @@ Container alternative:
 | Ninja link | The VDO.Ninja meeting link the Expert adds when a call starts |
 | Platform status | A Profile's standing on an expert network platform: not registered, registered or banned |
 | Conversation | A one-to-one chat between two users |
-| Task (to-do) | Work given by someone above you (Founder → anyone, Manager → any Associate), from a chat message or New task. The taker ticks it done, the giver confirms it: completed, and it stays in view for a week |
+| Task (to-do) | Work given by someone above you (Founder → anyone, Manager → their own team's Associates), from a chat message or New task. The taker ticks it done, the giver confirms it: completed, and it stays in view for a week |
 
 ## Appendix B. Change log
 
@@ -2177,6 +2206,7 @@ Container alternative:
 | 2026-10-10 | **Group chats**: anyone but an Expert starts a group (a name, a picture, members) and owns it; owners and admins add and remove people, rename it and delete messages, the owner chooses admins and deletes it; anyone leaves. What happens in a group shows as a line in it. **Replies** quote the message they answer, in any chat, and **@mentions** call a member, with their own notification and an @ badge in the chat list |
 | 2026-10-13 | **Removing a task**: a Founder removes any task, at any stage; anyone else only once it is completed, and then only whoever gave it or whoever it is for (before, the giver could remove an open one). **Notes on a task**, with no length cap, kept by the people who can see it, in a panel that a row now opens beside the table. A Founder's or a Manager's Tasks page has the **people as a tree** beside the table — teams under their Managers, the Experts, the rest — in place of the Owner filter |
 | 2026-10-14 | **The Founder's own calendar**: events of their own — not consultation calls — on the Calendar beside the calls, with a title, a note and the same repeats and this / following / all edits as time off. Only the Founder sees them, and they never block an Expert or a call |
+| 2026-10-16 | **Teams are closed to each other** (§2.4): a Manager and their Associates see only their own team's Profiles (approved ones are no longer shared; a Profile with no team is the Founder's), Calls, calendar details, people, statistics and tasks. A Call's Profile must be its team's, so Calls stay inside their team. Chat, presence and groups stay inside the team too (Managers still talk to each other, everyone to the Founders), and Associates may now chat with their teammates. On a shared Expert's calendar, other teams' Calls show only as busy time |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |

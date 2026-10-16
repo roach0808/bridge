@@ -1,26 +1,52 @@
 import type { Role } from './roles';
 
 /**
+ * Someone as the team rules see them. `managerId` is an Associate's Manager;
+ * it is null for everyone else.
+ */
+export interface TeamMember {
+  id: string;
+  role: Role;
+  managerId: string | null;
+}
+
+/**
+ * The team someone is in, named by its Manager: a Manager's own, an
+ * Associate's Manager's. The Founder and Experts are in no team.
+ */
+export const teamIdOf = (p: TeamMember): string | null =>
+  p.role === 'manager' ? p.id : p.role === 'associate' ? p.managerId : null;
+
+/** Two people in the same team. Each team is closed to the others (§2.4). */
+export const sameTeam = (a: TeamMember, b: TeamMember): boolean => {
+  const team = teamIdOf(a);
+  return team !== null && team === teamIdOf(b);
+};
+
+/**
  * Who may hold a one-to-one chat with whom:
  * - the Founder with anyone;
- * - Managers with Managers and with any Associate;
+ * - Managers with Managers;
+ * - everyone in a team with the rest of their own team: a Manager with their
+ *   Associates, Associates with each other;
  * - Experts with Managers and Associates, but only to schedule calls (see
  *   scheduling.ts): every message is one of the set sentences.
- * Associates don't chat with each other, nor Experts with Experts. The rule is
- * symmetric, and nobody chats with themselves.
+ * Nobody chats with another team's people, nor Experts with Experts. The rule
+ * is symmetric, and nobody chats with themselves.
  */
 export type ChatMode = 'free' | 'scheduling';
 
 /** How two people may chat, or null when they may not. */
-export function chatModeOf(a: { id: string; role: Role }, b: { id: string; role: Role }): ChatMode | null {
+export function chatModeOf(a: TeamMember, b: TeamMember): ChatMode | null {
   if (a.id === b.id) return null;
   if (a.role === 'founder' || b.role === 'founder') return 'free';
   if (a.role === 'expert' && b.role === 'expert') return null;
   if (a.role === 'expert' || b.role === 'expert') return 'scheduling';
-  return a.role === 'manager' || b.role === 'manager' ? 'free' : null;
+  if (a.role === 'manager' && b.role === 'manager') return 'free';
+  return sameTeam(a, b) ? 'free' : null;
 }
 
-export function canChat(a: { id: string; role: Role }, b: { id: string; role: Role }): boolean {
+export function canChat(a: TeamMember, b: TeamMember): boolean {
   return chatModeOf(a, b) !== null;
 }
 
@@ -102,12 +128,13 @@ export type TodoStatus = (typeof TODO_STATUSES)[number];
 
 /**
  * Who may give a task to whom: anyone to themselves (a personal to-do on their
- * own panel), the Founder to anyone else, a Manager to any Associate.
+ * own panel), the Founder to anyone else, a Manager to the Associates of their
+ * own team.
  */
-export function canGiveTask(giver: { id: string; role: Role }, taker: { id: string; role: Role }): boolean {
+export function canGiveTask(giver: TeamMember, taker: TeamMember): boolean {
   if (giver.id === taker.id) return true;
   if (giver.role === 'founder') return true;
-  return giver.role === 'manager' && taker.role === 'associate';
+  return giver.role === 'manager' && taker.role === 'associate' && taker.managerId === giver.id;
 }
 
 /** A task someone gave themselves needs nobody's confirmation: ticking it finishes it. */
@@ -121,10 +148,7 @@ export function isSelfTask(t: { assignee: { id: string }; createdBy: { id: strin
  * deadline you can move yourself is not a commitment to anyone — unless they
  * gave it to themselves.
  */
-export function canEditTask(
-  actor: { id: string; role: Role },
-  t: { assignee: { id: string; role: Role }; createdBy: { id: string } },
-): boolean {
+export function canEditTask(actor: TeamMember, t: { assignee: TeamMember; createdBy: { id: string } }): boolean {
   if (t.createdBy.id === actor.id) return true;
   return t.assignee.id !== actor.id && canGiveTask(actor, t.assignee);
 }
@@ -148,10 +172,7 @@ export function canRemoveTask(
  * Who may write notes on a task: whoever it is for, whoever gave it, and anyone
  * who could have given it to them — everyone who can see the task.
  */
-export function canNoteTask(
-  actor: { id: string; role: Role },
-  t: { assignee: { id: string; role: Role }; createdBy: { id: string } },
-): boolean {
+export function canNoteTask(actor: TeamMember, t: { assignee: TeamMember; createdBy: { id: string } }): boolean {
   return t.assignee.id === actor.id || t.createdBy.id === actor.id || canGiveTask(actor, t.assignee);
 }
 
@@ -160,11 +181,11 @@ export const canEditTaskNote = (actor: { id: string }, note: { author: { id: str
 export const canDeleteTaskNote = (actor: { id: string; role: Role }, note: { author: { id: string } }): boolean =>
   note.author.id === actor.id || actor.role === 'founder';
 
-/** A Manager runs the work of every Associate, and of themselves. */
-export function supervisesWork(actor: { id: string; role: Role }, owner: { id: string; role: Role }): boolean {
+/** A Manager runs the work of their own team's Associates, and their own. */
+export function supervisesWork(actor: TeamMember, owner: TeamMember): boolean {
   if (actor.role === 'founder') return true;
   if (actor.role !== 'manager') return false;
-  return owner.role === 'associate' || owner.id === actor.id;
+  return owner.id === actor.id || (owner.role === 'associate' && owner.managerId === actor.id);
 }
 
 /**

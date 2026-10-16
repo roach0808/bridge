@@ -2,6 +2,7 @@ import {
   ACTIVE_TODO_STATUSES,
   addGroupMembersSchema,
   canChat,
+  type TeamMember,
   canJoinGroups,
   canRemoveFromGroup,
   createGroupSchema,
@@ -101,7 +102,7 @@ const isDirect = (c: ConversationRow): c is DirectRow => c.kind === 'direct';
 
 const todoSummaryInclude = {
   // The owner's zone is the one a task's times are read in unless it says otherwise.
-  assignee: { select: { ...userRefSelect, timeZone: true } },
+  assignee: { select: { ...userRefSelect, timeZone: true, managerId: true } },
   createdBy: { select: userRefSelect },
 } satisfies Prisma.TodoInclude;
 
@@ -130,7 +131,7 @@ const toTodoSummary = (t: Prisma.TodoGetPayload<{ include: typeof todoSummaryInc
   status: t.status,
   urgency: t.urgency,
   importance: t.importance,
-  assignee: toUserRef(t.assignee),
+  assignee: { ...toUserRef(t.assignee), managerId: t.assignee.managerId },
   createdBy: toUserRef(t.createdBy),
   doneAt: isoOrNull(t.doneAt),
   confirmedAt: isoOrNull(t.confirmedAt),
@@ -230,12 +231,12 @@ const readMarker = (c: ConversationRow, userId: string, at: Date) =>
  */
 const canSendIn = (c: ConversationRow, userId: string) =>
   isDirect(c)
-    ? c.userA.isActive && c.userB.isActive && canChat({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role })
+    ? c.userA.isActive && c.userB.isActive && canChat(asMember(c.userA), asMember(c.userB))
     : c.members.some((m) => m.userId === userId && m.user.isActive);
 
 /** An Expert and the team only schedule calls; every other chat, groups included, is free. */
 const modeOf = (c: ConversationRow) =>
-  isDirect(c) ? (chatModeOf({ id: c.userA.id, role: c.userA.role as Role }, { id: c.userB.id, role: c.userB.role as Role }) ?? 'free') : 'free';
+  isDirect(c) ? (chatModeOf(asMember(c.userA), asMember(c.userB)) ?? 'free') : 'free';
 
 async function loadConversation(actor: Actor, id: string | null): Promise<ConversationRow> {
   if (!id) throw notFound('Conversation');
@@ -251,11 +252,9 @@ async function loadDirect(actor: Actor, id: string | null, what: string): Promis
   return c;
 }
 
-const meIn = (c: DirectRow, userId: string) => {
-  const me = c.userAId === userId ? c.userA : c.userB;
-  return { id: me.id, role: me.role as Role };
-};
-const asTaker = (u: { id: string; role: string }) => ({ id: u.id, role: u.role as Role });
+const meIn = (c: DirectRow, userId: string) => asMember(c.userAId === userId ? c.userA : c.userB);
+/** Someone as the team rules see them (`TeamMember`). */
+const asMember = (u: { id: string; role: string; managerId: string | null }): TeamMember => ({ id: u.id, role: u.role as Role, managerId: u.managerId });
 
 const groupSummary = (c: ConversationRow, userId: string): GroupSummary => ({
   title: c.title ?? '',
@@ -328,7 +327,7 @@ async function toConversationDTOs(db: Db, rows: ConversationRow[], userId: strin
       otherLastReadAt: isDirect(c) ? isoOrNull(otherLastReadAt(c, userId)) : null,
       canSend: open,
       mode: modeOf(c),
-      canGiveTask: isDirect(c) && open && canGiveTask(meIn(c, userId), asTaker(other!)),
+      canGiveTask: isDirect(c) && open && canGiveTask(meIn(c, userId), asMember(other!)),
       canRing: isDirect(c) && open,
       createdAt: iso(c.createdAt),
     };
@@ -356,10 +355,10 @@ chatRouter.get('/chat/contacts', async (req, res) => {
   const actor = actorOf(req);
   const users = await prisma.user.findMany({
     where: { isActive: true, id: { not: actor.id } },
-    select: userRefSelect,
+    select: { ...userRefSelect, managerId: true },
     orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
   });
-  res.json(users.filter((u) => canChat(actor, { id: u.id, role: u.role as Role })).map(toUserRef));
+  res.json(users.filter((u) => canChat(actor, asMember(u))).map(toUserRef));
 });
 
 /** The caller's chats that have at least one message, most recent first. */
@@ -377,11 +376,11 @@ chatRouter.get('/chat/conversations', async (req, res) => {
 chatRouter.post('/chat/conversations', async (req, res) => {
   const actor = actorOf(req);
   const { userId } = parseBody(startConversationSchema, req);
-  const other = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true, isActive: true } });
+  const other = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, role: true, managerId: true, isActive: true } });
   if (!other || !other.isActive || other.id === actor.id) {
     throw badRequest('Choose someone to chat with', { issues: [{ path: 'userId', message: 'Not an active user' }] });
   }
-  if (!canChat(actor, { id: other.id, role: other.role as Role })) {
+  if (!canChat(actor, asMember(other))) {
     throw forbidden('You cannot start a chat with this person');
   }
   const [userAId, userBId] = [actor.id, other.id].sort() as [string, string];
@@ -430,15 +429,26 @@ function assertRuns(c: ConversationRow, actor: Actor) {
   if (!runsGroup(roleIn(c, actor.id))) throw forbidden('Only the group’s owner and admins can do that');
 }
 
-/** The people to put in a group: each must be an active Founder, Manager or Associate. */
-async function groupPeople(ids: string[]) {
-  const people = await prisma.user.findMany({ where: { id: { in: ids } }, select: { ...userRefSelect, isActive: true } });
+/**
+ * The people to put in a group: each must be an active Founder, Manager or
+ * Associate. A group never reaches into another team (§2.4): unless the caller
+ * is a Founder, everyone in it — the caller, those already there and those
+ * joining — must be people each newcomer may chat with. A group a Founder made
+ * across teams is theirs to grow.
+ */
+async function groupPeople(actor: Actor, ids: string[], members: TeamMember[] = []) {
+  const people = await prisma.user.findMany({ where: { id: { in: ids } }, select: { ...userRefSelect, isActive: true, managerId: true } });
   const wrong = ids.filter((id) => {
     const u = people.find((p) => p.id === id);
     return !u || !u.isActive || !canJoinGroups(u.role as Role);
   });
   if (wrong.length) {
     throw badRequest('Groups are for active Founders, Managers and Associates', { issues: wrong.map(() => ({ path: 'memberIds', message: 'Cannot be in a group' })) });
+  }
+  if (actor.role !== 'founder') {
+    const everyone = [actor, ...members, ...people.map(asMember)];
+    const outside = people.some((p) => everyone.some((q) => q.id !== p.id && !canChat(asMember(p), q)));
+    if (outside) throw forbidden('A group can only hold people who may chat with each other');
   }
   // In the order they were picked.
   return ids.map((id) => people.find((p) => p.id === id)!);
@@ -473,10 +483,10 @@ chatRouter.get('/chat/group-candidates', async (req, res) => {
   if (!canJoinGroups(actor.role)) throw forbidden('Experts are not in groups');
   const users = await prisma.user.findMany({
     where: { isActive: true, id: { not: actor.id }, role: { not: 'expert' } },
-    select: userRefSelect,
+    select: { ...userRefSelect, managerId: true },
     orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
   });
-  res.json(users.map(toUserRef));
+  res.json(users.filter((u) => canChat(actor, asMember(u))).map(toUserRef));
 });
 
 /** Starts a group: the caller owns it, with the people they picked as members. */
@@ -484,7 +494,7 @@ chatRouter.post('/chat/groups', async (req, res) => {
   const actor = actorOf(req);
   if (!canJoinGroups(actor.role)) throw forbidden('Experts are not in groups');
   const { title, memberIds } = parseBody(createGroupSchema, req);
-  const people = await groupPeople(memberIds.filter((id) => id !== actor.id));
+  const people = await groupPeople(actor, memberIds.filter((id) => id !== actor.id));
   if (!people.length) throw badRequest('Add at least one person', { issues: [{ path: 'memberIds', message: 'Add at least one person' }] });
   const now = new Date();
   const { id, system } = await prisma.$transaction(async (tx) => {
@@ -570,7 +580,11 @@ chatRouter.post('/chat/groups/:id/members', async (req, res) => {
   const c = await loadGroup(actor, idParam(req));
   assertRuns(c, actor);
   const { userIds } = parseBody(addGroupMembersSchema, req);
-  const fresh = await groupPeople(userIds.filter((id) => !isParticipant(c, id)));
+  const fresh = await groupPeople(
+    actor,
+    userIds.filter((id) => !isParticipant(c, id)),
+    c.members.filter((m) => m.user.isActive).map((m) => asMember(m.user)),
+  );
   if (!fresh.length) return void (await groupChanged(res, actor, c.id, null));
   if (c.members.length + fresh.length > GROUP_MAX_MEMBERS) throw conflict(`A group holds at most ${GROUP_MAX_MEMBERS} people`);
   const now = new Date();
@@ -1171,7 +1185,7 @@ chatRouter.post('/chat/messages/:id/todo', async (req, res) => {
   const m = await loadMessageInMyChat(actor, idParam(req));
   if (!isDirect(m.conversation)) throw badRequest('Tasks come from one-to-one chats');
   const assignee = otherOf(m.conversation, actor.id);
-  if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
+  if (!canGiveTask(actor, asMember(assignee))) throw forbidden('You cannot give tasks to this person');
   if (m.kind !== 'text') throw conflict('Only regular messages can become tasks');
   if (m.todo) throw conflict('This message is already a task');
   if (!assignee.isActive) throw conflict('The other person is no longer active');
@@ -1218,7 +1232,7 @@ async function removeTodo(
   // Gone already (a double click, or someone else first) is still gone.
   await prisma.todo.deleteMany({ where: { id: t.id } });
   emitTodo(t, { id: t.id, conversationId: t.conversationId, messageId: t.messageId, removed: true });
-  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: t.assigneeId });
+  for (const userId of await boardWatchers(t.assigneeId)) emitToUser(userId, 'chat:todos-reordered', { assigneeId: t.assigneeId });
 }
 
 chatRouter.delete('/chat/messages/:id/todo', async (req, res) => {
@@ -1239,7 +1253,8 @@ chatRouter.get('/todos/assignees', async (req, res) => {
           where: {
             isActive: true,
             id: { not: actor.id },
-            ...(actor.role === 'manager' ? { role: 'associate' as const } : {}),
+            // A Manager gives tasks to their own team's Associates (§2.4).
+            ...(actor.role === 'manager' ? { role: 'associate' as const, managerId: actor.id } : {}),
           },
           select: userRefSelect,
           orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
@@ -1259,7 +1274,7 @@ chatRouter.post('/todos', async (req, res) => {
   if (!assignee || !assignee.isActive) {
     throw badRequest('Choose who the task is for', { issues: [{ path: 'assigneeId', message: 'Not an active user' }] });
   }
-  if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
+  if (!canGiveTask(actor, asMember(assignee))) throw forbidden('You cannot give tasks to this person');
 
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
     const quadrant = quadrantOf(input);
@@ -1314,7 +1329,7 @@ const toTodoNoteDTO = (n: Prisma.TodoNoteGetPayload<{ include: typeof noteInclud
 /** A task the caller may read and write notes on (`canNoteTask`); anyone else gets a 404. */
 async function loadTodoForNotes(actor: Actor, id: string | null) {
   const t = await loadTodoForEdit(actor, id);
-  if (!canNoteTask(actor, { assignee: t.assignee, createdBy: { id: t.createdById } })) throw notFound('Task');
+  if (!canNoteTask(actor, { assignee: asMember(t.assignee), createdBy: { id: t.createdById } })) throw notFound('Task');
   return t;
 }
 
@@ -1323,7 +1338,7 @@ async function emitNotesChanged(todoId: string) {
   const todo = await prisma.todo.findUnique({ where: { id: todoId }, include: todoInclude });
   if (!todo) return;
   emitTodo(todo, toTodoDTO(todo));
-  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: todo.assigneeId });
+  for (const userId of await boardWatchers(todo.assigneeId)) emitToUser(userId, 'chat:todos-reordered', { assigneeId: todo.assigneeId });
 }
 
 chatRouter.get('/todos/:id/notes', async (req, res) => {
@@ -1452,8 +1467,8 @@ async function waitsOn(tx: Db, from: string, target: string): Promise<boolean> {
 }
 
 /** Who may change a task (`canEditTask`): the giver, and anyone above the owner. */
-const mayEditTask = (actor: Actor, todo: { createdById: string; assignee: { id: string; role: Role } }): boolean =>
-  canEditTask(actor, { assignee: todo.assignee, createdBy: { id: todo.createdById } });
+const mayEditTask = (actor: Actor, todo: { createdById: string; assignee: { id: string; role: string; managerId: string | null } }): boolean =>
+  canEditTask(actor, { assignee: asMember(todo.assignee), createdBy: { id: todo.createdById } });
 
 /** Changing a task after it was given: its wording, its dates, what it should produce. */
 chatRouter.patch('/todos/:id', async (req, res) => {
@@ -1484,7 +1499,7 @@ chatRouter.patch('/todos/:id', async (req, res) => {
   });
   const dto = toTodoDTO(todo);
   emitTodo(todo, dto);
-  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: todo.assigneeId });
+  for (const userId of await boardWatchers(todo.assigneeId)) emitToUser(userId, 'chat:todos-reordered', { assigneeId: todo.assigneeId });
   res.json(dto);
 });
 
@@ -1521,9 +1536,9 @@ chatRouter.post('/todos/:id/status', async (req, res) => {
 
 /** A task the caller gave or was given, with enough of it to decide who may change it. */
 async function loadTodoForEdit(actor: Actor, id: string | null) {
-  const t = id ? await prisma.todo.findUnique({ where: { id }, include: { assignee: { select: { id: true, role: true } } } }) : null;
+  const t = id ? await prisma.todo.findUnique({ where: { id }, include: { assignee: { select: { id: true, role: true, managerId: true } } } }) : null;
   if (!t) throw notFound('Task');
-  if (t.assigneeId !== actor.id && t.createdById !== actor.id && !canGiveTask(actor, asTaker(t.assignee))) throw notFound('Task');
+  if (t.assigneeId !== actor.id && t.createdById !== actor.id && !canGiveTask(actor, asMember(t.assignee))) throw notFound('Task');
   return t;
 }
 
@@ -1557,7 +1572,7 @@ chatRouter.post('/todos/:id/move', async (req, res) => {
         );
     const dto = toTodoDTO(moved);
     emitTodo(moved, dto);
-    for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId });
+    for (const userId of await boardWatchers(assigneeId)) emitToUser(userId, 'chat:todos-reordered', { assigneeId });
     res.json(dto);
     return;
   }
@@ -1571,7 +1586,7 @@ chatRouter.post('/todos/:id/move', async (req, res) => {
   if (!assignee || !assignee.isActive) {
     throw badRequest('Choose who the task is for', { issues: [{ path: 'assigneeId', message: 'Not an active user' }] });
   }
-  if (!canGiveTask(actor, asTaker(assignee))) throw forbidden('You cannot give tasks to this person');
+  if (!canGiveTask(actor, asMember(assignee))) throw forbidden('You cannot give tasks to this person');
 
   const { todo, deliver } = await prisma.$transaction(async (tx) => {
     const todo = await tx.todo.update({
@@ -1593,7 +1608,7 @@ chatRouter.post('/todos/:id/move', async (req, res) => {
     emitToUser(existing.assigneeId, 'chat:todo', { id: todo.id, conversationId: null, messageId: null, removed: true });
   }
   emitTodo(todo, dto);
-  for (const userId of await boardWatchers()) emitToUser(userId, 'chat:todos-reordered', { assigneeId: existing.assigneeId });
+  for (const userId of await boardWatchers(existing.assigneeId)) emitToUser(userId, 'chat:todos-reordered', { assigneeId: existing.assigneeId });
   res.json(dto);
 });
 
@@ -1607,9 +1622,9 @@ chatRouter.post('/todos/reorder', async (req, res) => {
   const { assigneeId, ids, ...into } = parseBody(reorderTodosSchema, req);
   // The quadrant these tasks now belong to; left out, each keeps the one it has.
   const quadrant = into.urgency && into.importance ? { urgency: into.urgency, importance: into.importance } : null;
-  const assignee = await prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true, role: true } });
+  const assignee = await prisma.user.findUnique({ where: { id: assigneeId }, select: { id: true, role: true, managerId: true } });
   if (!assignee) throw notFound('Person');
-  if (assigneeId !== actor.id && !canGiveTask(actor, asTaker(assignee))) {
+  if (assigneeId !== actor.id && !canGiveTask(actor, asMember(assignee))) {
     throw forbidden('You cannot arrange this person\u2019s tasks');
   }
   const unique = [...new Set(ids)];
@@ -1632,16 +1647,16 @@ chatRouter.post('/todos/reorder', async (req, res) => {
       ordered.map((id, i) => tx.todo.update({ where: { id }, data: { position: (i + 1) * TODO_POSITION_STEP } })),
     );
   });
-  for (const userId of new Set([assigneeId, actor.id, ...(await boardWatchers())])) {
+  for (const userId of new Set([assigneeId, actor.id, ...(await boardWatchers(assigneeId))])) {
     emitToUser(userId, 'chat:todos-reordered', { assigneeId });
   }
   res.status(204).end();
 });
 
-/** Everyone whose board can hold someone else's panel. */
-async function boardWatchers(): Promise<string[]> {
+/** Who keeps an eye on these people's task panels: the Founders, and each one's own Manager. */
+async function boardWatchers(...assigneeIds: string[]): Promise<string[]> {
   const rows = await prisma.user.findMany({
-    where: { isActive: true, role: { in: ['founder', 'manager'] } },
+    where: { isActive: true, OR: [{ role: 'founder' }, { role: 'manager', team: { some: { id: { in: assigneeIds } } } }] },
     select: { id: true },
   });
   return rows.map((r) => r.id);
@@ -1683,17 +1698,17 @@ chatRouter.get('/todos/board', async (req, res) => {
     actor.role === 'founder'
       ? await prisma.user.findMany({
           where: { deletedAt: null, id: { not: actor.id } },
-          select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } },
+          select: { ...userRefSelect, isActive: true, managerId: true, manager: { select: userRefSelect } },
           orderBy: [{ isActive: 'desc' }, { role: 'asc' }, { nickname: 'asc' }],
         })
       : actor.role === 'manager'
         ? await prisma.user.findMany({
-            where: { deletedAt: null, role: 'associate' },
-            select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } },
+            where: { deletedAt: null, role: 'associate', managerId: actor.id },
+            select: { ...userRefSelect, isActive: true, managerId: true, manager: { select: userRefSelect } },
             orderBy: [{ isActive: 'desc' }, { nickname: 'asc' }],
           })
         : [];
-  const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: { ...userRefSelect, isActive: true, manager: { select: userRefSelect } } });
+  const me = await prisma.user.findUniqueOrThrow({ where: { id: actor.id }, select: { ...userRefSelect, isActive: true, managerId: true, manager: { select: userRefSelect } } });
   const people = [me, ...below];
 
   const rows = await prisma.todo.findMany({
@@ -1715,7 +1730,7 @@ chatRouter.get('/todos/board', async (req, res) => {
   const body: TodoPanel[] = people.map((person) => ({
     person: { ...toUserRef(person), isActive: person.isActive, manager: person.manager ? toUserRef(person.manager) : null },
     isMe: person.id === actor.id,
-    canGive: canGiveTask(actor, asTaker(person)),
+    canGive: canGiveTask(actor, asMember(person)),
     tasks: rows.filter((t) => t.assigneeId === person.id).map(toTodoDTO),
     counts: countsFor(counts, person.id),
   }));

@@ -57,10 +57,12 @@ describe('POST /calls', () => {
     expectError(await (await as(fx.a1)).post('/calls', body({ associateId: fx.a2.id })), 403);
   });
 
-  it('manager creates for any associate or runs the call themselves', async () => {
+  it('manager creates for an associate of their own team or runs the call themselves', async () => {
     const m1 = await as(fx.m1);
     expect((await m1.post('/calls', body({ associateId: fx.a2.id }))).status).toBe(201);
-    expect((await m1.post('/calls', body({ associateId: fx.a3.id }))).status).toBe(201);
+    // Another team's Associate or Manager is out of reach, whichever team's Profile is booked.
+    expectError(await m1.post('/calls', body({ associateId: fx.a3.id })), 403);
+    expectError(await m1.post('/calls', body({ associateId: fx.a3.id, profileId: fx.approvedProfileTeam2.id })), 403);
     expectError(await m1.post('/calls', body({ associateId: fx.m2.id })), 403);
     // Without an Associate, or choosing themselves, the Manager owns the call.
     const own = await m1.post('/calls', body());
@@ -95,7 +97,9 @@ describe('POST /calls', () => {
 
   it('the founder can give a call to a manager, but not to an expert', async () => {
     const founder = await as(fx.founder);
-    expect((await founder.post('/calls', body({ associateId: fx.m2.id }))).body.associate.id).toBe(fx.m2.id);
+    const given = await founder.post('/calls', body({ associateId: fx.m2.id, profileId: fx.approvedProfileTeam2.id }));
+    expect(given.status, given.text).toBe(201);
+    expect(given.body.associate.id).toBe(fx.m2.id);
     expectError(await founder.post('/calls', body({ associateId: fx.e1.id })), 400, 'validation_error');
     expectError(await founder.post('/calls', body()), 400, 'validation_error');
   });
@@ -118,7 +122,7 @@ describe('POST /calls', () => {
     expect(await waiting(fx.a1)).toBe(1); // one to schedule
     expect(await waiting(fx.e1)).toBe(1); // one to confirm
     expect(await waiting(fx.founder)).toBe(1); // one to invoice
-    expect(await waiting(fx.m1)).toBe(1); // scheduling steps across every associate
+    expect(await waiting(fx.m1)).toBe(1); // scheduling steps across their team
     expect(await waiting(fx.a2)).toBe(1); // a1's call to schedule is the team's
     expect(await waiting(fx.a3)).toBe(0);
   });
@@ -198,7 +202,7 @@ describe('an associate handles the calls of their team', () => {
 });
 
 describe('GET /calls visibility', () => {
-  it('each role sees its calls: managers follow every associate, associates their team', async () => {
+  it('each role sees its calls: managers and associates their own team’s', async () => {
     const c1 = await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: '2027-02-01T09:00:00Z' });
     const c2 = await makeCall(fx, { associate: fx.a2, expert: fx.e2, scheduledAt: '2027-02-02T09:00:00Z' });
     const c3 = await makeCall(fx, { associate: fx.a3, expert: fx.e1, scheduledAt: '2027-02-03T09:00:00Z' });
@@ -210,8 +214,9 @@ describe('GET /calls visibility', () => {
       return res.body.items.map((c: { id: string }) => c.id);
     };
     expect(await ids('founder')).toEqual([c1.id, c2.id, c3.id, c4.id]);
-    expect(await ids('m1')).toEqual([c1.id, c2.id, c3.id, c4.id]);
-    expect(await ids('m2')).toEqual([c1.id, c2.id, c3.id]);
+    // A Manager sees their own team's calls only: their Associates' and their own.
+    expect(await ids('m1')).toEqual([c1.id, c2.id, c4.id]);
+    expect(await ids('m2')).toEqual([c3.id]);
     // An associate sees their team's calls: their own, a teammate's and their manager's.
     expect(await ids('a1')).toEqual([c1.id, c2.id, c4.id]);
     expect(await ids('a3')).toEqual([c3.id]);
@@ -229,6 +234,52 @@ describe('GET /calls visibility', () => {
     const page = await a1.get('/calls', { pageSize: 2, page: 2, sort: 'scheduledAt' });
     expect(page.body).toMatchObject({ page: 2, pageSize: 2, total: 5 });
     expect(page.body.items.map((c: { scheduledAt: string }) => c.scheduledAt)).toEqual(['2027-02-03T09:00:00.000Z', '2027-02-04T09:00:00.000Z']);
+  });
+});
+
+describe('each team is closed to the others', () => {
+  it('a Manager neither lists nor opens another team’s calls', async () => {
+    const theirs = await makeCall(fx, { associate: fx.a3, expert: fx.e1, scheduledAt: '2027-02-01T09:00:00Z' });
+    const theirManagers = await makeCall(fx, { associate: fx.m2, expert: fx.e2, scheduledAt: '2027-02-02T09:00:00Z' });
+    const ours = await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: '2027-02-03T09:00:00Z' });
+    const [m1, m2] = [await as(fx.m1), await as(fx.m2)];
+    for (const call of [theirs, theirManagers]) {
+      expectError(await m1.get(`/calls/${call.id}`), 404);
+      expect((await m2.get(`/calls/${call.id}`)).status).toBe(200);
+    }
+    expectError(await m2.get(`/calls/${ours.id}`), 404);
+    const listed = (await m1.get('/calls')).body.items.map((c: { id: string }) => c.id);
+    expect(listed).toEqual([ours.id]);
+    // Nor can they move it along or call it off.
+    expectError(await m1.post(`/calls/${theirs.id}/transition`, { to: 'cancelled' }), 404);
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: theirs.id } })).status).toBe('on_scheduling');
+  });
+
+  it('a call books a Profile its own team handles, whoever creates it', async () => {
+    const expectOtherTeamsProfile = (res: Awaited<ReturnType<Awaited<ReturnType<typeof as>>['post']>>) => {
+      expectError(res, 400, 'validation_error');
+      expect(res.body.error.details.issues).toEqual([expect.objectContaining({ path: 'profileId' })]);
+    };
+    const [a1, a3, m1, founder] = [await as(fx.a1), await as(fx.a3), await as(fx.m1), await as(fx.founder)];
+    expectOtherTeamsProfile(await a1.post('/calls', body({ profileId: fx.approvedProfileTeam2.id })));
+    expectOtherTeamsProfile(await a3.post('/calls', body({ profileId: fx.approvedProfile.id })));
+    expectOtherTeamsProfile(await m1.post('/calls', body({ profileId: fx.approvedProfileTeam2.id })));
+    // The Founder gives a call to any team's Associate, but with that team's Profile.
+    expectOtherTeamsProfile(await founder.post('/calls', body({ associateId: fx.a3.id, profileId: fx.approvedProfile.id })));
+    expect(await prisma.call.count()).toBe(0);
+    const given = await founder.post('/calls', body({ associateId: fx.a3.id, profileId: fx.approvedProfileTeam2.id }));
+    expect(given.status, given.text).toBe(201);
+    expect(given.body).toMatchObject({ associate: { id: fx.a3.id }, manager: { id: fx.m2.id } });
+  });
+
+  it('a Manager cannot give a call to another team’s Associate', async () => {
+    const m2 = await as(fx.m2);
+    expectError(await m2.post('/calls', body({ associateId: fx.a1.id })), 403);
+    expectError(await m2.post('/calls', body({ associateId: fx.a1.id, profileId: fx.approvedProfileTeam2.id })), 403);
+    const own = await makeCall(fx, { associate: fx.a3 });
+    expectError(await m2.patch(`/calls/${own.id}`, { associateId: fx.a1.id }), 403);
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: own.id } })).associateId).toBe(fx.a3.id);
+    expect(await prisma.call.count()).toBe(1);
   });
 });
 
@@ -312,14 +363,20 @@ describe('PATCH /calls/:id permissions', () => {
     expect((await f.get(`/calls/${call.id}`)).body.expectedPrice).toBe(116.67);
   });
 
-  it('associate reassignment: managers to any associate, associates never', async () => {
+  it('associate reassignment: managers within their own team, associates never', async () => {
     const call = await makeCall(fx, { associate: fx.a1 });
     expectError(await (await as(fx.a1)).patch(`/calls/${call.id}`, { associateId: fx.a2.id }), 403);
     const m1 = await as(fx.m1);
-    // Another team's Associate is fine now; another Manager is not.
-    expect((await m1.patch(`/calls/${call.id}`, { associateId: fx.a3.id })).body.associate.id).toBe(fx.a3.id);
+    // Another team's Associate or Manager is out of reach.
+    expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.a3.id }), 403);
     expectError(await m1.patch(`/calls/${call.id}`, { associateId: fx.m2.id }), 403);
     expect((await m1.patch(`/calls/${call.id}`, { associateId: fx.a2.id })).body.associate.id).toBe(fx.a2.id);
+    // Even the Founder cannot move it to another team: its Profile stays with its team.
+    const founder = await as(fx.founder);
+    const moved = await founder.patch(`/calls/${call.id}`, { associateId: fx.a3.id });
+    expectError(moved, 400);
+    expect(moved.body.error.details.issues).toEqual([expect.objectContaining({ path: 'profileId' })]);
+    expect((await prisma.call.findUniqueOrThrow({ where: { id: call.id } })).associateId).toBe(fx.a2.id);
   });
 
   it('expert cannot edit call details', async () => {
@@ -330,6 +387,8 @@ describe('PATCH /calls/:id permissions', () => {
   it('a user who cannot see the call gets 404', async () => {
     const call = await makeCall(fx, { associate: fx.a1 });
     expectError(await (await as(fx.a3)).patch(`/calls/${call.id}`, { notes: 'x' }), 404);
+    // Nor does another team's Manager.
+    expectError(await (await as(fx.m2)).patch(`/calls/${call.id}`, { notes: 'x' }), 404);
     // One Manager's own call is invisible to another Manager.
     const ownCall = await makeCall(fx, { associate: fx.m1 });
     expectError(await (await as(fx.m2)).patch(`/calls/${ownCall.id}`, { notes: 'x' }), 404);

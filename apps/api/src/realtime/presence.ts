@@ -1,10 +1,11 @@
-import { AWAY_AFTER_MS, canChat, type PresenceDTO, type PresenceStatus, type Role } from '@god/shared';
+import { AWAY_AFTER_MS, canChat, type PresenceDTO, type PresenceStatus, type TeamMember } from '@god/shared';
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { emitToUser } from './hub';
 
 interface Connection {
-  role: Role;
+  /** Who they are to the chat rules: presence goes only to people they may chat with. */
+  member: TeamMember;
   sockets: Set<string>;
   /** Last sign of life from any of their tabs. */
   lastActiveAt: number;
@@ -26,18 +27,19 @@ export function presenceOf(userId: string): PresenceStatus {
 }
 
 /** Sends one person's presence to every connected user who may chat with them. */
-function broadcast(userId: string, role: Role, dto: PresenceDTO) {
+function broadcast(member: TeamMember, dto: PresenceDTO) {
   for (const [peerId, peer] of connections) {
-    if (peerId !== userId && canChat({ id: peerId, role: peer.role }, { id: userId, role })) {
+    if (peerId !== member.id && canChat(peer.member, member)) {
       emitToUser(peerId, 'presence:update', [dto]);
     }
   }
 }
 
-function publish(userId: string, role: Role, status: PresenceStatus, lastSeenAt: Date | null) {
+function publish(member: TeamMember, status: PresenceStatus, lastSeenAt: Date | null) {
+  const userId = member.id;
   if (broadcasted.get(userId) === status) return;
   broadcasted.set(userId, status);
-  broadcast(userId, role, { userId, status, lastSeenAt: lastSeenAt ? lastSeenAt.toISOString() : null });
+  broadcast(member, { userId, status, lastSeenAt: lastSeenAt ? lastSeenAt.toISOString() : null });
 }
 
 async function touch(userId: string) {
@@ -48,16 +50,17 @@ async function touch(userId: string) {
   }
 }
 
-export async function markConnected(userId: string, role: Role, socketId: string): Promise<void> {
+export async function markConnected(member: TeamMember, socketId: string): Promise<void> {
+  const userId = member.id;
   const existing = connections.get(userId);
   if (existing) {
     existing.sockets.add(socketId);
     existing.lastActiveAt = Date.now();
     existing.away = false;
   } else {
-    connections.set(userId, { role, sockets: new Set([socketId]), lastActiveAt: Date.now(), away: false });
+    connections.set(userId, { member, sockets: new Set([socketId]), lastActiveAt: Date.now(), away: false });
   }
-  publish(userId, role, 'online', null);
+  publish(member, 'online', null);
   await touch(userId);
 }
 
@@ -69,7 +72,7 @@ export function markDisconnected(userId: string, socketId: string): void {
   connections.delete(userId);
   broadcasted.delete(userId);
   const at = new Date();
-  broadcast(userId, c.role, { userId, status: 'offline', lastSeenAt: at.toISOString() });
+  broadcast(c.member, { userId, status: 'offline', lastSeenAt: at.toISOString() });
   void touch(userId);
 }
 
@@ -79,17 +82,17 @@ export function markActivity(userId: string, away: boolean): void {
   if (!c) return;
   c.away = away;
   if (!away) c.lastActiveAt = Date.now();
-  publish(userId, c.role, statusOf(c), null);
+  publish(c.member, statusOf(c), null);
 }
 
 /** Presence of everyone the caller may chat with, active users only. */
-export async function presenceFor(actor: { id: string; role: Role }): Promise<PresenceDTO[]> {
+export async function presenceFor(actor: TeamMember): Promise<PresenceDTO[]> {
   const users = await prisma.user.findMany({
     where: { isActive: true, id: { not: actor.id } },
-    select: { id: true, role: true, lastSeenAt: true },
+    select: { id: true, role: true, managerId: true, lastSeenAt: true },
   });
   return users
-    .filter((u) => canChat(actor, { id: u.id, role: u.role }))
+    .filter((u) => canChat(actor, u))
     .map((u) => {
       const status = presenceOf(u.id);
       return { userId: u.id, status, lastSeenAt: status === 'offline' ? u.lastSeenAt.toISOString() : null };
@@ -100,7 +103,7 @@ export async function presenceFor(actor: { id: string; role: Role }): Promise<Pr
 export function startPresenceSweeper(everyMs = 60_000): NodeJS.Timeout {
   const timer = setInterval(() => {
     for (const [userId, c] of connections) {
-      publish(userId, c.role, statusOf(c), null);
+      publish(c.member, statusOf(c), null);
       if (statusOf(c) === 'online') void touch(userId);
     }
   }, everyMs);

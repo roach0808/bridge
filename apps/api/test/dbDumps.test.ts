@@ -16,7 +16,7 @@ describe('database dumps', () => {
     expect(dump.succeeded).toBe(true);
     expect(dump.byteSize).toBeGreaterThan(0);
     expect(dump.tableCounts.users).toBe(fx.users.length);
-    expect(dump.tableCounts.profiles).toBe(3);
+    expect(dump.tableCounts.profiles).toBe(4);
     // Session secrets are deliberately left out.
     expect(Object.keys(dump.tableCounts)).not.toContain('refresh_tokens');
 

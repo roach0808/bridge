@@ -64,7 +64,7 @@ export default function StatsPage() {
           me.role === 'founder'
             ? 'Calls and money by Associate and by Profile, and expected against real income.'
             : me.role === 'manager'
-              ? 'Scheduled calls, potential money and income across every Associate.'
+              ? 'Scheduled calls, potential money and income across your team.'
               : 'Your scheduled and finished calls.'
         }
       />

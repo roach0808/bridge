@@ -11,14 +11,19 @@ beforeEach(async () => {
   await prisma.user.update({ where: { id: fx.e1.id }, data: { hourlyRate: 200 } });
   await prisma.user.update({ where: { id: fx.a1.id }, data: { sharePercent: 50 } });
   await prisma.user.update({ where: { id: fx.a2.id }, data: { sharePercent: 20 } });
-  await prisma.profilePlatformStatus.create({
-    data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 1000 },
-  });
+  // Each team books its own Profile (§2.4); m2's team's earns the same.
+  for (const profileId of [fx.approvedProfile.id, fx.approvedProfileTeam2.id]) {
+    await prisma.profilePlatformStatus.create({ data: { profileId, platformId: fx.platform.id, status: 'registered', rate: 1000 } });
+  }
   c = await clientsFor(fx, ['founder', 'm1', 'm2', 'a1', 'a2', 'a3', 'e1', 'e2']);
   bankId = (await makeBank(fx)).id;
+  bankTeam2Id = (await makeBank(fx, { profileId: fx.approvedProfileTeam2.id })).id;
 });
 /** The Profile's bank, which invoices are submitted to. */
 let bankId: string;
+/** The bank of m2's team's Profile. */
+let bankTeam2Id: string;
+const bankFor = (associate: typeof fx.a1) => ((associate.role === 'manager' ? associate.id : associate.managerId) === fx.m2.id ? bankTeam2Id : bankId);
 afterAll(async () => {
   await prisma.$disconnect();
 });
@@ -42,7 +47,10 @@ async function finishedCall(associate = fx.a1, minutes = 30, expert = fx.e1) {
 /** Finished, invoiced and paid to bank with `income`. */
 async function bankedCall(associate = fx.a1, income = 1000) {
   const call = await finishedCall(associate);
-  for (const to of ['invoice_submit', 'invoice_approve'] as const) expect((await move(c.founder, call.id, to)).status).toBe(200);
+  for (const to of ['invoice_submit', 'invoice_approve'] as const) {
+    const res = await move(c.founder, call.id, to, to === 'invoice_submit' ? { bankId: bankFor(associate) } : {});
+    expect(res.status, res.text).toBe(200);
+  }
   const res = await move(c.founder, call.id, 'process_to_bank', { realIncome: income });
   expect(res.status, res.text).toBe(200);
   return call;
@@ -106,10 +114,11 @@ describe('the Expert is paid at the rate they had when the call finished', () =>
     expect(set.status, set.text).toBe(200);
     expect(set.body.sharePercent).toBe(60);
     expect(((await c.m1.get('/users/me/team')).body as Array<{ id: string; sharePercent: number }>).find((u) => u.id === fx.a1.id)?.sharePercent).toBe(60);
-    expectError(await c.m2.patch(`/users/${fx.a1.id}`, { sharePercent: 10 }), 403);
-    // Another team's Associates keep their share to themselves.
+    // Another team's Associates are out of m2's sight altogether, share and all.
+    expectError(await c.m2.patch(`/users/${fx.a1.id}`, { sharePercent: 10 }), 404);
+    expect((await prisma.user.findUniqueOrThrow({ where: { id: fx.a1.id } })).sharePercent?.toNumber()).toBe(60);
     const listed = (await c.m2.get('/users')).body as Array<{ id: string; sharePercent: number | null; hourlyRate: number | null }>;
-    expect(listed.find((u) => u.id === fx.a1.id)?.sharePercent).toBeNull();
+    expect(listed.map((u) => u.id)).not.toContain(fx.a1.id);
     expect(listed.every((u) => u.hourlyRate === null)).toBe(true);
 
     // A Manager adds an Associate to their team directly, with a share; a new one starts at half.
@@ -168,8 +177,8 @@ describe('the Associate’s part is a portion of the Manager’s share', () => {
     expect(teammate).toMatchObject({ expectedPrice: null, realIncome: null, platformRate: null });
     expect(teammate.payouts).toMatchObject({ manager: null, associate: null, expert: null, canMark: [] });
 
-    // Another Manager oversees the call but is not paid for it.
-    expect((await view(c.m2, call.id)).payouts).toMatchObject({ expert: null, manager: null, associate: null, canMark: [] });
+    // Another team's Manager does not see the call at all.
+    expectError(await c.m2.get(`/calls/${call.id}`), 404);
   });
 
   it('uses the Profile’s Manager share, and later changes leave paid calls alone', async () => {
@@ -224,7 +233,8 @@ describe('marking people paid', () => {
 
     expectError(await c.m1.post('/finance/payouts', { payee: 'manager', callIds: [call.id] }), 403);
     expectError(await c.a1.post('/finance/payouts', { payee: 'associate', callIds: [call.id] }), 403);
-    expectError(await c.m2.post('/finance/payouts', { payee: 'associate', callIds: [call.id] }), 409, 'payout_unavailable');
+    // Another team's Manager cannot see the call, let alone mark it.
+    expectError(await c.m2.post('/finance/payouts', { payee: 'associate', callIds: [call.id] }), 404);
     res = await c.m1.post('/finance/payouts', { payee: 'associate', callIds: [call.id] });
     expect(res.status, res.text).toBe(200);
 
@@ -264,8 +274,9 @@ describe('marking people paid', () => {
   it('Managers correct how long a finished call took, until the Expert is paid for it', async () => {
     const call = await finishedCall(fx.a1, 30);
     expect((await view(c.m1, call.id)).permissions.editActualDuration).toBe(true);
-    // Every Manager oversees every Associate's call.
-    expect((await view(c.m2, call.id)).permissions.editActualDuration).toBe(true);
+    // Only the call's own team's Manager oversees it: another team's sees nothing and corrects nothing.
+    expectError(await c.m2.get(`/calls/${call.id}`), 404);
+    expectError(await c.m2.patch(`/calls/${call.id}`, { actualDurationMinutes: 45 }), 404);
     for (const who of ['a1', 'e1'] as const) {
       expect((await view(c[who], call.id)).permissions.editActualDuration).toBe(false);
       expectError(await c[who].patch(`/calls/${call.id}`, { actualDurationMinutes: 45 }), 403);
@@ -306,7 +317,7 @@ describe('marking people paid', () => {
 describe('the Finance tab', () => {
   it('lists each person’s own calls that took place, with their totals', async () => {
     const paid = await bankedCall(fx.a1, 1000); // e1: 100 · m1: 150, of which a1: 75
-    await bankedCall(fx.a3, 2000); // m2's team: e1: 100 · m2: 300 (a3 has no share)
+    const theirs = await bankedCall(fx.a3, 2000); // m2's team: e1: 100 · m2: 300 (a3 has no share)
     const finished = await finishedCall(fx.a2, 60); // e1: 200 · expected: m1 150, of which a2 30
     await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'confirmed', scheduledAt: nextSlot() });
     await c.founder.post('/finance/payouts', { payee: 'expert', callIds: [paid.id] });
@@ -328,6 +339,10 @@ describe('the Finance tab', () => {
     // Their paid call and their team's finished one; not the other team's.
     expect(m1.items.map((i) => i.id).sort()).toEqual([paid.id, finished.id].sort());
     expect(m1.summary).toMatchObject({ manager: { paid: 0, unpaid: 150, expected: 150 }, associate: { paid: 0, unpaid: 75, expected: 30 }, keeps: 75, expert: null });
+    // And the other team's Manager only theirs.
+    const m2 = await get(c.m2);
+    expect(m2.items.map((i) => i.id)).toEqual([theirs.id]);
+    expect(m2.summary).toMatchObject({ manager: { unpaid: 300 }, expert: null });
 
     // The Associate: their Manager's share and their part, never the income.
     const a1 = await get(c.a1);
@@ -455,12 +470,13 @@ describe('profiles are handled by a Manager’s team', () => {
     expect((await c.founder.post('/profiles', { name: 'Lee Unhandled', avatarId: 'profile-06' })).body).toMatchObject({ manager: null, mine: false });
   });
 
-  it('the whole team calls it theirs, the other team does not', async () => {
+  it('the whole team calls it theirs, the other team does not see it', async () => {
     const profile = `/profiles/${fx.approvedProfile.id}`;
     await c.founder.put(`${profile}/manager`, { managerId: fx.m1.id });
     for (const who of ['m1', 'a1', 'a2'] as const) expect((await c[who].get(profile)).body.mine, who).toBe(true);
-    for (const who of ['m2', 'a3', 'founder'] as const) expect((await c[who].get(profile)).body.mine, who).toBe(false);
-    expect((await c.a3.get(profile)).body.manager).toMatchObject({ id: fx.m1.id, role: 'manager' });
+    expect((await c.founder.get(profile)).body).toMatchObject({ mine: false, manager: { id: fx.m1.id, role: 'manager' } });
+    // Approved or not, another team's Profile is out of sight.
+    for (const who of ['m2', 'a3'] as const) expectError(await c[who].get(profile), 404);
   });
 
   it('a pending Profile is seen by the team handling it, not by other teams', async () => {
@@ -469,8 +485,8 @@ describe('profiles are handled by a Manager’s team', () => {
     await c.founder.put(`${profile}/manager`, { managerId: fx.m2.id });
     expect((await c.a3.get(profile)).status).toBe(200);
     expect((await c.m2.get(profile)).status).toBe(200);
-    // Its submitter still sees it.
-    expect((await c.a1.get(profile)).status).toBe(200);
+    // It has left the submitter's team, so they no longer see it either.
+    for (const who of ['a1', 'm1'] as const) expectError(await c[who].get(profile), 404);
   });
 
   it('only the Founder hands a Profile to another team, and only to an active Manager', async () => {
@@ -483,13 +499,16 @@ describe('profiles are handled by a Manager’s team', () => {
     expectError(await c.founder.put(path, { managerId: fx.a1.id }), 400);
     expectError(await c.founder.put(path, { managerId: fx.e1.id }), 400);
 
-    for (const who of ['m1', 'm2', 'a1', 'a3'] as const) {
-      expect((await c[who].get(`/profiles/${fx.approvedProfile.id}`)).body.canAssign, who).toBe(false);
-      expectError(await c[who].put(path, { managerId: fx.m1.id }), 403);
-    }
+    // Only the Founder hands it on; the team handling it now cannot, and the team it left no longer sees it.
+    for (const who of ['m1', 'm2', 'a1', 'a3'] as const) expectError(await c[who].put(path, { managerId: fx.m1.id }), 403);
+    for (const who of ['m2', 'a3'] as const) expect((await c[who].get(`/profiles/${fx.approvedProfile.id}`)).body.canAssign, who).toBe(false);
+    for (const who of ['m1', 'a1'] as const) expectError(await c[who].get(`/profiles/${fx.approvedProfile.id}`), 404);
+    expect((await prisma.profile.findUniqueOrThrow({ where: { id: fx.approvedProfile.id } })).managerId).toBe(fx.m2.id);
 
     res = await c.founder.put(path, { managerId: null });
     expect(res.body.manager).toBeNull();
+    // A Profile no team handles is the Founder's alone.
+    for (const who of ['m1', 'm2', 'a1', 'a3'] as const) expectError(await c[who].get(`/profiles/${fx.approvedProfile.id}`), 404);
     // Experts never see which team handles it.
     await c.founder.put(path, { managerId: fx.m1.id });
     await makeCall(fx, { associate: fx.a1, expert: fx.e1, scheduledAt: nextSlot() });
@@ -498,17 +517,21 @@ describe('profiles are handled by a Manager’s team', () => {
 });
 
 describe('platform statuses', () => {
-  it('every Manager and Associate sets them, whichever team handles the Profile; only the Founder sets rates', async () => {
+  it('the team handling the Profile sets them, other teams cannot; only the Founder sets rates', async () => {
     await c.founder.put(`/profiles/${fx.approvedProfile.id}/manager`, { managerId: fx.m1.id });
     const url = `/profiles/${fx.approvedProfile.id}/platforms/${fx.platform2.id}`;
 
-    for (const [who, status] of [['a1', 'registered'], ['m1', 'banned'], ['a3', 'registered'], ['m2', 'not_registered']] as const) {
+    for (const [who, status] of [['a1', 'registered'], ['m1', 'banned'], ['a2', 'not_registered']] as const) {
       expect((await c[who].get(`/profiles/${fx.approvedProfile.id}`)).body.canEditPlatforms, who).toBe(true);
       const res = await c[who].put(url, { status });
       expect(res.status, `${who}: ${res.text}`).toBe(200);
       expect(res.body.platformStatuses[1]).toMatchObject({ status, rate: null });
     }
-    for (const who of ['a1', 'm1', 'a3', 'm2'] as const) expectError(await c[who].put(url, { rate: 900 }), 403);
+    // The other team does not see the Profile, so cannot touch it.
+    for (const who of ['a3', 'm2'] as const) expectError(await c[who].put(url, { status: 'registered' }), 404);
+    for (const who of ['a1', 'm1'] as const) expectError(await c[who].put(url, { rate: 900 }), 403);
+    for (const who of ['a3', 'm2'] as const) expectError(await c[who].put(url, { rate: 900 }), 404);
+    expect((await prisma.profilePlatformStatus.findFirstOrThrow({ where: { profileId: fx.approvedProfile.id, platformId: fx.platform2.id } })).status).toBe('not_registered');
     expectError(await c.e1.put(url, { status: 'registered' }), 403);
     const res = await c.founder.put(url, { status: 'registered', rate: 900 });
     expect(res.body.platformStatuses[1]).toMatchObject({ status: 'registered', rate: 900 });

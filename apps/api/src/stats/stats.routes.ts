@@ -133,12 +133,12 @@ statsRouter.get('/stats/associates', async (req, res) => {
   const from = periods[0]!.start.toJSDate();
   const to = periods.at(-1)!.end.toJSDate();
 
-  // Managers run calls too, so they have a row of their own, and they follow every Associate.
+  // Managers run calls too, so they have a row of their own, and they follow their own team's Associates.
   const where: Prisma.UserWhereInput =
     actor.role === 'founder'
       ? { role: { in: ['associate', 'manager'] }, deletedAt: null }
       : actor.role === 'manager'
-        ? { deletedAt: null, OR: [{ role: 'associate' }, { id: actor.id }] }
+        ? { deletedAt: null, OR: [{ role: 'associate', managerId: actor.id }, { id: actor.id }] }
         : { id: actor.id };
   const associates = await prisma.user.findMany({
     where,
@@ -277,11 +277,11 @@ function addToFinanceCell(cell: FinanceCell, c: PricedCall) {
   }
 }
 
-/** Whose calls someone sees money for: everyone's (Founder), or every Associate's and their own (Manager). */
+/** Whose calls someone sees money for: everyone's (Founder), or their own team's and their own (Manager). */
 async function financeScope(actor: Actor): Promise<string[] | undefined> {
   if (actor.role === 'founder') return undefined;
   if (actor.role === 'manager') {
-    const associates = await prisma.user.findMany({ where: { role: 'associate', deletedAt: null }, select: { id: true } });
+    const associates = await prisma.user.findMany({ where: { role: 'associate', managerId: actor.id, deletedAt: null }, select: { id: true } });
     return [actor.id, ...associates.map((a) => a.id)];
   }
   return [actor.id];

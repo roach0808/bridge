@@ -180,7 +180,7 @@ export function TaskTable({
     setTasks((old) =>
       old.map((p) =>
         p.person.id === from.person.id ? { ...p, tasks: p.tasks.filter((t) => t.id !== task.id) }
-        : p.person.id === to.person.id ? { ...p, tasks: [{ ...task, assignee: to.person }, ...p.tasks] }
+        : p.person.id === to.person.id ? { ...p, tasks: [{ ...task, assignee: { ...to.person, managerId: to.person.manager?.id ?? null } }, ...p.tasks] }
         : p,
       ),
     );

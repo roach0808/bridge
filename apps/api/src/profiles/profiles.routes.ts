@@ -44,20 +44,19 @@ const platformsFor = (actor: Pick<Actor, 'role'>): Promise<PlatformRef[] | null>
   actor.role === 'expert' ? Promise.resolve(null) : platformRefs();
 
 /**
- * Approved profiles are shared. Pending and rejected ones are visible to the
- * Founder, the author, the author's Manager, and the team handling it (§6.4).
- * Experts see only the profiles of calls they are assigned to.
+ * Each team is closed to the others (§2.4): a Manager and their Associates see
+ * only the Profiles their team handles, whatever their review status. A
+ * Profile no team handles is the Founder's alone, except to whoever submitted
+ * it from outside any team. Experts see only the Profiles of calls they are
+ * assigned to.
  */
 export function visibleProfilesWhere(actor: Pick<Actor, 'id' | 'role' | 'managerId'>): Prisma.ProfileWhereInput {
   // Deactivated Profiles are the Founder's business only.
   // Deleted Profiles are gone for everyone; only their past calls still name them.
   if (actor.role === 'founder') return { deletedAt: null };
   if (actor.role === 'expert') return { deletedAt: null, isActive: true, calls: { some: { expertId: actor.id } } };
-  const own: Prisma.ProfileWhereInput[] = [{ createdById: actor.id }];
   const team = teamOf(actor);
-  if (team) own.push({ managerId: team });
-  if (actor.role === 'manager') own.push({ createdBy: { managerId: actor.id } });
-  return { deletedAt: null, isActive: true, OR: [{ status: 'approved' }, ...own] };
+  return { deletedAt: null, isActive: true, ...(team ? { managerId: team } : { managerId: null, createdById: actor.id }) };
 }
 
 async function loadVisible(actor: Actor, id: string | null) {

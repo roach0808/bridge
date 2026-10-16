@@ -23,8 +23,10 @@ describe('who can chat with whom', () => {
     ['founder', 'e1'],
     ['founder', 'a3'],
     ['m1', 'm2'],
-    ['a1', 'm2'], // any manager, not only their own
-    ['m2', 'a1'],
+    ['a1', 'm1'], // their own Manager
+    ['m1', 'a2'],
+    ['a1', 'a2'], // teammates
+    ['a4', 'a3'],
   ])('%s may chat with %s', async (a, b) => {
     const id = await open(await as(fx[a] as FixtureUser), fx[b] as FixtureUser);
     expect((await send(await as(fx[a] as FixtureUser), id, 'Hello')).status).toBe(201);
@@ -32,19 +34,26 @@ describe('who can chat with whom', () => {
   });
 
   it.each<[keyof Fixtures, keyof Fixtures]>([
-    ['a1', 'a3'],
+    ['a1', 'a3'], // Associates of different teams
+    ['a3', 'a1'],
+    ['m1', 'a3'], // another team's Associate
+    ['a3', 'm1'],
+    ['a1', 'm2'], // another team's Manager
+    ['m2', 'a1'],
     ['e1', 'e2'],
   ])('%s may not chat with %s', async (a, b) => {
     expectError(await (await as(fx[a] as FixtureUser)).post('/chat/conversations', { userId: (fx[b] as FixtureUser).id }), 403);
+    expect(await prisma.conversation.count()).toBe(0);
   });
 
   it('contacts follow the same rules', async () => {
     const nick = async (who: FixtureUser) => (await (await as(who)).get('/chat/contacts')).body.map((u: { nickname: string }) => u.nickname).sort();
     expect(await nick(fx.e1)).toEqual(['AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'Founder', 'ManagerOne', 'ManagerTwo']);
-    expect(await nick(fx.a1)).toEqual(['ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerOne', 'ManagerTwo']);
-    expect(await nick(fx.m1)).toEqual([
-      'AssocFour', 'AssocOne', 'AssocThree', 'AssocTwo', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerTwo',
-    ]);
+    // An Associate: their own team, the Experts and the Founder; nobody from another team.
+    expect(await nick(fx.a1)).toEqual(['AssocTwo', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerOne']);
+    expect(await nick(fx.a3)).toEqual(['AssocFour', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerTwo']);
+    // A Manager: their own Associates, the other Managers, the Experts and the Founder.
+    expect(await nick(fx.m1)).toEqual(['AssocOne', 'AssocTwo', 'ExpertLondon', 'ExpertNY', 'ExpertSeoul', 'Founder', 'ManagerTwo']);
     expect(await nick(fx.founder)).toHaveLength(fx.users.length - 1);
   });
 
@@ -69,8 +78,8 @@ describe('who can chat with whom', () => {
     expectError(await send(m1, id, 'still there?'), 403);
   });
 
-  it('chats from before the rule changed (associate ↔ associate, expert ↔ expert) are read-only', async () => {
-    for (const [a, b] of [[fx.a1, fx.a3], [fx.e1, fx.e2]] as const) {
+  it('chats from before the rule changed (across teams, expert ↔ expert) are read-only', async () => {
+    for (const [a, b] of [[fx.a1, fx.a3], [fx.m1, fx.a3], [fx.a1, fx.m2], [fx.e1, fx.e2]] as const) {
       const [userAId, userBId] = [a.id, b.id].sort() as [string, string];
       const c = await prisma.conversation.create({ data: { userAId, userBId, lastMessageAt: new Date() } });
       await prisma.chatMessage.create({ data: { conversationId: c.id, senderId: a.id, body: 'old message' } });
@@ -78,7 +87,22 @@ describe('who can chat with whom', () => {
       expect((await client.get('/chat/conversations')).body[0]).toMatchObject({ id: c.id, canSend: false });
       expect((await client.get(`/chat/conversations/${c.id}/messages`)).body.items).toHaveLength(1);
       expectError(await send(client, c.id, 'hello again'), 403);
+      // Read-only from the other side too.
+      const other = await as(b);
+      expect((await other.get(`/chat/conversations/${c.id}`)).body).toMatchObject({ id: c.id, canSend: false });
+      expectError(await send(other, c.id, 'hello from the other side'), 403);
     }
+  });
+
+  it('teammates chat freely: Associates of one Manager with each other', async () => {
+    const a1 = await as(fx.a1);
+    const a2 = await as(fx.a2);
+    const id = await open(a1, fx.a2);
+    expect((await a1.get(`/chat/conversations/${id}`)).body).toMatchObject({ mode: 'free', canSend: true });
+    expect((await send(a1, id, 'Lunch?')).status).toBe(201);
+    expect((await a2.get(`/chat/conversations/${id}`)).body).toMatchObject({ mode: 'free', canSend: true });
+    expect((await send(a2, id, 'Sure')).status).toBe(201);
+    expect(await open(a2, fx.a1)).toBe(id);
   });
 });
 
@@ -264,7 +288,7 @@ describe('to-dos', () => {
     expect(res.body.assignee.id).toBe(fx.e1.id);
   });
 
-  it('a manager gives tasks to any associate, once per message, in their own chats', async () => {
+  it('a manager gives tasks to their own team’s associates, once per message, in their own chats', async () => {
     const m1 = await as(fx.m1);
     const own = await open(m1, fx.a1);
     const ownMsg = (await send(m1, own, 'Confirm the Hanbit slot')).body;
@@ -274,18 +298,21 @@ describe('to-dos', () => {
     expect((await m1.post(`/chat/messages/${ownMsg.id}/todo`)).status).toBe(201);
     expectError(await m1.post(`/chat/messages/${ownMsg.id}/todo`), 409);
 
-    // Another team's associate is fine; a fellow manager is not.
-    const otherTeam = await open(m1, fx.a3);
-    expect((await m1.get(`/chat/conversations/${otherTeam}`)).body.canGiveTask).toBe(true);
-    const otherMsg = (await send(m1, otherTeam, 'Can you help?')).body;
-    expect((await m1.post(`/chat/messages/${otherMsg.id}/todo`)).status).toBe(201);
+    // Another team's associate is not theirs to chat with, let alone task; a fellow manager is not either.
+    expectError(await m1.post('/chat/conversations', { userId: fx.a3.id }), 403);
+    const [userAId, userBId] = [fx.m1.id, fx.a3.id].sort() as [string, string];
+    const otherTeam = await prisma.conversation.create({ data: { userAId, userBId, lastMessageAt: new Date() } });
+    const otherMsg = await prisma.chatMessage.create({ data: { conversationId: otherTeam.id, senderId: fx.m1.id, body: 'Can you help?' } });
+    expect((await m1.get(`/chat/conversations/${otherTeam.id}`)).body).toMatchObject({ canSend: false, canGiveTask: false });
+    expectError(await m1.post(`/chat/messages/${otherMsg.id}/todo`), 403);
     const peers = await open(m1, fx.m2);
     const peerMsg = (await send(m1, peers, 'between managers')).body;
     expectError(await m1.post(`/chat/messages/${peerMsg.id}/todo`), 403);
     // Not a participant: the message doesn't exist for them.
     expectError(await (await as(fx.founder)).post(`/chat/messages/${peerMsg.id}/todo`), 404);
 
-    expect((await m1.get('/todos', { scope: 'created' })).body).toHaveLength(2);
+    expect((await m1.get('/todos', { scope: 'created' })).body).toHaveLength(1);
+    expect((await (await as(fx.a3)).get('/todos')).body).toEqual([]);
   });
 
   it('marking done posts a reply in the chat, closes the to-do and notifies the founder', async () => {
@@ -350,7 +377,7 @@ describe('to-dos', () => {
 describe('the task board', () => {
   const board = async (user: typeof fx.a1, query?: Record<string, unknown>) => (await (await as(user)).get('/todos/board', query)).body;
 
-  it('puts your own tasks first, then the people below you', async () => {
+  it('puts your own tasks first, then the people below you: for a Manager, their own team only', async () => {
     const founder = await as(fx.founder);
     const m1 = await as(fx.m1);
     await founder.post('/todos', { assigneeId: fx.m1.id, title: 'Plan the quarter' });
@@ -358,11 +385,9 @@ describe('the task board', () => {
     await founder.post('/todos', { assigneeId: fx.a1.id, title: 'Send the report' });
 
     const managerBoard = await board(fx.m1);
-    // A Manager follows every Associate, not only their own team.
+    // A Manager follows the Associates of their own team, and no other.
     expect(managerBoard[0]).toMatchObject({ person: { id: fx.m1.id }, isMe: true });
-    expect(managerBoard.slice(1).map((p: { person: { id: string } }) => p.person.id).sort()).toEqual(
-      [fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort(),
-    );
+    expect(managerBoard.slice(1).map((p: { person: { id: string } }) => p.person.id).sort()).toEqual([fx.a1.id, fx.a2.id].sort());
     expect(managerBoard[0].tasks.map((t: { title: string }) => t.title)).toEqual(['Plan the quarter']);
     // An Associate's panel holds every task they were given, whoever gave it.
     const a1Panel = managerBoard.find((p: { person: { id: string } }) => p.person.id === fx.a1.id);
@@ -373,6 +398,14 @@ describe('the task board', () => {
     expect(founderBoard[0].person.id).toBe(fx.founder.id);
     expect(founderBoard.some((p: { person: { id: string } }) => p.person.id === fx.e1.id)).toBe(true);
     expect(founderBoard.find((p: { person: { id: string } }) => p.person.id === fx.m1.id).canGive).toBe(true);
+    expect(founderBoard.some((p: { person: { id: string } }) => p.person.id === fx.a3.id)).toBe(true);
+
+    // The other team's Manager sees their own team, and none of a1's tasks.
+    const otherBoard = await board(fx.m2);
+    expect(otherBoard[0]).toMatchObject({ person: { id: fx.m2.id }, isMe: true });
+    expect(otherBoard.slice(1).map((p: { person: { id: string } }) => p.person.id).sort()).toEqual([fx.a3.id, fx.a4.id].sort());
+    expect(JSON.stringify(otherBoard)).not.toContain('Chase invoices');
+    expect(JSON.stringify(otherBoard)).not.toContain('Send the report');
   });
 
   it('an associate sees only their own panel, and the filter follows the status', async () => {
@@ -532,7 +565,7 @@ describe('the four quadrants of a board (§ task board)', () => {
 });
 
 describe('tasks without a chat message', () => {
-  it('a founder gives anyone a task; a manager any associate', async () => {
+  it('a founder gives anyone a task; a manager their own team’s associates only', async () => {
     const founder = await as(fx.founder);
     const m1 = await as(fx.m1);
     const res = await founder.post('/todos', { assigneeId: fx.e1.id, title: '  Update your availability  ', details: 'For next week' });
@@ -541,13 +574,17 @@ describe('tasks without a chat message', () => {
     expect((await (await as(fx.e1)).get('/notifications')).body.items[0]).toMatchObject({ type: 'todo.assigned', payload: { todoId: res.body.id } });
 
     expect((await m1.post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' })).status).toBe(201);
-    expect((await m1.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' })).status).toBe(201);
+    expectError(await m1.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' }), 403);
+    expectError(await (await as(fx.m2)).post('/todos', { assigneeId: fx.a1.id, title: 'Chase invoices' }), 403);
     expectError(await m1.post('/todos', { assigneeId: fx.m2.id, title: 'Chase invoices' }), 403);
+    expect((await founder.post('/todos', { assigneeId: fx.a3.id, title: 'Chase invoices' })).status).toBe(201);
     expectError(await (await as(fx.a1)).post('/todos', { assigneeId: fx.a2.id, title: 'Chase invoices' }), 403);
     expectError(await founder.post('/todos', { assigneeId: fx.a1.id, title: '   ' }), 400);
 
     const assignees = (await m1.get('/todos/assignees')).body.map((u: { id: string }) => u.id).sort();
-    expect(assignees).toEqual([fx.m1.id, fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
+    expect(assignees).toEqual([fx.m1.id, fx.a1.id, fx.a2.id].sort());
+    const m2Assignees = (await (await as(fx.m2)).get('/todos/assignees')).body.map((u: { id: string }) => u.id).sort();
+    expect(m2Assignees).toEqual([fx.m2.id, fx.a3.id, fx.a4.id].sort());
     expect((await founder.get('/todos/assignees')).body.map((u: { id: string }) => u.id)).toContain(fx.founder.id);
     // Everyone can put a task on their own list, and nobody else's.
     expect((await (await as(fx.a1)).get('/todos/assignees')).body.map((u: { id: string }) => u.id)).toEqual([fx.a1.id]);

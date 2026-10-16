@@ -83,14 +83,29 @@ describe('GET /calendar privacy', () => {
     expect(res.text).not.toContain(w.c3.id);
   });
 
-  it('manager: every associate’s calls in full, but no rules or private notes', async () => {
+  it('manager: their team’s calls in full, other teams’ only as busy time, and no rules or private notes', async () => {
     const w = await seedExpertWeek();
     const res = await calendarOf(await as(fx.m1), fx.e1.id);
-    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.c2, w.c3, w.c4]));
-    expect(res.body.busy).toEqual([]);
+    expect(ids(res.body.calls)).toEqual(ids([w.c1, w.c4]));
+    expect(res.body.busy).toEqual([
+      { startsAt: '2027-02-01T12:00:00.000Z', endsAt: '2027-02-01T12:30:00.000Z' },
+      { startsAt: '2027-02-01T14:00:00.000Z', endsAt: '2027-02-01T15:00:00.000Z', tentative: true },
+    ]);
     expect(res.body.rules).toEqual([]);
     expect(res.body.canEditBlocks).toBe(false);
-    expect(res.text).not.toContain('private-block-note');
+    for (const secret of [w.c2.id, w.c3.id, 'AssocThree', 'AlphaSights', 'private-block-note']) {
+      expect(res.text).not.toContain(secret);
+    }
+    // The other team's Manager sees it the other way round.
+    const theirs = await calendarOf(await as(fx.m2), fx.e1.id);
+    expect(ids(theirs.body.calls)).toEqual(ids([w.c2, w.c3]));
+    expect(theirs.body.busy).toEqual([
+      { startsAt: '2027-02-01T09:00:00.000Z', endsAt: '2027-02-01T10:00:00.000Z' },
+      { startsAt: '2027-02-02T09:00:00.000Z', endsAt: '2027-02-02T09:45:00.000Z' },
+    ]);
+    for (const secret of [w.c1.id, w.c4.id, 'AssocOne', 'AssocTwo', 'secret-call-note', 'private-block-note']) {
+      expect(theirs.text).not.toContain(secret);
+    }
   });
 
   it('founder sees every call, no busy, and the rules with notes', async () => {

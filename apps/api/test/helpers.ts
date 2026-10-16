@@ -66,6 +66,8 @@ export interface Fixtures {
   platform: { id: string; name: string };
   platform2: { id: string; name: string };
   approvedProfile: { id: string; name: string };
+  /** Handled by ManagerTwo's team; `approvedProfile` by ManagerOne's. */
+  approvedProfileTeam2: { id: string; name: string };
   /** Pending profile authored by a1. */
   pendingProfile: { id: string; name: string };
   /** Pending profile authored by a3 (m2's team). */
@@ -113,14 +115,18 @@ export async function seedFixtures(): Promise<Fixtures> {
 
   const platform = await prisma.platform.create({ data: { name: 'GLG', url: 'https://glg.example', priority: 1, country: 'US' } });
   const platform2 = await prisma.platform.create({ data: { name: 'AlphaSights', url: 'https://alpha.example', priority: 2, country: 'GB' } });
+  // Each team handles its own Profiles (§2.4); a submission goes to the submitter's team.
   const approvedProfile = await prisma.profile.create({
-    data: { name: 'Dana Approved', avatarId: 'profile-01', status: 'approved', createdById: founder.id, reviewedById: founder.id, reviewedAt: new Date() },
+    data: { name: 'Dana Approved', avatarId: 'profile-01', status: 'approved', managerId: m1.id, createdById: founder.id, reviewedById: founder.id, reviewedAt: new Date() },
+  });
+  const approvedProfileTeam2 = await prisma.profile.create({
+    data: { name: 'Rowan Approved', avatarId: 'profile-04', status: 'approved', managerId: m2.id, createdById: founder.id, reviewedById: founder.id, reviewedAt: new Date() },
   });
   const pendingProfile = await prisma.profile.create({
-    data: { name: 'Pat Pending', avatarId: 'profile-02', status: 'pending', createdById: a1.id },
+    data: { name: 'Pat Pending', avatarId: 'profile-02', status: 'pending', managerId: m1.id, createdById: a1.id },
   });
   const pendingProfileTeam2 = await prisma.profile.create({
-    data: { name: 'Quinn Pending', avatarId: 'profile-03', status: 'pending', createdById: a3.id },
+    data: { name: 'Quinn Pending', avatarId: 'profile-03', status: 'pending', managerId: m2.id, createdById: a3.id },
   });
 
   return {
@@ -129,6 +135,7 @@ export async function seedFixtures(): Promise<Fixtures> {
     platform: { id: platform.id, name: platform.name },
     platform2: { id: platform2.id, name: platform2.name },
     approvedProfile: { id: approvedProfile.id, name: approvedProfile.name },
+    approvedProfileTeam2: { id: approvedProfileTeam2.id, name: approvedProfileTeam2.name },
     pendingProfile: { id: pendingProfile.id, name: pendingProfile.name },
     pendingProfileTeam2: { id: pendingProfileTeam2.id, name: pendingProfileTeam2.name },
   };
@@ -165,13 +172,16 @@ export interface MakeCallOptions {
   realIncome?: number | null;
 }
 
+const teamOfUser = (u: FixtureUser) => (u.role === 'manager' ? u.id : u.managerId);
+
 /** Inserts a call (and its first history row) directly, bypassing the API. */
 export async function makeCall(fx: Fixtures, opts: MakeCallOptions) {
   const call = await prisma.call.create({
     data: {
       status: opts.status ?? 'on_scheduling',
       platformId: fx.platform.id,
-      profileId: fx.approvedProfile.id,
+      // Each team books its own Profiles (§2.4).
+      profileId: teamOfUser(opts.associate) === fx.m2.id ? fx.approvedProfileTeam2.id : fx.approvedProfile.id,
       associateId: opts.associate.id,
       expertId: opts.expert === undefined ? fx.e1.id : (opts.expert?.id ?? null),
       scheduledAt: new Date(opts.scheduledAt ?? '2027-02-01T09:00:00Z'),
