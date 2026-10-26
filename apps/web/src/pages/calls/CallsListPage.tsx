@@ -52,7 +52,7 @@ import { Link as RouterLink, useNavigate, useSearchParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { EmptyState, ErrorState, LoadingRows, PageHeader } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
-import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
+import { STATUS_COLORS, StatusChip, StatusSince } from '@/components/StatusChip';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { countdown, formatRange, inZone, relativeTime, soon, whenAndLength, zoneAbbr } from '@/lib/time';
@@ -429,6 +429,7 @@ function ActiveCallsTab() {
                       </TableCell>
                       <TableCell>
                         <StatusChip status={c.status} />
+                        <StatusSince at={c.statusSince} zone={zone} />
                       </TableCell>
                       {showResearch && (
                         <TableCell onClick={(e) => e.stopPropagation()}>

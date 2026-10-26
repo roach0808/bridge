@@ -9,9 +9,10 @@ import PlayCircleRounded from '@mui/icons-material/PlayCircleRounded';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import TaskAltRounded from '@mui/icons-material/TaskAltRounded';
 import VerifiedRounded from '@mui/icons-material/VerifiedRounded';
-import { Box, type SvgIconProps } from '@mui/material';
+import { Box, Tooltip, Typography, type SvgIconProps } from '@mui/material';
 import { SHORT_STATUS_LABELS, STATUS_LABELS, STATUS_STAGE, type CallStatus } from '@god/shared';
 import type { ComponentType } from 'react';
+import { inZone } from '@/lib/time';
 import { STAGE_COLORS } from '@/theme/theme';
 
 export const STATUS_ICONS: Record<CallStatus, ComponentType<SvgIconProps>> = {
@@ -122,5 +123,17 @@ export function StatusChip({
       />
       {STATUS_LABELS[status]}
     </Box>
+  );
+}
+
+/** "since 10/12" under a call's status: when it entered it (`statusSince`), in the viewer's zone. */
+export function StatusSince({ at, zone }: { at: string; zone: string }) {
+  const when = inZone(at, zone);
+  return (
+    <Tooltip title={`In this status since ${when.toFormat('ccc, LLL d, yyyy · h:mm a')}`} disableInteractive>
+      <Typography variant="caption" color="text.secondary" component="div" noWrap sx={{ lineHeight: 1.3, fontVariantNumeric: 'tabular-nums' }}>
+        since {when.toFormat(when.hasSame(inZone(new Date().toISOString(), zone), 'year') ? 'MM/dd' : 'MM/dd/yy')}
+      </Typography>
+    </Tooltip>
   );
 }

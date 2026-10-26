@@ -155,6 +155,22 @@ export function statusForRole(role: Role, status: CallStatus): CallStatus {
   return SHOWN_AS[role][status] ?? status;
 }
 
+/**
+ * When a call entered the status a role is shown for it: the first of the
+ * latest run of history rows that read as that status to them. A step the role
+ * never sees does not move the date — an Associate's "confirmed" call stays
+ * confirmed since it was confirmed when the research data becomes ready, and
+ * an Expert's "finished" call stays finished since it finished while it is
+ * invoiced. `history` is oldest first; null when it is empty.
+ */
+export function statusSince(role: Role, history: ReadonlyArray<{ toStatus: CallStatus; createdAt: string }>): string | null {
+  if (!history.length) return null;
+  const current = statusForRole(role, history[history.length - 1]!.toStatus);
+  let i = history.length - 1;
+  while (i > 0 && statusForRole(role, history[i - 1]!.toStatus) === current) i--;
+  return history[i]!.createdAt;
+}
+
 /** The statuses of a stage a role sees. */
 export function stageStatusesForRole(role: Role, stage: Stage): CallStatus[] {
   const hidden = hiddenStatusesFor(role);

@@ -26,6 +26,8 @@ import {
   stageStatusesForRole,
   statusFilterForRole,
   statusForRole,
+  statusSince,
+  type CallStatus,
   type Role,
   AVATAR_AUDIENCES,
   BLOCKING_STATUSES,
@@ -270,6 +272,31 @@ describe('canGiveTask', () => {
   it('associates and experts give no tasks', () => {
     expect(canGiveTask(people.a, people.b)).toBe(false);
     expect(canGiveTask(people.e, people.f)).toBe(false);
+  });
+});
+
+describe('statusSince', () => {
+  const at = (day: number) => `2027-02-${String(day).padStart(2, '0')}T09:00:00.000Z`;
+  const path = (...steps: CallStatus[]) => steps.map((toStatus, i) => ({ toStatus, createdAt: at(i + 1) }));
+  const done = path('on_scheduling', 'scheduled', 'confirmed', 'research_ready', 'ongoing', 'finished', 'invoice_submit', 'invoice_approve');
+
+  it('is when the call entered its status', () => {
+    expect(statusSince('founder', done)).toBe(at(8));
+    expect(statusSince('founder', path('on_scheduling'))).toBe(at(1));
+    expect(statusSince('founder', [])).toBeNull();
+  });
+  it('an Expert’s call stays finished since it finished while it is invoiced', () => {
+    expect(statusSince('expert', done)).toBe(at(6));
+  });
+  it('an Associate’s or Manager’s call stays confirmed since it was confirmed when the research data is ready', () => {
+    const ready = path('on_scheduling', 'scheduled', 'confirmed', 'research_ready');
+    expect(statusSince('associate', ready)).toBe(at(3));
+    expect(statusSince('manager', ready)).toBe(at(3));
+    expect(statusSince('founder', ready)).toBe(at(4));
+    expect(statusSince('expert', ready)).toBe(at(4));
+  });
+  it('a status come back to counts from its latest return', () => {
+    expect(statusSince('founder', path('on_scheduling', 'scheduled', 'on_rescheduling', 'scheduled'))).toBe(at(4));
   });
 });
 

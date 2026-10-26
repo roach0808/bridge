@@ -30,7 +30,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { ConfirmDialog, EmptyState, ErrorState, LoadingRows } from '@/components/common';
-import { STATUS_COLORS } from '@/components/StatusChip';
+import { STATUS_COLORS, StatusSince } from '@/components/StatusChip';
 import { useToast } from '@/components/ToastProvider';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
@@ -296,7 +296,10 @@ function columnsFor(role: Role, zone: string): Column[] {
       render: (c) => (
         <Stack direction="row" spacing={0.75} alignItems="baseline">
           <Box component="span" sx={{ width: 7, height: 7, borderRadius: '50%', bgcolor: STATUS_COLORS[c.status], flexShrink: 0, position: 'relative', top: -1 }} />
-          <Typography variant="body2">{STATUS_LABELS[c.status]}</Typography>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="body2">{STATUS_LABELS[c.status]}</Typography>
+            <StatusSince at={c.statusSince} zone={zone} />
+          </Box>
         </Stack>
       ),
     },
