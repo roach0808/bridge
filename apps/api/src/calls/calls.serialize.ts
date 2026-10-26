@@ -4,6 +4,7 @@ import {
   expectedPrice,
   shareOf,
   statusForRole,
+  statusSince,
   type CallDTO,
   type CallPayouts,
   type CallStatus,
@@ -39,6 +40,8 @@ export const callInclude = {
   payeeManager: { select: userRefSelect },
   bank: { select: { id: true, nickname: true, bankName: true, bankType: true, accountNumber: true, isActive: true } },
   createdBy: { select: userRefSelect },
+  // Only to tell when the call entered the status each viewer is shown (`statusSince`).
+  history: { select: { toStatus: true, createdAt: true }, orderBy: [{ createdAt: 'asc' }, { id: 'asc' }] },
 } satisfies Prisma.CallInclude;
 
 export type CallRow = Prisma.CallGetPayload<{ include: typeof callInclude }>;
@@ -88,6 +91,11 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role' | 'ma
     permissions: callPermissions(viewer, call),
     payouts: payoutsFor(call, viewer, price),
     bankReady: viewer.role === 'founder' ? _count.banks > 0 : null,
+    statusSince:
+      statusSince(
+        viewer.role,
+        call.history.map((h) => ({ toStatus: h.toStatus, createdAt: iso(h.createdAt) })),
+      ) ?? iso(call.createdAt),
     // Experts never see a bank (§2.3).
     bank:
       viewer.role === 'expert' || !call.bank

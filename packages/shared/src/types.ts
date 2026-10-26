@@ -211,6 +211,8 @@ export interface CallDTO {
   bankReady: boolean | null;
   /** The bank the invoice was submitted to. Null for Experts, and before the invoice. */
   bank: CallBankRef | null;
+  /** When the call entered the status the viewer is shown (`statusSince`): steps they never see don't count. */
+  statusSince: string;
   createdBy: UserRef;
   createdAt: string;
   updatedAt: string;

@@ -4,7 +4,7 @@ import type { CallDTO } from '@god/shared';
 import { Link as RouterLink } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
 import { UserAvatar, UserChip } from '@/components/identity';
-import { StatusChip } from '@/components/StatusChip';
+import { StatusChip, StatusSince } from '@/components/StatusChip';
 import { countdown, whenAndLength } from '@/lib/time';
 import { IncomeFigures, callIncome } from './money';
 
@@ -41,7 +41,10 @@ export function CallCard({
                   {call.platform.name}
                 </Typography>
               </Box>
-              <StatusChip status={call.status} />
+              <Stack alignItems="flex-end" spacing={0.25} sx={{ flexShrink: 0 }}>
+                <StatusChip status={call.status} />
+                <StatusSince at={call.statusSince} zone={zone} />
+              </Stack>
             </Stack>
             <Typography variant="body2" sx={{ mt: 1, fontVariantNumeric: 'tabular-nums' }}>
               {countdown(call.scheduledAt)} · {whenAndLength(call.scheduledAt, zone, call.durationMinutes)}

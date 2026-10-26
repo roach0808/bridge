@@ -1,7 +1,7 @@
-import { FEATURES } from '@god/shared';
+import { FEATURES, type CallStatus } from '@god/shared';
 import { Prisma } from '@prisma/client';
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, clientsFor, expectError, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
+import { as, clientsFor, expectError, makeCall, prisma, seedFixtures, type Fixtures, type FixtureUser } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -749,5 +749,47 @@ describe('DELETE /calls/:id', () => {
     expectError(await founder.get(`/calls/${call.id}`), 404);
     // Its money no longer counts anywhere.
     expect((await founder.get('/stats/profiles')).body.find((r: { profile: { id: string } }) => r.profile.id === fx.approvedProfile.id).totalIncome).toBe(0);
+  });
+});
+
+describe('when a call entered its status', () => {
+  /** A call whose history is the given steps, a day apart from Feb 1. */
+  async function callThrough(steps: CallStatus[]) {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: steps.at(-1)! });
+    await prisma.callStatusHistory.deleteMany({ where: { callId: call.id } });
+    for (const [i, toStatus] of steps.entries()) {
+      await prisma.callStatusHistory.create({
+        data: { callId: call.id, fromStatus: i ? steps[i - 1]! : null, toStatus, actorId: fx.founder.id, isOverride: false, createdAt: new Date(Date.UTC(2027, 1, i + 1, 9)) },
+      });
+    }
+    return call;
+  }
+  const day = (d: number) => new Date(Date.UTC(2027, 1, d, 9)).toISOString();
+
+  it('is when it entered the status each viewer is shown; steps they never see do not move it', async () => {
+    const call = await callThrough(['on_scheduling', 'scheduled', 'confirmed', 'research_ready']);
+    const since = async (who: FixtureUser) => (await (await as(who)).get(`/calls/${call.id}`)).body.statusSince as string;
+    expect(await since(fx.founder)).toBe(day(4));
+    expect(await since(fx.e1)).toBe(day(4));
+    // Associates and Managers see "confirmed": since it was confirmed, so the research step stays hidden.
+    expect(await since(fx.a1)).toBe(day(3));
+    expect(await since(fx.m1)).toBe(day(3));
+  });
+
+  it('an Expert’s invoiced call is finished since it finished; the lists say the same', async () => {
+    const call = await callThrough(['on_scheduling', 'scheduled', 'confirmed', 'ongoing', 'finished', 'invoice_submit']);
+    const e1 = await as(fx.e1);
+    expect((await e1.get(`/calls/${call.id}`)).body).toMatchObject({ status: 'finished', statusSince: day(5) });
+    const founder = await as(fx.founder);
+    expect((await founder.get(`/calls/${call.id}`)).body).toMatchObject({ status: 'invoice_submit', statusSince: day(6) });
+    const list = await founder.get('/calls', { pageSize: 50 });
+    expect(list.body.items.find((c: { id: string }) => c.id === call.id).statusSince).toBe(day(6));
+  });
+
+  it('a new call is in its first status since it was created', async () => {
+    const res = await (await as(fx.a1)).post('/calls', body());
+    expect(res.status, res.text).toBe(201);
+    const shown = (await (await as(fx.a1)).get(`/calls/${res.body.id}`)).body;
+    expect(Math.abs(Date.parse(shown.statusSince) - Date.parse(res.body.createdAt))).toBeLessThan(5000);
   });
 });
