@@ -126,9 +126,14 @@ export function StatusChip({
   );
 }
 
-/** "since 10/12" under a call's status: when it entered it (`statusSince`), in the viewer's zone. */
-export function StatusSince({ at, zone }: { at: string; zone: string }) {
-  const when = inZone(at, zone);
+/**
+ * "since 10/12" under a call's status: when it entered it (`statusSince`), in the
+ * viewer's zone. Nothing when there is no date to show — the web app can go live
+ * a little before an API that sends one.
+ */
+export function StatusSince({ at, zone }: { at: string | null | undefined; zone: string }) {
+  const when = at ? inZone(at, zone) : null;
+  if (!when?.isValid) return null;
   return (
     <Tooltip title={`In this status since ${when.toFormat('ccc, LLL d, yyyy · h:mm a')}`} disableInteractive>
       <Typography variant="caption" color="text.secondary" component="div" noWrap sx={{ lineHeight: 1.3, fontVariantNumeric: 'tabular-nums' }}>
