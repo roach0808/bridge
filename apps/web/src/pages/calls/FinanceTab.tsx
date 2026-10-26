@@ -24,7 +24,7 @@ import {
   TableRow,
   Typography,
 } from '@mui/material';
-import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, type CallDTO, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
+import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, bankLabel, type CallDTO, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -301,6 +301,27 @@ function columnsFor(role: Role, zone: string): Column[] {
       ),
     },
   ];
+  // The bank the invoice was submitted to: chosen at "Invoice submitted", so empty before (§6.9a).
+  const bank: Column = {
+    key: 'bank',
+    label: 'Bank',
+    width: 120,
+    value: (c) => (c.bank ? bankLabel(c.bank) : NONE),
+    render: (c) =>
+      c.bank ? (
+        <Stack spacing={0.25}>
+          <Typography variant="body2" noWrap>
+            {bankLabel(c.bank)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ lineHeight: 1.3 }}>
+            {c.bank.nickname ? `${c.bank.bankType} ··${c.bank.accountLast4}` : c.bank.bankType}
+            {!c.bank.isActive && ' · deactivated'}
+          </Typography>
+        </Stack>
+      ) : (
+        <Num muted>{NONE}</Num>
+      ),
+  };
   const duration: Column = {
     key: 'duration',
     label: 'Duration',
@@ -351,6 +372,7 @@ function columnsFor(role: Role, zone: string): Column[] {
         sort: (c) => c.realIncome ?? 0,
         render: (c) => <Num muted={c.realIncome === null}>{money(c.realIncome)}</Num>,
       },
+      bank,
       {
         key: 'expert',
         label: 'Expert',
@@ -388,6 +410,7 @@ function columnsFor(role: Role, zone: string): Column[] {
     return [
       ...base,
       duration,
+      bank,
       {
         key: 'managerShare',
         label: 'Manager’s share',
