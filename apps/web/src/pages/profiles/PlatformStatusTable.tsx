@@ -1,10 +1,10 @@
 import { Box, Card, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, Tooltip, Typography } from '@mui/material';
-import { PLATFORM_REGISTRATION_LABELS, type ProfileDTO, type UserRef } from '@god/shared';
+import type { ProfileDTO, UserRef } from '@god/shared';
 import { DateTime } from 'luxon';
 import { useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 import { formatUsd } from '@/lib/time';
-import { PlatformDot, PlatformStatusSelect } from '@/components/ProfileDetails';
+import { PLATFORM_REGISTRATION_COLORS, PlatformFigures, PlatformStatusSelect } from '@/components/ProfileDetails';
 import { EmptyState } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { FilterChips, TableSurface } from '../admin/adminShared';
@@ -175,6 +175,18 @@ export function PlatformStatusTable({ profiles }: { profiles: ProfileDTO[] }) {
         </Stack>
       </Stack>
 
+      <Typography variant="caption" color="text.secondary">
+        Each cell is <strong>applied projects / delivered calls</strong> on that platform:{' '}
+        <Box component="span" sx={{ color: PLATFORM_REGISTRATION_COLORS.registered, fontWeight: 600 }}>
+          green
+        </Box>{' '}
+        where the profile is registered,{' '}
+        <Box component="span" sx={{ color: PLATFORM_REGISTRATION_COLORS.banned, fontWeight: 600 }}>
+          red
+        </Box>{' '}
+        where it is banned, and empty where it is not registered.
+      </Typography>
+
       {rows.length === 0 ?
         <Card>
           <EmptyState title="No profiles under this Manager" />
@@ -251,13 +263,9 @@ export function PlatformStatusTable({ profiles }: { profiles: ProfileDTO[] }) {
                     return (
                       <TableCell key={platform.id} align="center" sx={{ px: 0.5 }}>
                         {p.canEditPlatforms ? (
-                          <PlatformStatusSelect profile={p} platformId={platform.id} status={s.status} compact />
+                          <PlatformStatusSelect profile={p} platformId={platform.id} status={s.status} figures={s} compact />
                         ) : (
-                          <Tooltip title={`${platform.name}: ${PLATFORM_REGISTRATION_LABELS[s.status]}`}>
-                            <Box sx={{ display: 'inline-flex' }}>
-                              <PlatformDot status={s.status} />
-                            </Box>
-                          </Tooltip>
+                          <PlatformFigures status={s.status} figures={s} platformName={platform.name} />
                         )}
                       </TableCell>
                     );

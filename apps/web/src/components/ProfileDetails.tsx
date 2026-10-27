@@ -27,6 +27,7 @@ import {
   PLATFORM_REGISTRATION_LABELS,
   type PlatformRegistration,
   type ProfileDTO,
+  type ProfilePlatformStatusDTO,
   type ProfileStatus,
 } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -95,6 +96,44 @@ export function PlatformDot({ status, size = 10 }: { status: PlatformRegistratio
   );
 }
 
+/** What a Profile has done on one platform: applied projects, and calls delivered there. */
+export type PlatformFiguresValue = Pick<ProfilePlatformStatusDTO, 'appliedProjects' | 'deliveredCalls'>;
+
+/**
+ * One cell of the platform table: "applied / delivered" in green where the
+ * Profile is registered, in red where it is banned, and nothing where it is
+ * not registered. The words are on hover.
+ */
+export function PlatformFigures({ status, figures, platformName }: { status: PlatformRegistration; figures: PlatformFiguresValue; platformName?: string }) {
+  const label = PLATFORM_REGISTRATION_LABELS[status];
+  const detail =
+    status === 'not_registered'
+      ? label
+      : `${label} · ${figures.appliedProjects} applied project${figures.appliedProjects === 1 ? '' : 's'} · ${figures.deliveredCalls} delivered call${figures.deliveredCalls === 1 ? '' : 's'}`;
+  return (
+    <Tooltip title={platformName ? `${platformName}: ${detail}` : detail}>
+      <Box
+        component="span"
+        aria-label={detail}
+        sx={{
+          display: 'inline-block',
+          minWidth: 32,
+          minHeight: 20,
+          lineHeight: '20px',
+          textAlign: 'center',
+          fontSize: 13,
+          fontWeight: 600,
+          fontVariantNumeric: 'tabular-nums',
+          whiteSpace: 'nowrap',
+          color: status === 'registered' ? PLATFORM_REGISTRATION_COLORS.registered : PLATFORM_REGISTRATION_COLORS.banned,
+        }}
+      >
+        {status === 'not_registered' ? '' : `${figures.appliedProjects}/${figures.deliveredCalls}`}
+      </Box>
+    </Tooltip>
+  );
+}
+
 export function PlatformStatusChip({ status }: { status: PlatformRegistration }) {
   return <DotPill color={PLATFORM_REGISTRATION_COLORS[status]}>{PLATFORM_REGISTRATION_LABELS[status]}</DotPill>;
 }
@@ -125,12 +164,15 @@ export function PlatformStatusSelect({
   platformId,
   status,
   compact,
+  figures,
 }: {
   profile: Pick<ProfileDTO, 'id' | 'name'>;
   platformId: string;
   status: PlatformRegistration;
   /** In a table of many platforms, the dot alone; the words are in the menu. */
   compact?: boolean;
+  /** With `compact`: show applied projects / delivered calls in place of the dot. */
+  figures?: PlatformFiguresValue;
 }) {
   const mutation = useSetPlatform(profile.id, platformId);
   const value = mutation.isPending && mutation.variables?.status ? mutation.variables.status : status;
@@ -142,7 +184,9 @@ export function PlatformStatusSelect({
       value={value}
       disabled={mutation.isPending}
       onChange={(e) => mutation.mutate({ status: e.target.value as PlatformRegistration })}
-      renderValue={(v) => (compact ? <PlatformDot status={v} /> : <PlatformStatusChip status={v} />)}
+      renderValue={(v) =>
+        compact ? figures ? <PlatformFigures status={v} figures={figures} /> : <PlatformDot status={v} /> : <PlatformStatusChip status={v} />
+      }
       inputProps={{ 'aria-label': `${profile.name} platform status` }}
       sx={{
         '& .MuiSelect-select': {

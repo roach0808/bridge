@@ -1,4 +1,5 @@
 import {
+  FINANCE_STATUSES,
   TEAM_TIME_ZONE,
   isAvatarForAudience,
   listProfilesQuerySchema,
@@ -62,21 +63,34 @@ export function visibleProfilesWhere(actor: Pick<Actor, 'id' | 'role' | 'manager
 }
 
 /**
- * Fills in what each Profile brought in (`totalIncome`): real income that
- * reached the bank, from the calls the viewer can see — so a Profile that
- * changed teams never shows a Manager the other team's money. Founders and
- * Managers only; Associates and Experts never see income (§2.3).
+ * Fills in what a Profile's calls add up to, from the calls the viewer can see —
+ * so a Profile that changed teams never shows a Manager the other team's work:
+ * - `totalIncome`: real income that reached the bank. Founders and Managers
+ *   only; Associates and Experts never see income (§2.3).
+ * - `deliveredCalls` on each platform: the calls there that took place.
+ *   Everyone who sees platform statuses (not Experts).
  */
-export async function withIncome<T extends ProfileDTO | ProfileDTO[]>(actor: Actor, dto: T): Promise<T> {
+export async function withCallFigures<T extends ProfileDTO | ProfileDTO[]>(actor: Actor, dto: T): Promise<T> {
   const list: ProfileDTO[] = Array.isArray(dto) ? dto : [dto];
-  if ((actor.role !== 'founder' && actor.role !== 'manager') || !list.length) return dto;
-  const sums = await prisma.call.groupBy({
-    by: ['profileId'],
-    where: { AND: [visibleCallsWhere(actor), { profileId: { in: list.map((p) => p.id) } }, { realIncome: { not: null } }] },
-    _sum: { realIncome: true },
-  });
-  const byProfile = new Map(sums.map((r) => [r.profileId, Number(r._sum.realIncome ?? 0)]));
-  for (const p of list) p.totalIncome = byProfile.get(p.id) ?? 0;
+  if (!list.length || actor.role === 'expert') return dto;
+  const mine: Prisma.CallWhereInput = { AND: [visibleCallsWhere(actor), { profileId: { in: list.map((p) => p.id) } }] };
+  const seesMoney = actor.role === 'founder' || actor.role === 'manager';
+  const [income, delivered] = await Promise.all([
+    seesMoney
+      ? prisma.call.groupBy({ by: ['profileId'], where: { AND: [mine, { realIncome: { not: null } }] }, _sum: { realIncome: true } })
+      : Promise.resolve([]),
+    prisma.call.groupBy({
+      by: ['profileId', 'platformId'],
+      where: { AND: [mine, { status: { in: [...FINANCE_STATUSES] } }] },
+      _count: { _all: true },
+    }),
+  ]);
+  const incomeOf = new Map(income.map((r) => [r.profileId, Number(r._sum.realIncome ?? 0)]));
+  const deliveredOf = new Map(delivered.map((r) => [`${r.profileId}:${r.platformId}`, r._count._all]));
+  for (const p of list) {
+    if (seesMoney) p.totalIncome = incomeOf.get(p.id) ?? 0;
+    for (const s of p.platformStatuses ?? []) s.deliveredCalls = deliveredOf.get(`${p.id}:${s.platform.id}`) ?? 0;
+  }
   return dto;
 }
 
@@ -118,12 +132,12 @@ profilesRouter.get('/profiles', async (req, res) => {
     orderBy: [{ status: 'asc' }, { name: 'asc' }],
   });
   const platforms = await platformsFor(actor);
-  res.json(await withIncome(actor, profiles.map((p) => toProfileDTO(p, platforms, actor))));
+  res.json(await withCallFigures(actor, profiles.map((p) => toProfileDTO(p, platforms, actor))));
 });
 
 profilesRouter.get('/profiles/:id', async (req, res) => {
   const actor = actorOf(req);
-  res.json(await withIncome(actor, toProfileDTO(await loadVisible(actor, idParam(req)), await platformsFor(actor), actor)));
+  res.json(await withCallFigures(actor, toProfileDTO(await loadVisible(actor, idParam(req)), await platformsFor(actor), actor)));
 });
 
 const addressRows = (list: Array<{ label: string; address: string }>) =>
@@ -177,7 +191,7 @@ profilesRouter.post('/profiles', requireRole('founder', 'manager', 'associate'),
     return { profile, deliver };
   });
   deliver();
-  res.status(201).json(await withIncome(actor, toProfileDTO(profile, await platformRefs(), actor)));
+  res.status(201).json(await withCallFigures(actor, toProfileDTO(profile, await platformRefs(), actor)));
 });
 
 function personalDetails(input: Partial<z.output<typeof profileSchema>>, actor: Pick<Actor, 'role'>) {
@@ -235,7 +249,7 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
     return { updated, deliver };
   });
   deliver();
-  res.json(await withIncome(actor, toProfileDTO(updated, await platformsFor(actor), actor)));
+  res.json(await withCallFigures(actor, toProfileDTO(updated, await platformsFor(actor), actor)));
 });
 
 async function review(actor: Actor, id: string | null, decision: 'approved' | 'rejected', reason?: string) {
@@ -265,7 +279,7 @@ async function review(actor: Actor, id: string | null, decision: 'approved' | 'r
     return { updated, deliver };
   });
   deliver();
-  return withIncome(actor, toProfileDTO(updated, await platformRefs(), actor));
+  return withCallFigures(actor, toProfileDTO(updated, await platformRefs(), actor));
 }
 
 /** Founder deactivates a Profile (hidden from everyone else, and unbookable) or brings it back. */
@@ -278,7 +292,7 @@ profilesRouter.patch('/profiles/:id/active', requireRole('founder'), async (req,
     data: { isActive },
     include: includeFor(actor),
   });
-  res.json(await withIncome(actor, toProfileDTO(updated, await platformRefs(), actor)));
+  res.json(await withCallFigures(actor, toProfileDTO(updated, await platformRefs(), actor)));
 });
 
 /**
@@ -350,7 +364,7 @@ profilesRouter.put('/profiles/:id/platforms/:platformId', requireRole('founder',
     create: { profileId: profile.id, platformId: platform.id, status: status ?? 'not_registered', rate: rate ?? null },
     update: { status, rate },
   });
-  res.json(await withIncome(actor, toProfileDTO(await loadVisible(actor, profile.id), await platformsFor(actor), actor)));
+  res.json(await withCallFigures(actor, toProfileDTO(await loadVisible(actor, profile.id), await platformsFor(actor), actor)));
 });
 
 /**
@@ -372,7 +386,7 @@ profilesRouter.put('/profiles/:id/manager', requireRole('founder'), async (req, 
     data: { managerId },
     include: includeFor(actor),
   });
-  res.json(await withIncome(actor, toProfileDTO(updated, await platformsFor(actor), actor)));
+  res.json(await withCallFigures(actor, toProfileDTO(updated, await platformsFor(actor), actor)));
 });
 
 profilesRouter.post('/profiles/:id/approve', requireRole('founder'), async (req, res) => {

@@ -286,8 +286,8 @@ describe('platform statuses', () => {
   it('every platform is listed, not registered and with no rate yet', async () => {
     const res = await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`);
     expect(res.body.platformStatuses).toEqual([
-      { platform: { id: fx.platform.id, name: 'GLG', priority: 1 }, status: 'not_registered', rate: null },
-      { platform: { id: fx.platform2.id, name: 'AlphaSights', priority: 2 }, status: 'not_registered', rate: null },
+      { platform: { id: fx.platform.id, name: 'GLG', priority: 1 }, status: 'not_registered', rate: null, appliedProjects: 0, deliveredCalls: 0 },
+      { platform: { id: fx.platform2.id, name: 'AlphaSights', priority: 2 }, status: 'not_registered', rate: null, appliedProjects: 0, deliveredCalls: 0 },
     ]);
   });
 
@@ -542,5 +542,37 @@ describe('what a profile brought in', () => {
     expect((await (await as(fx.founder)).put(`/profiles/${fx.approvedProfile.id}/manager`, { managerId: fx.m2.id })).status).toBe(200);
     expect(await incomeOf(fx.m2, 'Dana Approved')).toBe(0);
     expect(await incomeOf(fx.founder, 'Dana Approved')).toBe(1000);
+  });
+});
+
+describe('calls delivered on each platform', () => {
+  const figuresOn = async (who: FixtureUser, platformName: string) => {
+    const res = await (await as(who)).get(`/profiles/${fx.approvedProfile.id}`);
+    return res.body.platformStatuses?.find((s: { platform: { name: string } }) => s.platform.name === platformName) as
+      | { appliedProjects: number; deliveredCalls: number }
+      | undefined;
+  };
+
+  it('counts the calls that took place there, for everyone who sees platform statuses', async () => {
+    await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    await makeCall(fx, { associate: fx.a2, status: 'process_to_bank', scheduledAt: '2027-02-02T09:00:00Z' });
+    // Not delivered: still on its way, or called off.
+    await makeCall(fx, { associate: fx.a1, status: 'scheduled', scheduledAt: '2027-02-03T09:00:00Z' });
+    await makeCall(fx, { associate: fx.a1, status: 'cancelled', scheduledAt: '2027-02-04T09:00:00Z' });
+    for (const who of [fx.founder, fx.m1, fx.a1]) {
+      expect(await figuresOn(who, 'GLG')).toMatchObject({ deliveredCalls: 2, appliedProjects: 0 });
+      expect(await figuresOn(who, 'AlphaSights')).toMatchObject({ deliveredCalls: 0, appliedProjects: 0 });
+    }
+    // The list says the same.
+    const list = await (await as(fx.a1)).get('/profiles');
+    const dana = list.body.find((p: { id: string }) => p.id === fx.approvedProfile.id);
+    expect(dana.platformStatuses.find((s: { platform: { name: string } }) => s.platform.name === 'GLG').deliveredCalls).toBe(2);
+  });
+
+  it('counts only the calls the viewer can see', async () => {
+    await makeCall(fx, { associate: fx.a1, status: 'finished' });
+    expect((await (await as(fx.founder)).put(`/profiles/${fx.approvedProfile.id}/manager`, { managerId: fx.m2.id })).status).toBe(200);
+    expect(await figuresOn(fx.a3, 'GLG')).toMatchObject({ deliveredCalls: 0 });
+    expect(await figuresOn(fx.founder, 'GLG')).toMatchObject({ deliveredCalls: 1 });
   });
 });
