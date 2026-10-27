@@ -1,5 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { as, expectError, makeBank, makeCall, prisma, seedFixtures, type Fixtures } from './helpers';
+import { as, expectError, makeBank, makeCall, prisma, seedFixtures, type Fixtures, type FixtureUser } from './helpers';
 
 let fx: Fixtures;
 beforeEach(async () => {
@@ -513,5 +513,34 @@ describe('DELETE /profiles/:id', () => {
     const founder = await as(fx.founder);
     await makeCall(fx, { associate: fx.a1, status: 'scheduled' });
     expectError(await founder.delete(`/profiles/${fx.approvedProfile.id}`), 409);
+  });
+});
+
+describe('what a profile brought in', () => {
+  const incomeOf = async (who: FixtureUser, name: string) => {
+    const res = await (await as(who)).get('/profiles');
+    return res.body.find((p: { name: string }) => p.name === name)?.totalIncome as number | null | undefined;
+  };
+
+  it('is the real income of its calls paid to bank, for the Founder and Managers only', async () => {
+    await makeCall(fx, { associate: fx.a1, status: 'process_to_bank', realIncome: 1000 });
+    await makeCall(fx, { associate: fx.a2, status: 'process_to_bank', realIncome: 250.5, scheduledAt: '2027-02-02T09:00:00Z' });
+    // Not paid to bank yet: no real income.
+    await makeCall(fx, { associate: fx.a1, status: 'invoice_submit', scheduledAt: '2027-02-03T09:00:00Z' });
+    expect(await incomeOf(fx.founder, 'Dana Approved')).toBe(1250.5);
+    expect(await incomeOf(fx.m1, 'Dana Approved')).toBe(1250.5);
+    expect(await incomeOf(fx.founder, 'Rowan Approved')).toBe(0);
+    // Associates and Experts never see what calls bring in.
+    expect(await incomeOf(fx.a1, 'Dana Approved')).toBeNull();
+    const single = await (await as(fx.m1)).get(`/profiles/${fx.approvedProfile.id}`);
+    expect(single.body.totalIncome).toBe(1250.5);
+    expect((await (await as(fx.a1)).get(`/profiles/${fx.approvedProfile.id}`)).body.totalIncome).toBeNull();
+  });
+
+  it('counts only the calls the viewer can see, so a Profile’s old team’s money stays with it', async () => {
+    await makeCall(fx, { associate: fx.a1, status: 'process_to_bank', realIncome: 1000 });
+    expect((await (await as(fx.founder)).put(`/profiles/${fx.approvedProfile.id}/manager`, { managerId: fx.m2.id })).status).toBe(200);
+    expect(await incomeOf(fx.m2, 'Dana Approved')).toBe(0);
+    expect(await incomeOf(fx.founder, 'Dana Approved')).toBe(1000);
   });
 });

@@ -161,6 +161,11 @@ export interface ProfileDTO {
   canEdit: boolean;
   /** The Manager's percent of this Profile's real income. Founder and Managers only. */
   managerSharePercent: number | null;
+  /**
+   * What this Profile's calls brought in: real income that reached the bank, from
+   * the calls the viewer can see. Founder and Managers only; null for everyone else.
+   */
+  totalIncome: number | null;
   createdBy: UserRef;
   reviewedBy: UserRef | null;
   reviewedAt: string | null;

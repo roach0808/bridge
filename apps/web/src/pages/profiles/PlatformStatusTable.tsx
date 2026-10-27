@@ -1,13 +1,62 @@
-import { Box, Card, Stack, Table, TableBody, TableCell, TableHead, TableRow, Tooltip, Typography } from '@mui/material';
+import { Box, Card, MenuItem, Stack, Table, TableBody, TableCell, TableHead, TableRow, TableSortLabel, TextField, Tooltip, Typography } from '@mui/material';
 import { PLATFORM_REGISTRATION_LABELS, type ProfileDTO, type UserRef } from '@god/shared';
+import { DateTime } from 'luxon';
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
+import { formatUsd } from '@/lib/time';
 import { PlatformDot, PlatformStatusSelect } from '@/components/ProfileDetails';
 import { EmptyState } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { FilterChips, TableSurface } from '../admin/adminShared';
 
 type Platform = NonNullable<ProfileDTO['platformStatuses']>[number]['platform'];
+
+/** What the table can be sorted by. */
+type SortKey = 'name' | 'onboarded' | 'income' | 'registered';
+type SortDir = 'asc' | 'desc';
+
+/** How far a sort starts: names A to Z, the rest largest or newest first. */
+const FIRST_DIR: Record<SortKey, SortDir> = { name: 'asc', onboarded: 'desc', income: 'desc', registered: 'desc' };
+
+const registeredCount = (p: ProfileDTO) => p.platformStatuses?.filter((s) => s.status === 'registered').length ?? 0;
+
+/** The value a Profile sorts by; null sorts last whichever way. */
+function sortValue(p: ProfileDTO, key: SortKey): string | number | null {
+  if (key === 'name') return p.name.toLocaleLowerCase();
+  if (key === 'onboarded') return p.onboardedAt;
+  if (key === 'income') return p.totalIncome;
+  return registeredCount(p);
+}
+
+function sortProfiles(profiles: ProfileDTO[], key: SortKey, dir: SortDir): ProfileDTO[] {
+  const sign = dir === 'asc' ? 1 : -1;
+  return [...profiles].sort((a, b) => {
+    const va = sortValue(a, key);
+    const vb = sortValue(b, key);
+    if (va === null || vb === null) return va === vb ? a.name.localeCompare(b.name) : va === null ? 1 : -1;
+    const by = typeof va === 'number' && typeof vb === 'number' ? va - vb : String(va).localeCompare(String(vb));
+    return by * sign || a.name.localeCompare(b.name);
+  });
+}
+
+/** `?sort=income-desc` and the like; anything else is name, A to Z. */
+function parseSort(value: string | null, incomeShown: boolean): { key: SortKey; dir: SortDir } {
+  const [key, dir] = (value ?? '').split('-') as [SortKey, SortDir];
+  const known = key === 'name' || key === 'onboarded' || key === 'registered' || (key === 'income' && incomeShown);
+  if (!known) return { key: 'name', dir: 'asc' };
+  return { key, dir: dir === 'asc' || dir === 'desc' ? dir : FIRST_DIR[key] };
+}
+
+const SORT_OPTIONS: Array<{ value: string; label: string; income?: boolean }> = [
+  { value: 'name-asc', label: 'Name, A to Z' },
+  { value: 'name-desc', label: 'Name, Z to A' },
+  { value: 'income-desc', label: 'Total income, highest first', income: true },
+  { value: 'income-asc', label: 'Total income, lowest first', income: true },
+  { value: 'onboarded-desc', label: 'Onboarded, newest first' },
+  { value: 'onboarded-asc', label: 'Onboarded, oldest first' },
+  { value: 'registered-desc', label: 'Most platforms registered' },
+  { value: 'registered-asc', label: 'Fewest platforms registered' },
+];
 
 /**
  * Every Profile's standing on the platforms of one priority (§9.1 Profiles):
@@ -27,10 +76,35 @@ export function PlatformStatusTable({ profiles }: { profiles: ProfileDTO[] }) {
   const managers = useMemo(() => managersOf(profiles), [profiles]);
   const [managerId, setManagerId] = useState<string>('all');
 
+  // Income goes to the Founder and Managers only (null for everyone else).
+  const incomeShown = profiles.some((p) => p.totalIncome !== null);
+  const [params, setParams] = useSearchParams();
+  const sort = parseSort(params.get('sort'), incomeShown);
+  const setSort = (key: SortKey, dir: SortDir) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (key === 'name' && dir === 'asc') next.delete('sort');
+        else next.set('sort', `${key}-${dir}`);
+        return next;
+      },
+      { replace: true },
+    );
+  const sortBy = (key: SortKey) => setSort(key, sort.key === key ? (sort.dir === 'asc' ? 'desc' : 'asc') : FIRST_DIR[key]);
+  const header = (key: SortKey, label: string) => (
+    <TableSortLabel active={sort.key === key} direction={sort.key === key ? sort.dir : FIRST_DIR[key]} onClick={() => sortBy(key)}>
+      {label}
+    </TableSortLabel>
+  );
+
   // Until the platforms arrive there is no priority to show, so fall back to the first.
   const shown = priority === 'all' || priorities.includes(priority) ? priority : (priorities[0] ?? 'all');
   const columns = shown === 'all' ? platforms : platforms.filter((p) => p.priority === shown);
-  const rows = profiles.filter((p) => managerId === 'all' || (managerId === 'none' ? !p.manager : p.manager?.id === managerId));
+  const rows = sortProfiles(
+    profiles.filter((p) => managerId === 'all' || (managerId === 'none' ? !p.manager : p.manager?.id === managerId)),
+    sort.key,
+    sort.dir,
+  );
 
   if (!profiles.length || !platforms.length) {
     return (
@@ -59,39 +133,69 @@ export function PlatformStatusTable({ profiles }: { profiles: ProfileDTO[] }) {
             ]}
           />
         </Box>
-        {managers.length > 0 && (
-          <Box>
-            <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
-              Manager
-            </Typography>
-            <FilterChips
-              ariaLabel="Filter by manager"
-              value={managerId}
-              onChange={setManagerId}
-              options={[
-                { value: 'all', label: 'All', count: profiles.length },
-                ...managers.map((m) => ({
-                  value: m.id,
-                  label: m.nickname,
-                  count: profiles.filter((p) => p.manager?.id === m.id).length,
-                })),
-                ...(profiles.some((p) => !p.manager) ? [{ value: 'none', label: 'Nobody', count: profiles.filter((p) => !p.manager).length }] : []),
-              ]}
-            />
-          </Box>
-        )}
+        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} useFlexGap flexWrap="wrap" alignItems={{ sm: 'flex-end' }}>
+          {managers.length > 0 && (
+            <Box sx={{ flexShrink: 0 }}>
+              <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.75 }}>
+                Manager
+              </Typography>
+              <FilterChips
+                ariaLabel="Filter by manager"
+                value={managerId}
+                onChange={setManagerId}
+                options={[
+                  { value: 'all', label: 'All', count: profiles.length },
+                  ...managers.map((m) => ({
+                    value: m.id,
+                    label: m.nickname,
+                    count: profiles.filter((p) => p.manager?.id === m.id).length,
+                  })),
+                  ...(profiles.some((p) => !p.manager) ? [{ value: 'none', label: 'Nobody', count: profiles.filter((p) => !p.manager).length }] : []),
+                ]}
+              />
+            </Box>
+          )}
+          <TextField
+            select
+            size="small"
+            label="Sort by"
+            value={`${sort.key}-${sort.dir}`}
+            onChange={(e) => {
+              const [key, dir] = e.target.value.split('-') as [SortKey, SortDir];
+              setSort(key, dir);
+            }}
+            sx={{ minWidth: 230 }}
+          >
+            {SORT_OPTIONS.filter((o) => incomeShown || !o.income).map((o) => (
+              <MenuItem key={o.value} value={o.value}>
+                {o.label}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Stack>
       </Stack>
 
       {rows.length === 0 ?
         <Card>
           <EmptyState title="No profiles under this Manager" />
         </Card>
-      : <TableSurface minWidth={320 + columns.length * 84}>
+      : <TableSurface minWidth={320 + (incomeShown ? 330 : 220) + columns.length * 84}>
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
-                <TableCell sx={{ minWidth: 200, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>Profile</TableCell>
+                <TableCell sx={{ minWidth: 200, position: 'sticky', left: 0, zIndex: 3, bgcolor: 'background.paper' }}>{header('name', 'Profile')}</TableCell>
                 <TableCell sx={{ minWidth: 120 }}>Manager</TableCell>
+                <TableCell sx={{ minWidth: 110 }}>{header('onboarded', 'Onboarded')}</TableCell>
+                {incomeShown && (
+                  <TableCell align="right" sx={{ minWidth: 110 }}>
+                    {header('income', 'Total income')}
+                  </TableCell>
+                )}
+                <TableCell align="right" sx={{ minWidth: 110 }}>
+                  <Tooltip title="Platforms the profile is registered on, of every platform">
+                    <span>{header('registered', 'Registered')}</span>
+                  </Tooltip>
+                </TableCell>
                 {columns.map((platform) => (
                   <PlatformHeader key={platform.id} platform={platform} registered={registeredOn(platform.id)} of={rows.length} all={shown === 'all'} />
                 ))}
@@ -119,6 +223,27 @@ export function PlatformStatusTable({ profiles }: { profiles: ProfileDTO[] }) {
                         —
                       </Typography>
                     )}
+                  </TableCell>
+                  <TableCell>
+                    <Typography variant="body2" noWrap color={p.onboardedAt ? 'text.primary' : 'text.disabled'} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {p.onboardedAt ? DateTime.fromISO(p.onboardedAt).toFormat('LLL d, yyyy') : '—'}
+                    </Typography>
+                  </TableCell>
+                  {incomeShown && (
+                    <TableCell align="right">
+                      <Typography variant="body2" noWrap color={p.totalIncome ? 'text.primary' : 'text.secondary'} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                        {p.totalIncome === null ? '—' : formatUsd(p.totalIncome)}
+                      </Typography>
+                    </TableCell>
+                  )}
+                  <TableCell align="right">
+                    <Typography variant="body2" noWrap sx={{ fontVariantNumeric: 'tabular-nums' }}>
+                      {registeredCount(p)}
+                      <Typography component="span" variant="caption" color="text.secondary">
+                        {' '}
+                        / {p.platformStatuses?.length ?? 0}
+                      </Typography>
+                    </Typography>
                   </TableCell>
                   {columns.map((platform) => {
                     const s = p.platformStatuses?.find((row) => row.platform.id === platform.id);
