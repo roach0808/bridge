@@ -177,6 +177,8 @@ export const toProfileDTO = (
   canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer),
   canEdit: canEditProfile(viewer),
   managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,
+  // Filled in by `withIncome` (profiles.routes), which knows which calls the viewer can see.
+  totalIncome: null,
   createdBy: toUserRef(p.createdBy),
   reviewedBy: p.reviewedBy ? toUserRef(p.reviewedBy) : null,
   reviewedAt: isoOrNull(p.reviewedAt),
