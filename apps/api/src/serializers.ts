@@ -166,6 +166,9 @@ export const toProfileDTO = (
           platform,
           status: row?.status ?? 'not_registered',
           rate: row?.rate == null || viewer.role === 'associate' ? null : Number(row.rate),
+          // Filled in by `withCallFigures` (profiles.routes); nothing records applications yet.
+          appliedProjects: 0,
+          deliveredCalls: 0,
         };
       })
     : null,
@@ -177,7 +180,7 @@ export const toProfileDTO = (
   canEditPlatforms: Boolean(platforms) && canEditProfilePlatforms(viewer),
   canEdit: canEditProfile(viewer),
   managerSharePercent: viewer.role === 'founder' || viewer.role === 'manager' ? Number(p.managerSharePercent) : null,
-  // Filled in by `withIncome` (profiles.routes), which knows which calls the viewer can see.
+  // Filled in by `withCallFigures` (profiles.routes), which knows which calls the viewer can see.
   totalIncome: null,
   createdBy: toUserRef(p.createdBy),
   reviewedBy: p.reviewedBy ? toUserRef(p.reviewedBy) : null,

@@ -104,6 +104,13 @@ export interface ProfilePlatformStatusDTO {
   status: PlatformRegistration;
   /** USD per hour. Null until the Founder sets it; required while registered. */
   rate: number | null;
+  /**
+   * Projects the Profile applied to on this platform. Always 0 until project
+   * applications are recorded in the system.
+   */
+  appliedProjects: number;
+  /** Its calls on this platform that took place (finished or being invoiced), among those the viewer can see. */
+  deliveredCalls: number;
 }
 
 export interface ProfileAddressDTO {
