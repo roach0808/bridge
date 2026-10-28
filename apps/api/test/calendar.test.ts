@@ -424,3 +424,41 @@ describe('DELETE /schedule-blocks/:id scopes', () => {
     expect(res.body.deleted).toEqual([id]);
   });
 });
+
+describe('cancelled calls on the calendar', () => {
+  const WEEK = { from: '2027-01-31T00:00:00Z', to: '2027-02-07T00:00:00Z' };
+
+  it('stay for everyone who can see the call, marked cancelled, and never make anyone busy', async () => {
+    const off = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'cancelled', scheduledAt: '2027-02-01T09:00:00Z' });
+    for (const who of [fx.a1, fx.a2, fx.m1, fx.founder]) {
+      const res = await calendarOf(await as(who), fx.e1.id, WEEK);
+      expect(res.status, res.text).toBe(200);
+      expect(res.body.calls).toEqual([expect.objectContaining({ id: off.id, status: 'cancelled' })]);
+      expect(res.body.busy).toEqual([]);
+    }
+    // The Expert sees it on their own calendar too, and on "my calls" the team does.
+    expect((await calendarOf(await as(fx.e1), undefined, WEEK)).body.calls.map((c: { id: string }) => c.id)).toEqual([off.id]);
+    expect((await calendarOf(await as(fx.a1), undefined, WEEK)).body.calls.map((c: { id: string }) => c.id)).toEqual([off.id]);
+  });
+
+  it('are nothing at all to another team: no details and no busy time', async () => {
+    const off = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'cancelled', scheduledAt: '2027-02-01T09:00:00Z' });
+    for (const who of [fx.a3, fx.m2]) {
+      const res = await calendarOf(await as(who), fx.e1.id, WEEK);
+      expect(res.body.calls).toEqual([]);
+      expect(res.body.busy).toEqual([]);
+      expect(res.text).not.toContain(off.id);
+      const side = await (await as(who)).get('/calendar/experts', WEEK);
+      const column = side.body.experts.find((c: { expert: { id: string } }) => c.expert.id === fx.e1.id);
+      expect(column).toMatchObject({ calls: [], busy: [] });
+    }
+  });
+
+  it('leave the slot free to book again', async () => {
+    await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'cancelled', scheduledAt: '2027-02-01T09:00:00Z' });
+    const again = await makeCall(fx, { associate: fx.a3, expert: fx.e1, status: 'scheduled', scheduledAt: '2027-02-01T09:00:00Z' });
+    const res = await calendarOf(await as(fx.founder), fx.e1.id, WEEK);
+    expect(res.body.calls.map((c: { status: string }) => c.status).sort()).toEqual(['cancelled', 'scheduled']);
+    expect(res.body.calls.find((c: { id: string }) => c.id === again.id)).toBeTruthy();
+  });
+});

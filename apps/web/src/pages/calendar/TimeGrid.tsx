@@ -397,7 +397,8 @@ export function TimeGrid({
                             height: hPx - 2,
                             left: `calc(${pl.left * 100}% + 2px)`,
                             width: `calc(${pl.width * 100}% - 4px)`,
-                            zIndex: ev.type === 'call' ? 2 : 1,
+                            // A cancelled call sits under the calls that are still on.
+                            zIndex: ev.type === 'call' && ev.call.status !== 'cancelled' ? 2 : 1,
                             containerType: 'inline-size',
                           }}
                         >

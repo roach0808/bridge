@@ -235,7 +235,9 @@ function SingleDayList({
                   <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                     {time}
                   </Box>{' '}
-                  {ev.call.profile.name}
+                  <Box component="span" sx={ev.call.status === 'cancelled' ? { textDecoration: 'line-through' } : undefined}>
+                    {ev.call.profile.name}
+                  </Box>
                 </>
               }
               badge={<StatusBadge status={ev.call.status} compact />}
@@ -309,7 +311,8 @@ function SingleDayList({
 function ExpertDots({ cells }: { cells: Array<{ column: GridColumn; items: DayItem[] }> }) {
   const active = cells
     .map(({ column, items }) => {
-      const calls = items.filter((i) => i.kind === 'event' && i.event.type === 'call').length;
+      // A cancelled call leaves the Expert free, so it is not counted here.
+      const calls = items.filter((i) => i.kind === 'event' && i.event.type === 'call' && i.event.call.status !== 'cancelled').length;
       const busy = items.filter((i) => i.kind === 'event' && i.event.type === 'busy').length;
       const timeOff = items.some((i) => i.kind === 'allday' || (i.kind === 'event' && i.event.type === 'timeoff'));
       return { column, calls, busy, timeOff };

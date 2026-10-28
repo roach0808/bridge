@@ -326,7 +326,8 @@ export type ConflictReason = 'call' | 'busy' | 'timeoff';
 export function conflictsFor(source: CalendarSource, from: DateTime, to: DateTime): ConflictReason[] {
   const hit = (s: string, e: string) => DateTime.fromISO(s) < to && DateTime.fromISO(e) > from;
   const reasons = new Set<ConflictReason>();
-  if (source.calls.some((c) => hit(c.scheduledAt, c.endsAt))) reasons.add('call');
+  // A cancelled call stays on the calendar, but its time is free again.
+  if (source.calls.some((c) => c.status !== 'cancelled' && hit(c.scheduledAt, c.endsAt))) reasons.add('call');
   if (source.busy.some((b) => hit(b.startsAt, b.endsAt))) reasons.add('busy');
   if (source.occurrences.some((o) => o.kind === 'unavailable' && hit(o.startsAt, o.endsAt))) reasons.add('timeoff');
   return [...reasons];

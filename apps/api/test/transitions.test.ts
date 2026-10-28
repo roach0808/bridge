@@ -193,9 +193,11 @@ describe('cancelling a call (§4.5)', () => {
 
     await expectMoved(a1, fx.a1, call.id, 'scheduled', 'cancelled', false);
     expect((await transition(a1, booked.body.id, 'scheduled')).status).toBe(200);
-    // A cancelled call is off the calendar; its slot belongs to the new one.
+    // The cancelled call stays on the calendar, marked so; its slot belongs to the new one.
     const cal = await a1.get('/calendar', { from: '2027-04-01T00:00:00Z', to: '2027-04-02T00:00:00Z' });
-    expect(cal.body.calls.map((c: { id: string }) => c.id)).toEqual([booked.body.id]);
+    expect(cal.body.calls.map((c: { id: string; status: string }) => [c.id, c.status]).sort()).toEqual(
+      [[call.id, 'cancelled'], [booked.body.id, 'scheduled']].sort(),
+    );
   });
 });
 
