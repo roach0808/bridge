@@ -378,6 +378,19 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
 
   const { call, delivers } = await prisma.$transaction(async (tx) => {
     await lockCall(tx, current.id);
+    // The step goes into the history first, so the call read back already says since when it is in it.
+    if (unconfirm) {
+      await tx.callStatusHistory.create({
+        data: {
+          callId: current.id,
+          fromStatus: current.status,
+          toStatus: 'scheduled',
+          actorId: actor.id,
+          isOverride: false,
+          comment: 'Time changed — the Expert needs to confirm again',
+        },
+      });
+    }
     const updated = await tx.call
       .update({
         where: { id: current.id },
@@ -401,18 +414,6 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
         include: callInclude,
       })
       .catch(rethrowOverlap);
-    if (unconfirm) {
-      await tx.callStatusHistory.create({
-        data: {
-          callId: current.id,
-          fromStatus: current.status,
-          toStatus: 'scheduled',
-          actorId: actor.id,
-          isOverride: false,
-          comment: 'Time changed — the Expert needs to confirm again',
-        },
-      });
-    }
 
     const before = new Set(await participantIds(tx, current));
     const after = await participantIds(tx, updated);
@@ -541,9 +542,7 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
       const payee = runByAssociate ? current.associate.managerId : current.associateId;
       data.payeeManager = payee ? { connect: { id: payee } } : { disconnect: true };
     }
-    const updated = await tx.call
-      .update({ where: { id }, data, include: callInclude })
-      .catch(rethrowOverlap);
+    // The step goes into the history first, so the call read back already says since when it is in it.
     await tx.callStatusHistory.create({
       data: {
         callId: id,
@@ -554,6 +553,9 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
         comment: comment ?? null,
       },
     });
+    const updated = await tx.call
+      .update({ where: { id }, data, include: callInclude })
+      .catch(rethrowOverlap);
     // Each person hears about the step as they see it: Experts are not told about invoicing,
     // Associates and Managers not about the research step, and a step nobody sees tells them nothing.
     const people = await tx.user.findMany({

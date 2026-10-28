@@ -786,6 +786,15 @@ describe('when a call entered its status', () => {
     expect(list.body.items.find((c: { id: string }) => c.id === call.id).statusSince).toBe(day(6));
   });
 
+  it('the answer to a status change already says since when', async () => {
+    const call = await callThrough(['on_scheduling', 'scheduled']);
+    const before = Date.now();
+    const res = await (await as(fx.a1)).post(`/calls/${call.id}/transition`, { to: 'cancelled' });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.status).toBe('cancelled');
+    expect(Date.parse(res.body.statusSince)).toBeGreaterThanOrEqual(before - 1000);
+  });
+
   it('a new call is in its first status since it was created', async () => {
     const res = await (await as(fx.a1)).post('/calls', body());
     expect(res.status, res.text).toBe(201);

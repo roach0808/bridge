@@ -106,8 +106,9 @@ async function buildExpertCalendars(
 ): Promise<Map<string, ExpertCalendar>> {
   const [calls, blocks] = await Promise.all([
     prisma.call.findMany({
-      // A cancelled call is off the calendar: its slot is free again.
-      where: { expertId: { in: expertIds }, status: { not: 'cancelled' }, ...overlaps(from, to) },
+      // A cancelled call stays on the calendar, marked so, for those who can see it; its slot
+      // is free again, so it is never anyone's busy time (below).
+      where: { expertId: { in: expertIds }, ...overlaps(from, to) },
       select: calendarCallSelect,
       orderBy: { scheduledAt: 'asc' },
     }),
@@ -162,7 +163,7 @@ calendarRouter.get('/calendar', requireAuth, async (req, res) => {
 
   if (!expertId) {
     const calls = await prisma.call.findMany({
-      where: { AND: [visibleCallsWhere(actor), { status: { not: 'cancelled' } }, overlaps(from, to)] },
+      where: { AND: [visibleCallsWhere(actor), overlaps(from, to)] },
       select: calendarCallSelect,
       orderBy: { scheduledAt: 'asc' },
     });

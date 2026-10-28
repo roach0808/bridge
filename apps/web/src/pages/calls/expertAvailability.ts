@@ -23,7 +23,8 @@ export function availabilityFor(
   excludeCallId?: string,
 ): ExpertAvailability {
   const call = column.calls.find(
-    (c) => c.id !== excludeCallId && c.status !== 'on_scheduling' && overlaps(c.scheduledAt, c.endsAt, start, end),
+    // A cancelled call still shows on the calendar, but its time is free again.
+    (c) => c.id !== excludeCallId && c.status !== 'on_scheduling' && c.status !== 'cancelled' && overlaps(c.scheduledAt, c.endsAt, start, end),
   );
   if (call) return { state: 'call', label: call.profile.name };
   // A tentative call that is the one being edited shows up as `busy` for other viewers only

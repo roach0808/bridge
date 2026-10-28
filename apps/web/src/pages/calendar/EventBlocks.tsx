@@ -130,11 +130,16 @@ export function CallBlock({
   const tiny = heightPx < 26;
   const roomy = heightPx >= 56;
   const time = formatRange(call.scheduledAt, call.endsAt, zone);
+  // A cancelled call stays where it was booked, faded and struck through; its time is free.
+  const cancelled = call.status === 'cancelled';
+  const struck = cancelled ? { textDecoration: 'line-through' } : {};
   return (
     <BlockShell
       accent={color}
-      background={alpha(bg, 0.16)}
-      hoverBackground={alpha(bg, 0.26)}
+      background={alpha(bg, cancelled ? 0.07 : 0.16)}
+      hoverBackground={alpha(bg, cancelled ? 0.14 : 0.26)}
+      dashed={cancelled}
+      sx={cancelled ? { opacity: 0.85 } : undefined}
       onClick={() => onOpen(call.id)}
       label={`${call.profile.name}, ${time}, ${STATUS_LABELS[call.status]}`}
       tooltip={<CallTooltip call={call} zone={zone} />}
@@ -142,7 +147,7 @@ export function CallBlock({
       {tiny ? (
         <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
           <StatusBadge status={call.status} compact />
-          <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.35, fontSize: 11, minWidth: 0 }}>
+          <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.35, fontSize: 11, minWidth: 0, ...struck }}>
             {call.profile.name}{' '}
             <Box component="span" className="cal-sub" sx={{ color: 'text.secondary', fontWeight: 500 }}>
               {DateTime.fromISO(call.scheduledAt).setZone(zone).toFormat('h:mm')}
@@ -152,7 +157,7 @@ export function CallBlock({
       ) : (
         <>
           <Stack direction="row" spacing={0.5} alignItems="center" sx={{ minWidth: 0 }}>
-            <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: 12, minWidth: 0, flex: 1 }}>
+            <Typography variant="caption" noWrap component="div" sx={{ fontWeight: 600, lineHeight: 1.3, fontSize: 12, minWidth: 0, flex: 1, ...struck }}>
               {call.profile.name}
             </Typography>
             <StatusBadge status={call.status} />
