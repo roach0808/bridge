@@ -230,12 +230,13 @@ function SingleDayList({
               key={ev.key}
               kind="call"
               accent={STATUS_COLORS[ev.call.status]}
+              outlined={ev.call.status === 'cancelled'}
               title={
                 <>
                   <Box component="span" sx={{ color: 'text.secondary', fontWeight: 500 }}>
                     {time}
                   </Box>{' '}
-                  <Box component="span" sx={ev.call.status === 'cancelled' ? { textDecoration: 'line-through' } : undefined}>
+                  <Box component="span" sx={ev.call.status === 'cancelled' ? { textDecoration: 'line-through', color: 'text.secondary' } : undefined}>
                     {ev.call.profile.name}
                   </Box>
                 </>

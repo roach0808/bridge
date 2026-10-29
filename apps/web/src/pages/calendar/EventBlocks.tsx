@@ -27,6 +27,7 @@ function BlockShell({
   label,
   tooltip,
   dashed,
+  outlined,
   sx,
 }: {
   children: ReactNode;
@@ -37,6 +38,8 @@ function BlockShell({
   label: string;
   tooltip?: ReactNode;
   dashed?: boolean;
+  /** Empty, with a dotted outline all the way round: a call that was called off. */
+  outlined?: boolean;
   sx?: object;
 }) {
   const resolve = (v: string | ((t: Theme) => string), t: Theme) => (typeof v === 'function' ? v(t) : v);
@@ -69,13 +72,14 @@ function BlockShell({
         px: 0.75,
         py: 0.25,
         cursor: interactive ? 'pointer' : 'default',
-        background: resolve(background, t),
-        borderLeft: `3px ${dashed ? 'dashed' : 'solid'} ${resolve(accent, t)}`,
+        ...(outlined
+          ? { background: 'transparent', border: `1.5px dotted ${resolve(accent, t)}` }
+          : { background: resolve(background, t), borderLeft: `3px ${dashed ? 'dashed' : 'solid'} ${resolve(accent, t)}` }),
         transition: 'background-color 120ms, box-shadow 120ms',
         '&:hover': interactive && hoverBackground ? { background: resolve(hoverBackground, t) } : undefined,
         '&:focus-visible': { outline: `2px solid ${pal(t).primary.main}`, outlineOffset: 1 },
         // Narrow Expert sub-columns: keep only the title.
-        '@container (max-width: 72px)': { px: 0.5, borderLeftWidth: 2, '& .cal-sub': { display: 'none' } },
+        '@container (max-width: 72px)': { px: 0.5, ...(outlined ? {} : { borderLeftWidth: 2 }), '& .cal-sub': { display: 'none' } },
         ...sx,
       })}
     >
@@ -130,16 +134,16 @@ export function CallBlock({
   const tiny = heightPx < 26;
   const roomy = heightPx >= 56;
   const time = formatRange(call.scheduledAt, call.endsAt, zone);
-  // A cancelled call stays where it was booked, faded and struck through; its time is free.
+  // A cancelled call stays where it was booked: an empty box with a dotted outline, its
+  // name struck through, so it never reads as a call being scheduled. Its time is free.
   const cancelled = call.status === 'cancelled';
-  const struck = cancelled ? { textDecoration: 'line-through' } : {};
+  const struck = cancelled ? { textDecoration: 'line-through', color: 'text.secondary' } : {};
   return (
     <BlockShell
-      accent={color}
-      background={alpha(bg, cancelled ? 0.07 : 0.16)}
-      hoverBackground={alpha(bg, cancelled ? 0.14 : 0.26)}
-      dashed={cancelled}
-      sx={cancelled ? { opacity: 0.85 } : undefined}
+      accent={cancelled ? (t: Theme) => t.alpha(pal(t).text.primary, 0.45) : color}
+      background={alpha(bg, 0.16)}
+      hoverBackground={cancelled ? (t: Theme) => t.alpha(pal(t).text.primary, 0.04) : alpha(bg, 0.26)}
+      outlined={cancelled}
       onClick={() => onOpen(call.id)}
       label={`${call.profile.name}, ${time}, ${STATUS_LABELS[call.status]}`}
       tooltip={<CallTooltip call={call} zone={zone} />}
@@ -310,6 +314,7 @@ export function EventPill({
   onClick,
   tooltip,
   repeat,
+  outlined,
 }: {
   kind: 'call' | 'timeoff' | 'busy' | 'event';
   title: ReactNode;
@@ -320,6 +325,8 @@ export function EventPill({
   onClick?: () => void;
   tooltip?: ReactNode;
   repeat?: boolean;
+  /** Empty, with a dotted outline: a cancelled call. */
+  outlined?: boolean;
 }) {
   const pill = (
     <ButtonBase
@@ -353,11 +360,12 @@ export function EventPill({
           px: 0.75,
           borderRadius: '6px',
           justifyContent: 'flex-start',
-          background: base.bg,
-          borderLeft: `3px solid ${base.bar}`,
+          ...(outlined
+            ? { background: 'transparent', border: `1.5px dotted ${t.alpha(pal(t).text.primary, 0.45)}` }
+            : { background: base.bg, borderLeft: `3px solid ${base.bar}` }),
           cursor: onClick ? 'pointer' : 'default',
           overflow: 'hidden',
-          '&:hover': onClick && base.hover ? { background: base.hover } : undefined,
+          '&:hover': onClick && base.hover ? { background: outlined ? t.alpha(pal(t).text.primary, 0.04) : base.hover } : undefined,
           '&:focus-visible': { outline: `2px solid ${pal(t).primary.main}` },
         };
       }}
