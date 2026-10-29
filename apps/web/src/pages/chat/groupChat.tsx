@@ -260,6 +260,9 @@ export function useMentions({
 // --- Starting a group ------------------------------------------------------------------------
 
 /** Picks people from those who may be in a group (everyone but Experts). */
+/** The headings of the people picker; a Founder may also put Experts in a group. */
+const ROLE_GROUP: Record<UserRef['role'], string> = { founder: 'Founders', manager: 'Managers', associate: 'Associates', expert: 'Experts' };
+
 function PeoplePicker({ value, onChange, exclude = [], label = 'People' }: { value: UserRef[]; onChange: (people: UserRef[]) => void; exclude?: string[]; label?: string }) {
   const candidates = useQuery({ queryKey: qk.chat.groupCandidates, queryFn: api.chat.groupCandidates });
   const options = (candidates.data ?? []).filter((u) => !exclude.includes(u.id));
@@ -272,7 +275,7 @@ function PeoplePicker({ value, onChange, exclude = [], label = 'People' }: { val
       onChange={(_e, v) => onChange(v)}
       getOptionLabel={(o) => o.nickname}
       isOptionEqualToValue={(a, b) => a.id === b.id}
-      groupBy={(o) => (o.role === 'founder' ? 'Founders' : o.role === 'manager' ? 'Managers' : 'Associates')}
+      groupBy={(o) => ROLE_GROUP[o.role]}
       filterSelectedOptions
       renderOption={({ key, ...props }, o) => (
         <li key={key} {...props}>

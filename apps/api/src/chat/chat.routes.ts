@@ -4,6 +4,7 @@ import {
   canChat,
   type TeamMember,
   canJoinGroups,
+  canPutInGroup,
   canRemoveFromGroup,
   createGroupSchema,
   GROUP_MAX_MEMBERS,
@@ -431,23 +432,27 @@ function assertRuns(c: ConversationRow, actor: Actor) {
 
 /**
  * The people to put in a group: each must be an active Founder, Manager or
- * Associate. A group never reaches into another team (§2.4): unless the caller
- * is a Founder, everyone in it — the caller, those already there and those
- * joining — must be people each newcomer may chat with. A group a Founder made
- * across teams is theirs to grow.
+ * Associate — or an Expert, when a Founder puts them there (`canPutInGroup`).
+ * A group never reaches into another team (§2.4): unless the caller is a
+ * Founder, everyone in it — the caller, those already there and those joining —
+ * must be people each newcomer may chat with freely. So a group a Founder made
+ * across teams, or with an Expert in it, is theirs to grow.
  */
 async function groupPeople(actor: Actor, ids: string[], members: TeamMember[] = []) {
   const people = await prisma.user.findMany({ where: { id: { in: ids } }, select: { ...userRefSelect, isActive: true, managerId: true } });
   const wrong = ids.filter((id) => {
     const u = people.find((p) => p.id === id);
-    return !u || !u.isActive || !canJoinGroups(u.role as Role);
+    return !u || !u.isActive || !canPutInGroup(actor, { role: u.role as Role });
   });
   if (wrong.length) {
-    throw badRequest('Groups are for active Founders, Managers and Associates', { issues: wrong.map(() => ({ path: 'memberIds', message: 'Cannot be in a group' })) });
+    throw badRequest(
+      actor.role === 'founder' ? 'Only active people can be in a group' : 'Groups are for active Founders, Managers and Associates; only a Founder adds an Expert',
+      { issues: wrong.map(() => ({ path: 'memberIds', message: 'Cannot be in a group' })) },
+    );
   }
   if (actor.role !== 'founder') {
     const everyone = [actor, ...members, ...people.map(asMember)];
-    const outside = people.some((p) => everyone.some((q) => q.id !== p.id && !canChat(asMember(p), q)));
+    const outside = people.some((p) => everyone.some((q) => q.id !== p.id && chatModeOf(asMember(p), q) !== 'free'));
     if (outside) throw forbidden('A group can only hold people who may chat with each other');
   }
   // In the order they were picked.
@@ -480,19 +485,24 @@ async function groupChanged(res: import('express').Response, actor: Actor, id: s
 /** Everyone the caller may put in a group. */
 chatRouter.get('/chat/group-candidates', async (req, res) => {
   const actor = actorOf(req);
-  if (!canJoinGroups(actor.role)) throw forbidden('Experts are not in groups');
+  if (!canJoinGroups(actor.role)) throw forbidden('Experts do not start groups');
   const users = await prisma.user.findMany({
-    where: { isActive: true, id: { not: actor.id }, role: { not: 'expert' } },
+    where: { isActive: true, id: { not: actor.id } },
     select: { ...userRefSelect, managerId: true },
     orderBy: [{ role: 'asc' }, { nickname: 'asc' }],
   });
-  res.json(users.filter((u) => canChat(actor, asMember(u))).map(toUserRef));
+  // A Founder may put anyone in a group, Experts too; everyone else the people they chat with freely.
+  res.json(
+    users
+      .filter((u) => canPutInGroup(actor, { role: u.role as Role }) && (actor.role === 'founder' || chatModeOf(actor, asMember(u)) === 'free'))
+      .map(toUserRef),
+  );
 });
 
 /** Starts a group: the caller owns it, with the people they picked as members. */
 chatRouter.post('/chat/groups', async (req, res) => {
   const actor = actorOf(req);
-  if (!canJoinGroups(actor.role)) throw forbidden('Experts are not in groups');
+  if (!canJoinGroups(actor.role)) throw forbidden('Experts do not start groups');
   const { title, memberIds } = parseBody(createGroupSchema, req);
   const people = await groupPeople(actor, memberIds.filter((id) => id !== actor.id));
   if (!people.length) throw badRequest('Add at least one person', { issues: [{ path: 'memberIds', message: 'Add at least one person' }] });

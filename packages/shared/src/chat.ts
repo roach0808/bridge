@@ -79,8 +79,16 @@ export type GroupRole = (typeof GROUP_ROLES)[number];
 export const GROUP_TITLE_MAX = 64;
 export const GROUP_MAX_MEMBERS = 200;
 
-/** Who may be in a group, and so start one: everyone but Experts. */
+/** Who may start a group: everyone but Experts. */
 export const canJoinGroups = (role: Role): boolean => role !== 'expert';
+
+/**
+ * Who may put someone in a group: anyone who may start one (so never an
+ * Expert) puts Founders, Managers and Associates there; an Expert is put there
+ * by a Founder only, and then talks freely in it like everyone else.
+ */
+export const canPutInGroup = (actor: { role: Role }, person: { role: Role }): boolean =>
+  canJoinGroups(actor.role) && (person.role !== 'expert' || actor.role === 'founder');
 
 /** Owners and admins run the group. */
 export const runsGroup = (role: GroupRole | null | undefined): boolean => role === 'owner' || role === 'admin';
