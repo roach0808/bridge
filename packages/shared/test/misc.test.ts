@@ -6,6 +6,7 @@ import {
   associateShareOf,
   shareOf,
   canChat,
+  canPutInGroup,
   chatModeOf,
   type ChatMode,
   TODO_STATUSES,
@@ -240,6 +241,19 @@ describe('canChat', () => {
   });
   it('nobody chats with themselves', () => {
     expect(canChat(people.f, people.f)).toBe(false);
+  });
+});
+
+describe('canPutInGroup', () => {
+  it('Founders, Managers and Associates by anyone who starts groups; an Expert by a Founder only', () => {
+    for (const who of [people.f, people.m, people.a]) {
+      expect(canPutInGroup(who, people.b)).toBe(true);
+      expect(canPutInGroup(who, people.m2)).toBe(true);
+    }
+    expect(canPutInGroup(people.f, people.e)).toBe(true);
+    expect(canPutInGroup(people.m, people.e)).toBe(false);
+    expect(canPutInGroup(people.a, people.e)).toBe(false);
+    expect(canPutInGroup(people.e, people.a)).toBe(false);
   });
 });
 

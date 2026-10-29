@@ -44,7 +44,7 @@ describe('starting a group', () => {
     await group(fx.a1, [fx.a2, fx.m1]);
   });
 
-  it('keeps Experts out, and wants a name and someone to talk to', async () => {
+  it('Experts start none and only a Founder adds them; a group wants a name and someone to talk to', async () => {
     const e1 = await as(fx.e1);
     expectError(await e1.post('/chat/groups', { title: 'Mine', memberIds: [fx.a1.id] }), 403);
     expectError(await e1.get('/chat/group-candidates'), 403);
@@ -58,9 +58,44 @@ describe('starting a group', () => {
     expect(candidates.map((u) => u.id).sort()).toEqual([fx.founder.id, fx.m2.id, fx.a1.id, fx.a2.id].sort());
     const a1Candidates = (await (await as(fx.a1)).get('/chat/group-candidates')).body as Array<{ id: string }>;
     expect(a1Candidates.map((u) => u.id).sort()).toEqual([fx.founder.id, fx.m1.id, fx.a2.id].sort());
-    // The Founder may put anyone but an Expert in a group.
+    // The Founder may put anyone in a group, Experts too.
     const founderCandidates = (await (await as(fx.founder)).get('/chat/group-candidates')).body as Array<{ id: string }>;
-    expect(founderCandidates.map((u) => u.id).sort()).toEqual([fx.m1.id, fx.m2.id, fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id].sort());
+    expect(founderCandidates.map((u) => u.id).sort()).toEqual(
+      [fx.m1.id, fx.m2.id, fx.a1.id, fx.a2.id, fx.a3.id, fx.a4.id, fx.e1.id, fx.e2.id, fx.e3.id].sort(),
+    );
+  });
+
+  it('a Founder’s group with Experts: everyone talks freely in it, and only a Founder grows it', async () => {
+    const { client: founder, id, body } = await group(fx.founder, [fx.e1, fx.a1, fx.a3], 'Pumps experts');
+    expect(body).toMatchObject({ mode: 'free', canSend: true, group: { memberCount: 4 } });
+
+    // The Expert finds it in their chats and writes freely — no set scheduling sentences.
+    const e1 = await as(fx.e1);
+    expect(await listed(e1, id)).toBeTruthy();
+    const said = await send(e1, id, { body: 'Happy to walk through the pump market, @AssocOne.' });
+    expect(said.status, said.text).toBe(201);
+    expect(said.body.mentionIds).toEqual([fx.a1.id]);
+    expect((await (await as(fx.a1)).get(`/chat/conversations/${id}`)).body).toMatchObject({ mode: 'free', canSend: true });
+    expect((await send(await as(fx.a3), id, { body: 'Thanks!' })).status).toBe(201);
+    expect((await messages(founder, id)).filter((m) => m.kind === 'text').map((m) => m.sender.id)).toEqual([fx.e1.id, fx.a3.id]);
+
+    // Nobody else adds an Expert, even to a group of their own…
+    const m1 = await as(fx.m1);
+    expectError(await m1.post('/chat/groups', { title: 'With an Expert', memberIds: [fx.a1.id, fx.e2.id] }), 400);
+    // …or grows the Founder's group with an Expert in it, even as its admin.
+    await founder.put(`/chat/groups/${id}/members/${fx.a1.id}/role`, { role: 'admin' });
+    expectError(await (await as(fx.a1)).post(`/chat/groups/${id}/members`, { userIds: [fx.a2.id] }), 403);
+    expectError(await (await as(fx.a1)).post(`/chat/groups/${id}/members`, { userIds: [fx.e2.id] }), 400);
+    // An Expert still starts none.
+    expectError(await e1.post('/chat/groups', { title: 'Mine', memberIds: [fx.founder.id] }), 403);
+
+    // The Founder adds another Expert; any Expert can leave.
+    const added = await founder.post(`/chat/groups/${id}/members`, { userIds: [fx.e2.id] });
+    expect(added.status, added.text).toBe(200);
+    expect(added.body.memberCount).toBe(5);
+    expect((await e1.delete(`/chat/groups/${id}/members/${fx.e1.id}`)).status).toBeLessThan(300);
+    // Gone for them, as for anyone who leaves.
+    expectError(await send(e1, id, { body: 'still here?' }), 404);
   });
 
   it('holds only people who may chat with each other: no group reaches into another team', async () => {

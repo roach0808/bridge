@@ -136,7 +136,7 @@ grouped under Managers; they are assigned per Call.
 | Delete own chat message; react; send pictures | ✓ | ✓ | ✓ | ✓ |
 | Clear a chat's whole history | the two people in it | same | same | same |
 | Chat one-to-one (§6.11) | anyone | Founders, Managers, own team's Associates; Experts in set scheduling messages | Founders, own Manager, teammates; Experts in set scheduling messages | Founders; Managers and Associates in set scheduling messages |
-| Start a group chat, be in one (§6.11c) | ✓ | ✓ (with people they may chat with) | ✓ (with people they may chat with) | |
+| Start a group chat, be in one (§6.11c) | ✓ (with anyone, Experts included) | ✓ (with people they may chat with) | ✓ (with people they may chat with) | be in one a Founder puts them in |
 | Give tasks (chat message or New task) | ✓ anyone | ✓ own team's Associates | | |
 | Remove a task (§6.11) | ✓ any task, at any stage | once it is completed, if they gave it or it is theirs | same | same |
 | Write notes on a task (§6.11) | ✓ any task | tasks they gave or own, and their team's Associates' | tasks they gave or own | own tasks |
@@ -1562,8 +1562,13 @@ page, which only a Founder is shown.
 ### 6.11c Group chats **[Implementation]**
 
 A group is a conversation (`kind: group`) with a title, an optional picture and
-members, instead of two people. Everyone but Experts may start one and be in one
-(`canJoinGroups`); Experts keep their one-to-one chats. Messages, pictures,
+members, instead of two people. Everyone but Experts may start one
+(`canJoinGroups`). An Expert is in a group only when a **Founder** puts them
+there (`canPutInGroup`) — when starting it or adding them later — and then
+writes freely in it like everyone else (their one-to-one chats stay set
+scheduling messages). Anyone else adds only people every member may chat with
+freely, so a group with an Expert in it, like one a Founder made across teams,
+grows only by a Founder's hand. Messages, pictures,
 reactions, deleting and live updates work as in any chat; ringing and turning a
 message into a task are for one-to-one chats only (400).
 
@@ -1589,12 +1594,12 @@ message into a task are for one-to-one chats only (400).
 
 | Method | Path | Who | Notes |
 |---|---|---|---|
-| GET | /chat/group-candidates | everyone but Experts | Active Founders, Managers and Associates |
+| GET | /chat/group-candidates | everyone but Experts | Active people the caller may put in a group: everyone for a Founder, Experts included; for anyone else the Founders, Managers and Associates they chat with freely |
 | POST | /chat/groups | everyone but Experts | { title (≤ 64), memberIds }: the caller owns it (201: the conversation) |
 | GET | /chat/groups/:id | members | { title, photoId, memberCount, myRole, createdBy, members: [{ user (+ isActive), role, joinedAt }] }, owner first, then admins |
 | PATCH | /chat/groups/:id | owner, admins | { title } |
 | PUT / DELETE | /chat/groups/:id/photo | owner, admins | { dataUrl } (≤ 400 KB), or remove it |
-| POST | /chat/groups/:id/members | owner, admins | { userIds }: anyone already in it is skipped; Experts are 400 |
+| POST | /chat/groups/:id/members | owner, admins | { userIds }: anyone already in it is skipped; an Expert is 400 unless a Founder adds them; anyone a member may not chat with freely is 403 unless a Founder adds them |
 | DELETE | /chat/groups/:id/members/:userId | the member themselves (leaving); owner (anyone); admins (plain members) | 204 when the caller is no longer in it |
 | PUT | /chat/groups/:id/members/:userId/role | owner | { role: admin \| member } |
 | DELETE | /chat/groups/:id | owner | Deletes it with every message and picture |
@@ -2266,6 +2271,7 @@ Container alternative:
 | 2026-10-27 | The Profiles **Platform status** tab sorts by **total income**, **onboarded date**, platforms registered or name, and shows those values; Profiles carry `totalIncome` for Founders and Managers |
 | 2026-10-27 | The **Platform status** cells show **applied projects / delivered calls** (green: registered, red: banned, empty: not registered) in place of dots. Applied projects are 0 until applications are recorded |
 | 2026-10-28 | **Cancelled calls stay on the calendar**, marked Cancelled (faded, struck through), for those who could see them; their slot stays free and they are nobody's busy time |
+| 2026-10-29 | A **Founder's group chats can include Experts**, alongside Associates, Managers and Founders. Only a Founder puts an Expert in a group, and such a group grows only by a Founder's hand; the Expert writes freely in it. Cancelled calls on the calendar are an empty dotted outline |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |
