@@ -10,7 +10,6 @@ import {
   Checkbox,
   CircularProgress,
   Collapse,
-  Grid,
   IconButton,
   LinearProgress,
   Link,
@@ -27,7 +26,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, bankLabel, type CallDTO, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
+import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, bankLabel, type CallDTO, type FinanceCallsPage, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
@@ -40,7 +39,7 @@ import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { formatUsd, inZone } from '@/lib/time';
 import { ColumnFilter } from '@/components/ColumnFilter';
-import { StatTile, TableSurface, useIsPhone } from '../admin/adminShared';
+import { TableSurface, useIsPhone } from '../admin/adminShared';
 import { PaidMark } from './money';
 
 /** Every call with something still to pay; paid ones are on the Payment records tab. */
@@ -52,7 +51,7 @@ const QUERY: FinanceCallsQuery = { paid: 'unpaid', page: 1, pageSize: 1000 };
  * and one query in both places. The Founder and Managers see each call's rate, invoice and
  * real income with the Expert and the Manager; an Associate their part; an
  * Expert their pay. Every column filters, several values at a time, and the
- * totals above follow the filters. Rows can be selected and marked paid by
+ * top row totals every row the filters leave, on all pages. Rows can be selected and marked paid by
  * whoever pays.
  */
 export function FinanceTab() {
@@ -113,9 +112,29 @@ export function FinanceTab() {
   if (error) return <ErrorState error={error} onRetry={refetch} />;
   if (isLoading || !data) return <LoadingRows rows={8} />;
 
+  // The same page controls above and below the table.
+  const pager = (
+    <TablePagination
+      component="div"
+      sx={{ '& .MuiTablePagination-toolbar': { px: 0, minHeight: 40 }, '& .MuiTablePagination-selectLabel': { display: { xs: 'none', sm: 'block' } } }}
+      count={rows.length}
+      page={Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1))}
+      rowsPerPage={pageSize}
+      rowsPerPageOptions={[25, 50, 100, 200]}
+      onPageChange={(_, p) => setPage(p)}
+      onRowsPerPageChange={(e) => {
+        setPageSize(Number(e.target.value));
+        setPage(0);
+      }}
+    />
+  );
+  const firstSerial = page * pageSize + 1;
+  // Each column's share of the table's width, so every row fits on the screen.
+  const widthOf = (weight: number) => `${(weight / (columns.reduce((t, col) => t + (col.width ?? 80), 0) + SERIAL_WIDTH + (canSelect ? CHECK_WIDTH : 0))) * 100}%`;
+
   return (
     <Box>
-      <Totals rows={rows} role={me.role} />
+      <Unpriced rows={rows} role={me.role} />
 
       {all.length === 0 ? (
         <Card>
@@ -127,7 +146,7 @@ export function FinanceTab() {
         </Card>
       ) : (
         <>
-          <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mb: 1.5, minHeight: 32 }}>
+          <Stack direction="row" spacing={1} alignItems="center" useFlexGap flexWrap="wrap" sx={{ mb: 1, minHeight: 32 }}>
             <Typography variant="body2" color="text.secondary" sx={{ fontVariantNumeric: 'tabular-nums' }}>
               {filtering ? `${rows.length} of ${all.length} calls` : `${all.length} call${all.length === 1 ? '' : 's'}`}
             </Typography>
@@ -140,6 +159,7 @@ export function FinanceTab() {
                 Clear filters
               </Button>
             )}
+            {rows.length > 0 && <Box sx={{ ml: 'auto' }}>{pager}</Box>}
           </Stack>
 
           {canSelect && selectedRows.length > 0 && (
@@ -154,13 +174,21 @@ export function FinanceTab() {
               </Card>
             ) : phone ? (
               <Stack spacing={1.25}>
-                {shown.map((c) => (
-                  <FinanceCard key={c.id} call={c} columns={columns} selectable={canSelect} selected={selected.has(c.id)} onToggle={() => toggle(c.id)} />
+                <TotalsCard rows={rows} columns={columns} />
+                {shown.map((c, i) => (
+                  <FinanceCard key={c.id} call={c} serial={firstSerial + i} columns={columns} selectable={canSelect} selected={selected.has(c.id)} onToggle={() => toggle(c.id)} />
                 ))}
               </Stack>
             ) : (
-              <TableSurface minWidth={me.role === 'founder' ? 1300 : me.role === 'manager' ? 1100 : 800}>
-                <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
+              <TableSurface minWidth={me.role === 'founder' ? 960 : me.role === 'manager' ? 860 : 700}>
+                <Table size="small" sx={FIT_TABLE}>
+                  <colgroup>
+                    {canSelect && <col style={{ width: widthOf(CHECK_WIDTH) }} />}
+                    <col style={{ width: widthOf(SERIAL_WIDTH) }} />
+                    {columns.map((col) => (
+                      <col key={col.key} style={{ width: widthOf(col.width ?? 80) }} />
+                    ))}
+                  </colgroup>
                   <TableHead>
                     <TableRow>
                       {canSelect && (
@@ -174,9 +202,10 @@ export function FinanceTab() {
                           />
                         </TableCell>
                       )}
+                      <TableCell align="right">#</TableCell>
                       {columns.map((col) => (
-                        <TableCell key={col.key} align={col.align} sx={{ minWidth: col.width, whiteSpace: 'nowrap', ...(col.pinned ? PINNED_CELL : {}) }}>
-                          <Stack direction="row" alignItems="center" spacing={0.25} justifyContent={col.align === 'right' ? 'flex-end' : 'flex-start'}>
+                        <TableCell key={col.key} align={col.align} data-col={col.key}>
+                          <Stack direction="row" alignItems="center" flexWrap="wrap" justifyContent={col.align === 'right' ? 'flex-end' : 'flex-start'}>
                             <span>{col.label}</span>
                             <ColumnFilter label={col.label} options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
                           </Stack>
@@ -185,27 +214,33 @@ export function FinanceTab() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {shown.map((c) => (
-                      <FinanceRow key={c.id} call={c} columns={columns} selectable={canSelect} selected={selected.has(c.id)} onToggle={() => toggle(c.id)} />
+                    {/* The totals of every row the filters leave, on all pages. */}
+                    <TableRow sx={{ '& td': { bgcolor: 'action.hover', fontWeight: 600, verticalAlign: 'top' } }}>
+                      {canSelect && <TableCell />}
+                      <TableCell />
+                      {columns.map((col, i) => (
+                        <TableCell key={col.key} align={col.align} data-col={col.key}>
+                          {i === 0 ? (
+                            <>
+                              Total
+                              <Typography variant="caption" color="text.secondary" component="div">
+                                {plural(rows.length, 'call')}
+                              </Typography>
+                            </>
+                          ) : (
+                            col.total?.(rows)
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                    {shown.map((c, i) => (
+                      <FinanceRow key={c.id} call={c} serial={firstSerial + i} columns={columns} selectable={canSelect} selected={selected.has(c.id)} onToggle={() => toggle(c.id)} />
                     ))}
                   </TableBody>
                 </Table>
               </TableSurface>
             )}
-            {rows.length > 0 && (
-              <TablePagination
-                component="div"
-                count={rows.length}
-                page={Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1))}
-                rowsPerPage={pageSize}
-                rowsPerPageOptions={[25, 50, 100, 200]}
-                onPageChange={(_, p) => setPage(p)}
-                onRowsPerPageChange={(e) => {
-                  setPageSize(Number(e.target.value));
-                  setPage(0);
-                }}
-              />
-            )}
+            {rows.length > 0 && pager}
           </Box>
         </>
       )}
@@ -222,9 +257,10 @@ interface Column {
   key: string;
   label: string;
   align?: 'right';
+  /** Its share of the table's width, against the other columns'. */
   width?: number;
-  /** Stays at the table's right edge while the rest scrolls sideways. */
-  pinned?: boolean;
+  /** What the top row says for every row the filters leave, on all pages. */
+  total?: (rows: CallDTO[]) => ReactNode;
   /** What the column's filter matches: the cell as text. */
   value: (c: CallDTO) => string;
   /** How the filter lists its values (defaults to the text). */
@@ -232,12 +268,25 @@ interface Column {
   render: (c: CallDTO) => ReactNode;
 }
 
-/** Keeps a column in view at the table's right edge. */
-const PINNED_CELL = { position: 'sticky', right: 0, zIndex: 1, bgcolor: 'background.paper', borderLeft: 1, borderLeftColor: 'divider' } as const;
+const CHECK_WIDTH = 30;
+const SERIAL_WIDTH = 26;
+
+/** Tight, and wrapping rather than scrolling: a whole row is in view at once. */
+const FIT_TABLE = {
+  tableLayout: 'fixed',
+  '& th, & td': { px: 0.625, fontSize: 12.5 },
+  '& td': { overflowWrap: 'anywhere' },
+  '& th': { fontSize: 11.5, lineHeight: 1.2 },
+  '& td .MuiTypography-body2': { fontSize: 12.5, lineHeight: 1.3 },
+  '& td .MuiTypography-caption': { fontSize: 11 },
+  '& th:first-of-type, & td:first-of-type': { pl: 0.75 },
+  '& .MuiCheckbox-root': { p: 0.25 },
+  '& th .MuiIconButton-root': { p: 0.125 },
+  // Keeps it clear of the right-aligned money beside it.
+  '& [data-col="bank"]': { pl: 1.5 },
+} as const;
 
 const money = (n: number | null | undefined) => (n == null ? NONE : formatUsd(n));
-const unpaid = (line: { amount: number | null; paidAt: string | null } | null | undefined): line is { amount: number; paidAt: null } =>
-  Boolean(line && line.amount !== null && !line.paidAt);
 
 /** A call's rate: the special rate for this call, or the Profile's rate on the platform. */
 const rateOf = (c: CallDTO) => c.rateOverride ?? c.platformRate;
@@ -249,6 +298,41 @@ function Num({ children, muted }: { children: ReactNode; muted?: boolean }) {
     </Typography>
   );
 }
+
+/** A number in the top row, with what it needs explaining underneath. */
+function Total({ value, notes = [] }: { value: string; notes?: string[] }) {
+  return (
+    <>
+      <Typography variant="body2" component="div" fontWeight={600} sx={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+        {value}
+      </Typography>
+      {notes.map((note) => (
+        <Typography key={note} variant="caption" color="text.secondary" component="div" sx={{ lineHeight: 1.25, fontVariantNumeric: 'tabular-nums' }}>
+          {note}
+        </Typography>
+      ))}
+    </>
+  );
+}
+
+/**
+ * What a column of pay adds up to, known or expected. Someone already paid on a
+ * call stays in its row while another is still waiting, so what is left to pay
+ * is said underneath when it is not the whole sum.
+ */
+function PayTotal({ rows, line, word }: { rows: CallDTO[]; line: (c: CallDTO) => { amount: number | null; expected?: number | null; paidAt: string | null } | null | undefined; word: string }) {
+  const lines = rows.map(line).filter((l) => l != null);
+  const known = lines.reduce((t, l) => t + (l.amount ?? 0), 0);
+  const expected = lines.reduce((t, l) => t + (l.amount === null ? (l.expected ?? 0) : 0), 0);
+  const left = lines.reduce((t, l) => t + (l.paidAt ? 0 : (l.amount ?? 0)), 0);
+  const notes = [...(left !== known ? [`${formatUsd(left)} ${word}`] : []), ...(expected > 0 ? [`${formatUsd(expected)} exp.`] : [])];
+  return <Total value={formatUsd(known + expected)} notes={notes} />;
+}
+
+const hoursAndMinutes = (minutes: number) => {
+  const h = Math.floor(minutes / 60);
+  return h ? `${h}h ${minutes % 60}m` : `${minutes} min`;
+};
 
 /** An amount someone is paid, with whether it was: "$180.00 ✓". Expected shares say so. */
 function Pay({ line, zone }: { line: { amount: number | null; expected?: number | null; paidAt: string | null }; zone: string }) {
@@ -273,7 +357,7 @@ function Pay({ line, zone }: { line: { amount: number | null; expected?: number 
 function PersonPay({ name, children }: { name: string | null; children?: ReactNode }) {
   return (
     <Stack spacing={0.25}>
-      <Typography variant="body2" noWrap>
+      <Typography variant="body2">
         {name ?? <Typography component="span" variant="caption" color="text.secondary">None</Typography>}
       </Typography>
       {children}
@@ -291,14 +375,19 @@ function NoteCell({ call: c }: { call: CallDTO }) {
   const [draft, setDraft] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (notes: string) => api.calls.update(c.id, { notes }),
-    // Waits for the list, so the row never flashes the old note.
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: qk.calls.all });
+    onSuccess: (saved) => {
+      // Straight into the list, so the row never flashes the old note while it refreshes.
+      queryClient.setQueriesData<FinanceCallsPage>({ queryKey: ['calls', 'finance'] }, (page) =>
+        page && { ...page, items: page.items.map((row) => (row.id === saved.id ? saved : row)) },
+      );
+      void queryClient.invalidateQueries({ queryKey: qk.calls.all });
       setDraft(null);
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
+  // Saving disables the field, and the blur that follows must not save it again.
   const finish = (text: string) => {
+    if (save.isPending || save.isSuccess) return;
     if (text.trim() === (c.notes ?? '').trim()) setDraft(null);
     else save.mutate(text);
   };
@@ -328,13 +417,13 @@ function NoteCell({ call: c }: { call: CallDTO }) {
           }}
           placeholder="Add a note"
           slotProps={{ htmlInput: { 'aria-label': `Note on the call with ${c.profile.name}`, maxLength: 10000, sx: { fontSize: 13 } } }}
-          sx={{ minWidth: 170 }}
         />
       </Box>
     );
   }
   const open = (e: { stopPropagation: () => void }) => {
     e.stopPropagation();
+    save.reset();
     setDraft(c.notes ?? '');
   };
   return (
@@ -364,21 +453,28 @@ function NoteCell({ call: c }: { call: CallDTO }) {
 function columnsFor(role: Role, zone: string): Column[] {
   const when = (c: CallDTO) => inZone(c.scheduledAt, zone);
   const base: Column[] = [
-    { key: 'profile', label: 'Profile', width: 110, value: (c) => c.profile.name, render: (c) => <Typography variant="body2" fontWeight={550}>{c.profile.name}</Typography> },
-    { key: 'platform', label: 'Platform', width: 100, value: (c) => c.platform.name, render: (c) => c.platform.name },
+    { key: 'profile', label: 'Profile', width: 92, value: (c) => c.profile.name, render: (c) => <Typography variant="body2" fontWeight={550}>{c.profile.name}</Typography> },
+    { key: 'platform', label: 'Platform', width: 74, value: (c) => c.platform.name, render: (c) => c.platform.name },
     {
       key: 'time',
       label: 'Time',
-      width: 120,
+      width: 56,
       // Filtered by day; shown to the minute.
       value: (c) => when(c).toFormat('MM/dd/yyyy'),
       sort: (c) => -when(c).startOf('day').toMillis(),
-      render: (c) => <Num>{when(c).toFormat('MM/dd hh:mm a')}</Num>,
+      render: (c) => (
+        <Stack>
+          <Num>{when(c).toFormat('MM/dd')}</Num>
+          <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+            {when(c).toFormat('h:mm a')}
+          </Typography>
+        </Stack>
+      ),
     },
     {
       key: 'status',
       label: 'Status',
-      width: 100,
+      width: 94,
       value: (c) => STATUS_LABELS[c.status],
       sort: (c) => CALL_STATUSES.indexOf(c.status),
       // A dot and words that may wrap: a pill would push the money columns off the page.
@@ -397,15 +493,13 @@ function columnsFor(role: Role, zone: string): Column[] {
   const bank: Column = {
     key: 'bank',
     label: 'Bank',
-    width: 120,
+    width: 68,
     value: (c) => (c.bank ? bankLabel(c.bank) : NONE),
     render: (c) =>
       c.bank ? (
         <Stack spacing={0.25}>
-          <Typography variant="body2" noWrap>
-            {bankLabel(c.bank)}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ lineHeight: 1.3 }}>
+          <Typography variant="body2">{bankLabel(c.bank)}</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.3 }}>
             {c.bank.nickname ? `${c.bank.bankType} ··${c.bank.accountLast4}` : c.bank.bankType}
             {!c.bank.isActive && ' · deactivated'}
           </Typography>
@@ -418,9 +512,10 @@ function columnsFor(role: Role, zone: string): Column[] {
     key: 'duration',
     label: 'Duration',
     align: 'right',
-    width: 80,
+    width: 60,
     value: (c) => (c.actualDurationMinutes === null ? NONE : `${c.actualDurationMinutes} min`),
     sort: (c) => c.actualDurationMinutes ?? 0,
+    total: (rows) => <Total value={hoursAndMinutes(sumOf(rows, (c) => c.actualDurationMinutes))} />,
     render: (c) => <Num>{c.actualDurationMinutes === null ? NONE : `${c.actualDurationMinutes} min`}</Num>,
   };
 
@@ -432,7 +527,7 @@ function columnsFor(role: Role, zone: string): Column[] {
         key: 'rate',
         label: 'Rate',
         align: 'right',
-        width: 80,
+        width: 62,
         value: (c) => (rateOf(c) === null ? NONE : `${formatUsd(rateOf(c))}/h`),
         sort: (c) => rateOf(c) ?? 0,
         render: (c) =>
@@ -441,7 +536,7 @@ function columnsFor(role: Role, zone: string): Column[] {
           ) : (
             <Stack alignItems="flex-end">
               <Num>{formatUsd(rateOf(c))}/h</Num>
-              {c.rateOverride !== null && <Typography variant="caption" color="text.secondary" noWrap>special rate</Typography>}
+              {c.rateOverride !== null && <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.2 }}>special rate</Typography>}
             </Stack>
           ),
       },
@@ -450,34 +545,39 @@ function columnsFor(role: Role, zone: string): Column[] {
         key: 'invoice',
         label: 'Invoice amount',
         align: 'right',
-        width: 110,
+        width: 76,
         value: (c) => money(c.expectedPrice),
         sort: (c) => c.expectedPrice ?? 0,
+        total: (rows) => <Total value={formatUsd(sumOf(rows, (c) => c.expectedPrice))} />,
         render: (c) => <Num>{money(c.expectedPrice)}</Num>,
       },
       {
         key: 'real',
         label: 'Real income',
         align: 'right',
-        width: 100,
+        width: 68,
         value: (c) => money(c.realIncome),
         sort: (c) => c.realIncome ?? 0,
+        total: (rows) => <Total value={formatUsd(sumOf(rows, (c) => c.realIncome))} />,
         render: (c) => <Num muted={c.realIncome === null}>{money(c.realIncome)}</Num>,
       },
       bank,
       {
         key: 'expert',
         label: 'Expert',
-        width: 100,
+        width: 78,
         value: (c) => c.expert?.nickname ?? NONE,
+        // What Managers see of the Expert has no money in it.
+        total: founder ? (rows) => <PayTotal rows={rows} line={(c) => c.payouts.expert} word="to pay" /> : undefined,
         // Managers see who the Expert is, never what they are paid.
         render: (c) => <PersonPay name={c.expert?.nickname ?? null}>{founder && c.payouts.expert && <Pay line={c.payouts.expert} zone={zone} />}</PersonPay>,
       },
       {
         key: 'manager',
         label: 'Manager',
-        width: 110,
+        width: 82,
         value: (c) => c.payouts.manager?.user?.nickname ?? c.manager?.nickname ?? NONE,
+        total: (rows) => <PayTotal rows={rows} line={(c) => (c.payouts.manager?.user ? c.payouts.manager : null)} word="to pay" />,
         render: (c) => {
           const m = c.payouts.manager;
           const a = c.payouts.associate;
@@ -501,8 +601,7 @@ function columnsFor(role: Role, zone: string): Column[] {
             {
               key: 'note',
               label: 'Note',
-              width: 190,
-              pinned: true,
+              width: 100,
               value: (c: CallDTO) => (c.notes ? 'Has a note' : 'No note'),
               render: (c: CallDTO) => <NoteCell call={c} />,
             },
@@ -520,9 +619,10 @@ function columnsFor(role: Role, zone: string): Column[] {
         key: 'managerShare',
         label: 'Manager’s share',
         align: 'right',
-        width: 140,
+        width: 100,
         value: (c) => money(c.payouts.manager?.amount ?? c.payouts.manager?.expected),
         sort: (c) => c.payouts.manager?.amount ?? c.payouts.manager?.expected ?? 0,
+        total: (rows) => <Total value={formatUsd(sumOf(rows, (c) => c.payouts.manager?.amount ?? c.payouts.manager?.expected))} />,
         // Their Manager's share, not whether it was paid: that is between the Manager and the Founder.
         render: (c) => {
           const m = c.payouts.manager;
@@ -533,9 +633,10 @@ function columnsFor(role: Role, zone: string): Column[] {
         key: 'mine',
         label: 'Your part',
         align: 'right',
-        width: 140,
+        width: 100,
         value: (c) => money(c.payouts.associate?.amount ?? c.payouts.associate?.expected),
         sort: (c) => c.payouts.associate?.amount ?? c.payouts.associate?.expected ?? 0,
+        total: (rows) => <PayTotal rows={rows} line={(c) => c.payouts.associate} word="to come" />,
         render: (c) => (c.payouts.associate ? <Stack alignItems="flex-end"><Pay line={c.payouts.associate} zone={zone} /></Stack> : NONE),
       },
     ];
@@ -548,7 +649,7 @@ function columnsFor(role: Role, zone: string): Column[] {
       key: 'rate',
       label: 'Your rate',
       align: 'right',
-      width: 110,
+      width: 80,
       value: (c) => (c.payouts.expert?.rate == null ? NONE : `${formatUsd(c.payouts.expert.rate)}/h`),
       sort: (c) => c.payouts.expert?.rate ?? 0,
       render: (c) =>
@@ -558,77 +659,19 @@ function columnsFor(role: Role, zone: string): Column[] {
       key: 'pay',
       label: 'Your pay',
       align: 'right',
-      width: 130,
+      width: 90,
       value: (c) => money(c.payouts.expert?.amount),
       sort: (c) => c.payouts.expert?.amount ?? 0,
+      total: (rows) => <PayTotal rows={rows} line={(c) => c.payouts.expert} word="to come" />,
       render: (c) => (c.payouts.expert ? <Stack alignItems="flex-end"><Pay line={c.payouts.expert} zone={zone} /></Stack> : NONE),
     },
   ];
 }
 
-// --- Filters -------------------------------------------------------------------
-
 // --- Totals --------------------------------------------------------------------
 
 const sumOf = (rows: CallDTO[], pick: (c: CallDTO) => number | null | undefined) => rows.reduce((t, c) => t + (pick(c) ?? 0), 0);
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-
-/** What is still to pay on the calls shown, and the calls that cannot be priced yet. */
-function Totals({ rows, role }: { rows: CallDTO[]; role: Role }) {
-  const tiles: Array<{ label: string; value: string; footer: string }> = [];
-
-  if (role === 'founder' || role === 'manager') {
-    // Every call on the tab has finished: the invoice amount of all of them, whatever their invoice stage.
-    const banked = rows.filter((c) => c.realIncome !== null);
-    tiles.push({ label: 'Total income on invoice', value: formatUsd(sumOf(rows, (c) => c.expectedPrice)), footer: `from ${plural(rows.length, 'finished call')}` });
-    tiles.push({ label: 'Real income', value: formatUsd(sumOf(banked, (c) => c.realIncome)), footer: `from ${plural(banked.length, 'call')} paid to bank` });
-  }
-  if (role === 'founder') {
-    const experts = rows.filter((c) => unpaid(c.payouts.expert));
-    const managers = rows.filter((c) => c.payouts.manager?.user && c.payouts.manager.settled && unpaid(c.payouts.manager));
-    const coming = rows.filter((c) => c.payouts.manager?.user && !c.payouts.manager.settled);
-    tiles.push({ label: 'To pay Experts', value: formatUsd(sumOf(experts, (c) => c.payouts.expert?.amount)), footer: `for ${plural(experts.length, 'call')}` });
-    tiles.push({
-      label: 'To pay Managers',
-      value: formatUsd(sumOf(managers, (c) => c.payouts.manager?.amount)),
-      footer: `for ${plural(managers.length, 'call')} · ${formatUsd(sumOf(coming, (c) => c.payouts.manager?.expected))} more once the bank pays`,
-    });
-  }
-  if (role === 'manager') {
-    const mine = rows.filter((c) => c.payouts.manager?.settled && unpaid(c.payouts.manager));
-    const coming = rows.filter((c) => c.payouts.manager && !c.payouts.manager.settled);
-    tiles.push({
-      label: 'Your share to receive',
-      value: formatUsd(sumOf(mine, (c) => c.payouts.manager?.amount)),
-      footer: `${formatUsd(sumOf(coming, (c) => c.payouts.manager?.expected))} more once the bank pays`,
-    });
-  }
-  if (role === 'associate') {
-    const parts = rows.filter((c) => c.payouts.associate && !c.payouts.associate.paidAt);
-    tiles.push({
-      label: 'Your part to come',
-      value: formatUsd(sumOf(parts, (c) => c.payouts.associate?.amount ?? c.payouts.associate?.expected)),
-      footer: `on ${plural(parts.length, 'call')}, paid by your Manager`,
-    });
-  }
-  if (role === 'expert') {
-    const pay = rows.filter((c) => unpaid(c.payouts.expert));
-    tiles.push({ label: 'Your pay to come', value: formatUsd(sumOf(pay, (c) => c.payouts.expert?.amount)), footer: `for ${plural(pay.length, 'call')}` });
-  }
-
-  return (
-    <Box sx={{ mb: 2.5 }}>
-      <Grid container spacing={2}>
-        {tiles.map((t) => (
-          <Grid key={t.label} size={{ xs: 12, sm: 6, lg: tiles.length > 3 ? 3 : 12 / tiles.length }}>
-            <StatTile label={t.label} value={t.value} footer={<Typography variant="body2" color="text.secondary">{t.footer}</Typography>} />
-          </Grid>
-        ))}
-      </Grid>
-      <Unpriced rows={rows} role={role} />
-    </Box>
-  );
-}
 
 /** Calls that cannot be invoiced or paid until someone sets a rate: which Profile, which platform, what is missing. */
 function Unpriced({ rows, role }: { rows: CallDTO[]; role: Role }) {
@@ -649,7 +692,7 @@ function Unpriced({ rows, role }: { rows: CallDTO[]; role: Role }) {
   return (
     <Alert
       severity="warning"
-      sx={{ mt: 2, '& .MuiAlert-message': { width: '100%' } }}
+      sx={{ mb: 2, '& .MuiAlert-message': { width: '100%' } }}
       action={
         <Button color="inherit" size="small" onClick={() => setOpen((o) => !o)}>
           {open ? 'Hide' : 'Show'}
@@ -677,13 +720,15 @@ function Unpriced({ rows, role }: { rows: CallDTO[]; role: Role }) {
 
 interface RowProps {
   call: CallDTO;
+  /** Its place in the list, counting across pages. */
+  serial: number;
   columns: Column[];
   selectable: boolean;
   selected: boolean;
   onToggle: () => void;
 }
 
-function FinanceRow({ call: c, columns, selectable, selected, onToggle }: RowProps) {
+function FinanceRow({ call: c, serial, columns, selectable, selected, onToggle }: RowProps) {
   const navigate = useNavigate();
   return (
     <TableRow hover selected={selected} sx={{ cursor: 'pointer', '& td': { py: 1 } }} onClick={() => navigate(`/calls/${c.id}`)}>
@@ -692,8 +737,11 @@ function FinanceRow({ call: c, columns, selectable, selected, onToggle }: RowPro
           <Checkbox size="small" checked={selected} onChange={onToggle} inputProps={{ 'aria-label': `Select the call with ${c.profile.name}` }} />
         </TableCell>
       )}
+      <TableCell align="right" sx={{ color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+        {serial}
+      </TableCell>
       {columns.map((col) => (
-        <TableCell key={col.key} align={col.align} sx={{ maxWidth: col.pinned ? 240 : 200, ...(col.pinned ? PINNED_CELL : {}) }}>
+        <TableCell key={col.key} align={col.align} data-col={col.key}>
           {col.render(c)}
         </TableCell>
       ))}
@@ -701,8 +749,31 @@ function FinanceRow({ call: c, columns, selectable, selected, onToggle }: RowPro
   );
 }
 
+/** Phones: the top row of the table, as a card above the others. */
+function TotalsCard({ rows, columns }: { rows: CallDTO[]; columns: Column[] }) {
+  return (
+    <Card variant="outlined" sx={{ p: 1.5, bgcolor: 'action.hover' }}>
+      <Typography variant="body2" fontWeight={600}>
+        Total · {plural(rows.length, 'call')}
+      </Typography>
+      <Stack spacing={0.75} sx={{ mt: 1 }}>
+        {columns
+          .filter((col) => col.total)
+          .map((col) => (
+            <Stack key={col.key} direction="row" justifyContent="space-between" alignItems="flex-start" spacing={2}>
+              <Typography variant="caption" color="text.secondary" sx={{ pt: 0.25 }}>
+                {col.label}
+              </Typography>
+              <Box sx={{ textAlign: 'right' }}>{col.total!(rows)}</Box>
+            </Stack>
+          ))}
+      </Stack>
+    </Card>
+  );
+}
+
 /** Phones: the same fields as a card, one per line. */
-function FinanceCard({ call: c, columns, selectable, selected, onToggle }: RowProps) {
+function FinanceCard({ call: c, serial, columns, selectable, selected, onToggle }: RowProps) {
   const navigate = useNavigate();
   const [title, , ...rest] = columns;
   return (
@@ -716,7 +787,7 @@ function FinanceCard({ call: c, columns, selectable, selected, onToggle }: RowPr
         <Box sx={{ flex: 1, minWidth: 0 }}>
           {title!.render(c)}
           <Typography variant="caption" color="text.secondary" component="div">
-            {c.platform.name}
+            #{serial} · {c.platform.name}
           </Typography>
           <Stack spacing={0.75} sx={{ mt: 1 }}>
             {rest.map((col) => (
