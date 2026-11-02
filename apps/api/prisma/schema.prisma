@@ -313,6 +313,8 @@ model Call {
   associatePaidAt       DateTime?  @map("associate_paid_at") @db.Timestamptz(3)
   /// When the money reached the bank (processed to bank): its income counts in that payment cycle.
   bankedAt              DateTime?  @map("banked_at") @db.Timestamptz(3)
+  /// When the Founder expects this finished call's money to arrive. Founder only.
+  paymentEta            DateTime?  @map("payment_eta") @db.Date
   createdById           String     @map("created_by") @db.Uuid
   createdAt             DateTime   @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt             DateTime   @updatedAt @map("updated_at") @db.Timestamptz(3)

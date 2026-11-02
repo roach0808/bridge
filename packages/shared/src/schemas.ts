@@ -299,6 +299,8 @@ export const updateCallSchema = z
     expertRate: rate.nullable().optional(),
     /** The Founder or a Manager over the call: how long a finished call really took, until the Expert is paid. */
     actualDurationMinutes: actualDurationMinutes.optional(),
+    /** Founder only, once the call has taken place: when its money should arrive. */
+    paymentEta: isoDate.nullable().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, 'Nothing to update');
 

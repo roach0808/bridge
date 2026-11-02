@@ -13,7 +13,7 @@ import {
 } from '@god/shared';
 import type { Prisma } from '@prisma/client';
 import type { Actor } from '../auth/middleware';
-import { iso, isoOrNull } from '../http';
+import { dateOnly, iso, isoOrNull } from '../http';
 import { toUserRef, userRefSelect } from '../serializers';
 import { allowedTransitionsFor, callPermissions } from './calls.access';
 
@@ -75,6 +75,7 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role' | 'ma
     endsAt: iso(call.endsAt),
     // Once a call has taken place, its note is the Founder's working note on the Finance table.
     notes: viewer.role === 'founder' || !FINANCE_STATUSES.includes(call.status as CallStatus) ? call.notes : null,
+    paymentEta: viewer.role === 'founder' && call.paymentEta ? dateOnly(call.paymentEta) : null,
     projectDetails: call.projectDetails,
     platformAssociateName: call.platformAssociateName,
     meetingDetails: call.meetingDetails,

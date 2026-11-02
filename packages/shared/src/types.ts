@@ -195,6 +195,8 @@ export interface CallDTO {
   durationMinutes: number;
   endsAt: string;
   notes: string | null;
+  /** yyyy-mm-dd: when the Founder expects a finished call's money to arrive. Founder only; null for everyone else. */
+  paymentEta: string | null;
   projectDetails: string;
   platformAssociateName: string;
   /** How to join the platform's meeting (link, passcode…), added by whoever runs the call. Everyone on the call reads it. */

@@ -851,3 +851,42 @@ describe('a call’s note once it has taken place', () => {
     expect(await prisma.notification.count({ where: { payload: { path: ['callId'], equals: call.id } } })).toBeGreaterThan(0);
   });
 });
+
+describe('a call’s ETA', () => {
+  it('only the Founder sees it, on the call and the Finance list', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
+    const founder = await as(fx.founder);
+    const saved = await founder.patch(`/calls/${call.id}`, { paymentEta: '2027-03-15' });
+    expect(saved.status, saved.text).toBe(200);
+    expect(saved.body.paymentEta).toBe('2027-03-15');
+    expect((await founder.get(`/calls/${call.id}`)).body.paymentEta).toBe('2027-03-15');
+    const query = { paid: 'unpaid', page: 1, pageSize: 100 };
+    expect((await founder.get('/finance/calls', query)).body.items.find((c: { id: string }) => c.id === call.id).paymentEta).toBe('2027-03-15');
+    for (const who of [fx.m1, fx.a1, fx.a2, fx.e1]) {
+      const client = await as(who);
+      const res = await client.get(`/calls/${call.id}`);
+      expect(res.status, res.text).toBe(200);
+      expect(res.body.paymentEta).toBeNull();
+      expect(res.text).not.toContain('2027-03-15');
+      expect((await client.get('/finance/calls', query)).text).not.toContain('2027-03-15');
+    }
+  });
+
+  it('only the Founder sets it, and it can be cleared', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'invoice_submit' });
+    for (const who of [fx.m1, fx.a1, fx.e1]) expectError(await (await as(who)).patch(`/calls/${call.id}`, { paymentEta: '2027-03-15' }), 403);
+    const founder = await as(fx.founder);
+    expect((await founder.patch(`/calls/${call.id}`, { paymentEta: '2027-03-15' })).status).toBe(200);
+    expect((await founder.patch(`/calls/${call.id}`, { paymentEta: null })).body.paymentEta).toBeNull();
+    expectError(await founder.patch(`/calls/${call.id}`, { paymentEta: 'next week' }), 400);
+  });
+
+  it('is for calls that have taken place, and saving it tells nobody', async () => {
+    const founder = await as(fx.founder);
+    const early = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled' });
+    expectError(await founder.patch(`/calls/${early.id}`, { paymentEta: '2027-03-15' }), 409);
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e2, status: 'finished', scheduledAt: '2027-02-02T09:00:00Z' });
+    expect((await founder.patch(`/calls/${call.id}`, { paymentEta: '2027-03-15', notes: 'Bank says Monday' })).status).toBe(200);
+    expect(await prisma.notification.count({ where: { payload: { path: ['callId'], equals: call.id } } })).toBe(0);
+  });
+});
