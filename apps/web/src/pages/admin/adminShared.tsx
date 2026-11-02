@@ -473,10 +473,10 @@ export function FormSection({ label, hint, error, children }: { label: string; h
 }
 
 /** Rounded outlined surface for tables; scrolls horizontally when narrow. */
-export function TableSurface({ children, minWidth = 720 }: { children: ReactNode; minWidth?: number }) {
+export function TableSurface({ children, minWidth = 720, maxHeight }: { children: ReactNode; minWidth?: number; /** Rows beyond it scroll inside, under a sticky head. */ maxHeight?: string }) {
   return (
     <Paper variant="outlined" sx={{ borderRadius: '14px', overflow: 'hidden', boxShadow: '0 1px 2px rgba(0, 0, 0, 0.03)' }}>
-      <Box sx={{ overflowX: 'auto', '& table': { minWidth } }}>{children}</Box>
+      <Box sx={{ overflowX: 'auto', ...(maxHeight ? { maxHeight, overflowY: 'auto' } : {}), '& table': { minWidth } }}>{children}</Box>
     </Paper>
   );
 }

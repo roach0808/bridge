@@ -1,6 +1,7 @@
 import {
   ERROR_CODES,
   FINANCE_STATUSES,
+  TEAM_TIME_ZONE,
   teamIdOf,
   type Role,
   FEATURES,
@@ -21,6 +22,7 @@ import {
   type updateCallSchema,
 } from '@god/shared';
 import { Prisma } from '@prisma/client';
+import { DateTime } from 'luxon';
 import type { z } from 'zod';
 import type { Actor } from '../auth/middleware';
 import { prisma, type Tx } from '../db';
@@ -545,6 +547,8 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
       // (it counts in the period it arrived in on the Payment records tab).
       data.realIncome = input.realIncome;
       data.bankedAt = new Date();
+      // The money has arrived: its ETA becomes that day, in team time.
+      data.paymentEta = fromDateOnly(DateTime.now().setZone(TEAM_TIME_ZONE).toISODate()!);
       // The shares are settled now: the Profile's Manager share, and the Associate's percent of it.
       // A Manager running a call themselves keeps the whole Manager share.
       const runByAssociate = current.associate.role === 'associate';

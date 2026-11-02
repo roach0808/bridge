@@ -537,3 +537,31 @@ describe('the team’s calls', () => {
     }
   });
 });
+
+describe('a call paid to bank has its ETA set to that day', () => {
+  const nyToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+
+  it('fills it in, replacing an earlier estimate, and only the Founder sees it', async () => {
+    const founder = await as(fx.founder);
+    const empty = await makeCall(fx, { associate: fx.a1, status: 'invoice_approve' });
+    const estimated = await makeCall(fx, { associate: fx.a2, expert: fx.e2, status: 'invoice_approve', scheduledAt: '2027-02-02T09:00:00Z' });
+    expect((await founder.patch(`/calls/${estimated.id}`, { paymentEta: '2027-09-09' })).body.paymentEta).toBe('2027-09-09');
+    for (const call of [empty, estimated]) {
+      const res = await founder.post(`/calls/${call.id}/transition`, { to: 'process_to_bank', realIncome: 900 });
+      expect(res.status, res.text).toBe(200);
+      expect(res.body.paymentEta).toBe(nyToday());
+    }
+    expect((await (await as(fx.a1)).get(`/calls/${empty.id}`)).body.paymentEta).toBeNull();
+    // It can still be corrected by hand afterwards.
+    expect((await founder.patch(`/calls/${empty.id}`, { paymentEta: '2027-01-15' })).body.paymentEta).toBe('2027-01-15');
+  });
+
+  it('earlier steps leave it alone', async () => {
+    const founder = await as(fx.founder);
+    const call = await makeCall(fx, { associate: fx.a1, status: 'invoice_submit' });
+    expect((await founder.patch(`/calls/${call.id}`, { paymentEta: '2027-09-09' })).status).toBe(200);
+    const res = await founder.post(`/calls/${call.id}/transition`, { to: 'invoice_approve' });
+    expect(res.status, res.text).toBe(200);
+    expect(res.body.paymentEta).toBe('2027-09-09');
+  });
+});
