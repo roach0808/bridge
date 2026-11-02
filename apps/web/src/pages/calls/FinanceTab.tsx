@@ -15,6 +15,7 @@ import {
   Link,
   Menu,
   MenuItem,
+  Popover,
   Stack,
   Table,
   TableBody,
@@ -26,8 +27,10 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, bankLabel, type CallDTO, type FinanceCallsPage, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
+import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, bankLabel, type CallDTO, type FinanceCallsPage, type FinanceCallsQuery, type Payee, type Role, type UpdateCallInput } from '@god/shared';
+import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { DateTime } from 'luxon';
 import { useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
@@ -365,31 +368,78 @@ function PersonPay({ name, children }: { name: string | null; children?: ReactNo
   );
 }
 
+/** Saves a change made right in a table row. */
+function useSaveInRow(callId: string, onSaved: () => void) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: UpdateCallInput) => api.calls.update(callId, body),
+    onSuccess: (saved) => {
+      // Straight into the list, so the row never flashes the old value while it refreshes.
+      queryClient.setQueriesData<FinanceCallsPage>({ queryKey: ['calls', 'finance'] }, (page) =>
+        page && { ...page, items: page.items.map((row) => (row.id === saved.id ? saved : row)) },
+      );
+      void queryClient.invalidateQueries({ queryKey: qk.calls.all });
+      onSaved();
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+}
+
+/** When a call's money should arrive: click to pick a date, or to clear it. */
+function EtaCell({ call: c }: { call: CallDTO }) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const save = useSaveInRow(c.id, () => setAnchor(null));
+  const when = c.paymentEta ? DateTime.fromISO(c.paymentEta) : null;
+  return (
+    <Box onClick={(e) => e.stopPropagation()}>
+      <Tooltip title={when ? when.toFormat('cccc, LLLL d, yyyy') : ''} placement="top" disableInteractive>
+        <ButtonBase
+          onClick={(e) => setAnchor(e.currentTarget)}
+          aria-label={when ? `Change the ETA of the call with ${c.profile.name}, ${when.toFormat('LLLL d, yyyy')}` : `Set an ETA for the call with ${c.profile.name}`}
+          sx={{ display: 'block', width: '100%', textAlign: 'left', borderRadius: 1, px: 0.5, py: 0.25, mx: -0.5, '&:hover': { bgcolor: 'action.selected' } }}
+        >
+          {when ? (
+            <Num>{when.toFormat(when.hasSame(DateTime.now(), 'year') ? 'MM/dd' : 'MM/dd/yy')}</Num>
+          ) : (
+            <Typography variant="caption" color="text.disabled">
+              Set
+            </Typography>
+          )}
+        </ButtonBase>
+      </Tooltip>
+      <Popover open={Boolean(anchor)} anchorEl={anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
+        <DateCalendar
+          value={when}
+          disabled={save.isPending}
+          onChange={(v, state) => {
+            if (v?.isValid && state === 'finish') save.mutate({ paymentEta: v.toISODate()! });
+          }}
+        />
+        {when && (
+          <Box sx={{ px: 2, pb: 1.5, textAlign: 'right' }}>
+            <Button size="small" color="inherit" disabled={save.isPending} onClick={() => save.mutate({ paymentEta: null })}>
+              Clear ETA
+            </Button>
+          </Box>
+        )}
+      </Popover>
+    </Box>
+  );
+}
+
 /**
  * A call's note, written right in its row: click it (or "Add note") to type.
  * Enter or leaving the field saves, Shift+Enter starts a new line, Esc cancels.
  */
 function NoteCell({ call: c }: { call: CallDTO }) {
-  const toast = useToast();
-  const queryClient = useQueryClient();
   const [draft, setDraft] = useState<string | null>(null);
-  const save = useMutation({
-    mutationFn: (notes: string) => api.calls.update(c.id, { notes }),
-    onSuccess: (saved) => {
-      // Straight into the list, so the row never flashes the old note while it refreshes.
-      queryClient.setQueriesData<FinanceCallsPage>({ queryKey: ['calls', 'finance'] }, (page) =>
-        page && { ...page, items: page.items.map((row) => (row.id === saved.id ? saved : row)) },
-      );
-      void queryClient.invalidateQueries({ queryKey: qk.calls.all });
-      setDraft(null);
-    },
-    onError: (err) => toast.error(errorMessage(err)),
-  });
+  const save = useSaveInRow(c.id, () => setDraft(null));
   // Saving disables the field, and the blur that follows must not save it again.
   const finish = (text: string) => {
     if (save.isPending || save.isSuccess) return;
     if (text.trim() === (c.notes ?? '').trim()) setDraft(null);
-    else save.mutate(text);
+    else save.mutate({ notes: text });
   };
 
   if (draft !== null) {
@@ -453,12 +503,12 @@ function NoteCell({ call: c }: { call: CallDTO }) {
 function columnsFor(role: Role, zone: string): Column[] {
   const when = (c: CallDTO) => inZone(c.scheduledAt, zone);
   const base: Column[] = [
-    { key: 'profile', label: 'Profile', width: 92, value: (c) => c.profile.name, render: (c) => <Typography variant="body2" fontWeight={550}>{c.profile.name}</Typography> },
-    { key: 'platform', label: 'Platform', width: 74, value: (c) => c.platform.name, render: (c) => c.platform.name },
+    { key: 'profile', label: 'Profile', width: 100, value: (c) => c.profile.name, render: (c) => <Typography variant="body2" fontWeight={550}>{c.profile.name}</Typography> },
+    { key: 'platform', label: 'Platform', width: 78, value: (c) => c.platform.name, render: (c) => c.platform.name },
     {
       key: 'time',
       label: 'Time',
-      width: 56,
+      width: 54,
       // Filtered by day; shown to the minute.
       value: (c) => when(c).toFormat('MM/dd/yyyy'),
       sort: (c) => -when(c).startOf('day').toMillis(),
@@ -474,7 +524,7 @@ function columnsFor(role: Role, zone: string): Column[] {
     {
       key: 'status',
       label: 'Status',
-      width: 94,
+      width: 95,
       value: (c) => STATUS_LABELS[c.status],
       sort: (c) => CALL_STATUSES.indexOf(c.status),
       // A dot and words that may wrap: a pill would push the money columns off the page.
@@ -493,7 +543,7 @@ function columnsFor(role: Role, zone: string): Column[] {
   const bank: Column = {
     key: 'bank',
     label: 'Bank',
-    width: 68,
+    width: 62,
     value: (c) => (c.bank ? bankLabel(c.bank) : NONE),
     render: (c) =>
       c.bank ? (
@@ -575,7 +625,7 @@ function columnsFor(role: Role, zone: string): Column[] {
       {
         key: 'manager',
         label: 'Manager',
-        width: 82,
+        width: 80,
         value: (c) => c.payouts.manager?.user?.nickname ?? c.manager?.nickname ?? NONE,
         total: (rows) => <PayTotal rows={rows} line={(c) => (c.payouts.manager?.user ? c.payouts.manager : null)} word="to pay" />,
         render: (c) => {
@@ -595,13 +645,21 @@ function columnsFor(role: Role, zone: string): Column[] {
           );
         },
       },
-      // Once a call has taken place its note is the Founder's alone (§6.8).
+      // Once a call has taken place its ETA and note are the Founder's alone (§6.8).
       ...(founder
         ? [
             {
+              key: 'eta',
+              label: 'ETA',
+              width: 50,
+              value: (c: CallDTO) => (c.paymentEta ? DateTime.fromISO(c.paymentEta).toFormat('MM/dd/yyyy') : NONE),
+              sort: (c: CallDTO) => c.paymentEta ?? '',
+              render: (c: CallDTO) => <EtaCell call={c} />,
+            },
+            {
               key: 'note',
               label: 'Note',
-              width: 100,
+              width: 84,
               value: (c: CallDTO) => (c.notes ? 'Has a note' : 'No note'),
               render: (c: CallDTO) => <NoteCell call={c} />,
             },

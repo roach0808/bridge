@@ -25,6 +25,7 @@ import type { z } from 'zod';
 import type { Actor } from '../auth/middleware';
 import { prisma, type Tx } from '../db';
 import { HttpError, badRequest, conflict, forbidden, notFound } from '../errors';
+import { fromDateOnly } from '../http';
 import { logger } from '../logger';
 import { deliverAll, notify, type Deliver } from '../notifications/notify';
 import { emitToUser } from '../realtime/hub';
@@ -353,6 +354,10 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
       ? conflict('The Expert was already paid for this call; mark it unpaid before changing the duration')
       : forbidden('Only the Founder or a Manager corrects how long a call took, once it has taken place');
   }
+  if (input.paymentEta !== undefined) {
+    if (actor.role !== 'founder') throw forbidden('Only the Founder sets when a call’s money should arrive');
+    if (!FINANCE_STATUSES.includes(current.status as CallStatus)) throw conflict('A call has an ETA once it has taken place');
+  }
   if (input.researchLink !== undefined && !perms.editResearchLink) {
     throw forbidden('Only the Founder sets the research data link');
   }
@@ -411,6 +416,7 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
           rateOverride: input.rateOverride === undefined ? undefined : input.rateOverride,
           expertRate: input.expertRate === undefined ? undefined : input.expertRate,
           actualDurationMinutes: input.actualDurationMinutes,
+          paymentEta: input.paymentEta === undefined ? undefined : input.paymentEta === null ? null : fromDateOnly(input.paymentEta),
         },
         include: callInclude,
       })
@@ -421,10 +427,11 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     // Money-only edits are none of the Expert's business.
     const MONEY_FIELDS = ['realIncome', 'rateOverride', 'expertRate'];
     const moneyOnly = Object.entries(input).every(([k, v]) => v === undefined || MONEY_FIELDS.includes(k));
-    // A finished call's note is the Founder's alone: changing it tells nobody anything.
-    const privateNoteOnly =
-      FINANCE_STATUSES.includes(current.status as CallStatus) && Object.entries(input).every(([k, v]) => v === undefined || k === 'notes');
-    const recipients = privateNoteOnly
+    // A finished call's note and ETA are the Founder's alone: changing them tells nobody anything.
+    const PRIVATE_FIELDS = ['notes', 'paymentEta'];
+    const privateOnly =
+      FINANCE_STATUSES.includes(current.status as CallStatus) && Object.entries(input).every(([k, v]) => v === undefined || PRIVATE_FIELDS.includes(k));
+    const recipients = privateOnly
       ? []
       : [...new Set([...before, ...after])].filter((uid) => uid !== actor.id && !(moneyOnly && uid === updated.expertId));
     const newlyAssigned = [updated.expertId, updated.associateId].filter(
