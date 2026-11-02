@@ -190,7 +190,7 @@ export function FinanceTab() {
                 ))}
               </Stack>
             ) : (
-              <TableSurface minWidth={me.role === 'founder' ? 960 : me.role === 'manager' ? 860 : 700}>
+              <TableSurface minWidth={me.role === 'founder' ? 960 : me.role === 'manager' ? 860 : 700} maxHeight={FROZEN_HEAD_HEIGHT}>
                 <Table size="small" sx={FIT_TABLE}>
                   <colgroup>
                     {canSelect && <col style={{ width: widthOf(CHECK_WIDTH) }} />}
@@ -222,14 +222,12 @@ export function FinanceTab() {
                         </TableCell>
                       ))}
                     </TableRow>
-                  </TableHead>
-                  <TableBody>
                     {/* The totals of every row the filters leave, on all pages. */}
-                    <TableRow sx={{ '& td': { bgcolor: 'action.hover', fontWeight: 600, verticalAlign: 'top' } }}>
-                      {canSelect && <TableCell />}
-                      <TableCell />
+                    <TableRow sx={{ '& > td': { bgcolor: 'background.subtle', color: 'text.primary', fontWeight: 600, verticalAlign: 'top' } }}>
+                      {canSelect && <TableCell component="td" />}
+                      <TableCell component="td" />
                       {columns.map((col, i) => (
-                        <TableCell key={col.key} align={col.align} data-col={col.key}>
+                        <TableCell key={col.key} component="td" align={col.align} data-col={col.key}>
                           {i === 0 ? (
                             <>
                               Total
@@ -243,6 +241,8 @@ export function FinanceTab() {
                         </TableCell>
                       ))}
                     </TableRow>
+                  </TableHead>
+                  <TableBody>
                     {shown.map((c, i) => (
                       <FinanceRow key={c.id} call={c} serial={firstSerial + i} columns={columns} selectable={canSelect} selected={selected.has(c.id)} onToggle={() => toggle(c.id)} />
                     ))}
@@ -280,12 +280,19 @@ interface Column {
   render: (c: CallDTO) => ReactNode;
 }
 
+/** The table's own height: the rows scroll inside it, under its frozen headings and totals. */
+const FROZEN_HEAD_HEIGHT = 'max(420px, calc(100vh - 150px))';
 const CHECK_WIDTH = 30;
 const SERIAL_WIDTH = 26;
 
 /** Tight, and wrapping rather than scrolling: a whole row is in view at once. */
 const FIT_TABLE = {
   tableLayout: 'fixed',
+  // Separate borders, or a frozen row's lines would scroll away from it.
+  borderCollapse: 'separate',
+  borderSpacing: 0,
+  '& thead': { position: 'sticky', top: 0, zIndex: 2 },
+  '& thead th': { bgcolor: 'background.paper' },
   '& th, & td': { px: 0.625, fontSize: 12.5 },
   '& td': { overflowWrap: 'anywhere' },
   '& th': { fontSize: 11.5, lineHeight: 1.2 },
