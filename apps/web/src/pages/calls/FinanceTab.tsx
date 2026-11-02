@@ -5,6 +5,7 @@ import {
   Alert,
   Box,
   Button,
+  ButtonBase,
   Card,
   Checkbox,
   CircularProgress,
@@ -22,6 +23,8 @@ import {
   TableHead,
   TablePagination,
   TableRow,
+  TextField,
+  Tooltip,
   Typography,
 } from '@mui/material';
 import { CALL_STATUSES, PAYEE_LABELS, STATUS_LABELS, bankLabel, type CallDTO, type FinanceCallsQuery, type Payee, type Role } from '@god/shared';
@@ -44,8 +47,9 @@ import { PaidMark } from './money';
 const QUERY: FinanceCallsQuery = { paid: 'unpaid', page: 1, pageSize: 1000 };
 
 /**
- * The second tab of the Calls page: what is still to pay on the calls that
- * took place (§9.1). The Founder and Managers see each call's rate, invoice and
+ * What is still to pay on the calls that took place (§9.1): the second tab of the
+ * Calls page, and the main table of the Founder's dashboard — this one component
+ * and one query in both places. The Founder and Managers see each call's rate, invoice and
  * real income with the Expert and the Manager; an Associate their part; an
  * Expert their pay. Every column filters, several values at a time, and the
  * totals above follow the filters. Rows can be selected and marked paid by
@@ -155,7 +159,7 @@ export function FinanceTab() {
                 ))}
               </Stack>
             ) : (
-              <TableSurface minWidth={me.role === 'founder' || me.role === 'manager' ? 1100 : 800}>
+              <TableSurface minWidth={me.role === 'founder' ? 1300 : me.role === 'manager' ? 1100 : 800}>
                 <Table size="small" sx={{ '& th, & td': { px: 1 }, '& th:first-of-type, & td:first-of-type': { pl: 2 } }}>
                   <TableHead>
                     <TableRow>
@@ -171,7 +175,7 @@ export function FinanceTab() {
                         </TableCell>
                       )}
                       {columns.map((col) => (
-                        <TableCell key={col.key} align={col.align} sx={{ minWidth: col.width, whiteSpace: 'nowrap' }}>
+                        <TableCell key={col.key} align={col.align} sx={{ minWidth: col.width, whiteSpace: 'nowrap', ...(col.pinned ? PINNED_CELL : {}) }}>
                           <Stack direction="row" alignItems="center" spacing={0.25} justifyContent={col.align === 'right' ? 'flex-end' : 'flex-start'}>
                             <span>{col.label}</span>
                             <ColumnFilter label={col.label} options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
@@ -219,12 +223,17 @@ interface Column {
   label: string;
   align?: 'right';
   width?: number;
+  /** Stays at the table's right edge while the rest scrolls sideways. */
+  pinned?: boolean;
   /** What the column's filter matches: the cell as text. */
   value: (c: CallDTO) => string;
   /** How the filter lists its values (defaults to the text). */
   sort?: (c: CallDTO) => number | string;
   render: (c: CallDTO) => ReactNode;
 }
+
+/** Keeps a column in view at the table's right edge. */
+const PINNED_CELL = { position: 'sticky', right: 0, zIndex: 1, bgcolor: 'background.paper', borderLeft: 1, borderLeftColor: 'divider' } as const;
 
 const money = (n: number | null | undefined) => (n == null ? NONE : formatUsd(n));
 const unpaid = (line: { amount: number | null; paidAt: string | null } | null | undefined): line is { amount: number; paidAt: null } =>
@@ -269,6 +278,86 @@ function PersonPay({ name, children }: { name: string | null; children?: ReactNo
       </Typography>
       {children}
     </Stack>
+  );
+}
+
+/**
+ * A call's note, written right in its row: click it (or "Add note") to type.
+ * Enter or leaving the field saves, Shift+Enter starts a new line, Esc cancels.
+ */
+function NoteCell({ call: c }: { call: CallDTO }) {
+  const toast = useToast();
+  const queryClient = useQueryClient();
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = useMutation({
+    mutationFn: (notes: string) => api.calls.update(c.id, { notes }),
+    // Waits for the list, so the row never flashes the old note.
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: qk.calls.all });
+      setDraft(null);
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const finish = (text: string) => {
+    if (text.trim() === (c.notes ?? '').trim()) setDraft(null);
+    else save.mutate(text);
+  };
+
+  if (draft !== null) {
+    return (
+      <Box onClick={(e) => e.stopPropagation()}>
+        <TextField
+          autoFocus
+          multiline
+          fullWidth
+          size="small"
+          maxRows={5}
+          value={draft}
+          disabled={save.isPending}
+          onChange={(e) => setDraft(e.target.value)}
+          onFocus={(e) => e.target.setSelectionRange(e.target.value.length, e.target.value.length)}
+          onBlur={() => finish(draft)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.stopPropagation();
+              setDraft(null);
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              finish(draft);
+            }
+          }}
+          placeholder="Add a note"
+          slotProps={{ htmlInput: { 'aria-label': `Note on the call with ${c.profile.name}`, maxLength: 10000, sx: { fontSize: 13 } } }}
+          sx={{ minWidth: 170 }}
+        />
+      </Box>
+    );
+  }
+  const open = (e: { stopPropagation: () => void }) => {
+    e.stopPropagation();
+    setDraft(c.notes ?? '');
+  };
+  return (
+    <Tooltip title={c.notes ? <Box sx={{ whiteSpace: 'pre-wrap' }}>{c.notes}</Box> : ''} placement="top" disableInteractive>
+      <ButtonBase
+        onClick={open}
+        aria-label={c.notes ? `Edit the note on the call with ${c.profile.name}` : `Add a note to the call with ${c.profile.name}`}
+        sx={{ display: 'block', width: '100%', textAlign: 'left', borderRadius: 1, px: 0.5, py: 0.25, mx: -0.5, '&:hover': { bgcolor: 'action.selected' } }}
+      >
+        {c.notes ? (
+          <Typography
+            variant="body2"
+            sx={{ fontSize: 13, lineHeight: 1.35, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}
+          >
+            {c.notes}
+          </Typography>
+        ) : (
+          <Typography variant="caption" color="text.disabled">
+            Add note
+          </Typography>
+        )}
+      </ButtonBase>
+    </Tooltip>
   );
 }
 
@@ -406,6 +495,19 @@ function columnsFor(role: Role, zone: string): Column[] {
           );
         },
       },
+      // Once a call has taken place its note is the Founder's alone (§6.8).
+      ...(founder
+        ? [
+            {
+              key: 'note',
+              label: 'Note',
+              width: 190,
+              pinned: true,
+              value: (c: CallDTO) => (c.notes ? 'Has a note' : 'No note'),
+              render: (c: CallDTO) => <NoteCell call={c} />,
+            },
+          ]
+        : []),
     ];
   }
 
@@ -591,7 +693,7 @@ function FinanceRow({ call: c, columns, selectable, selected, onToggle }: RowPro
         </TableCell>
       )}
       {columns.map((col) => (
-        <TableCell key={col.key} align={col.align} sx={{ maxWidth: 200 }}>
+        <TableCell key={col.key} align={col.align} sx={{ maxWidth: col.pinned ? 240 : 200, ...(col.pinned ? PINNED_CELL : {}) }}>
           {col.render(c)}
         </TableCell>
       ))}

@@ -1,5 +1,6 @@
 import {
   ERROR_CODES,
+  FINANCE_STATUSES,
   teamIdOf,
   type Role,
   FEATURES,
@@ -420,9 +421,12 @@ export async function updateCall(actor: Actor, id: string | null, input: UpdateC
     // Money-only edits are none of the Expert's business.
     const MONEY_FIELDS = ['realIncome', 'rateOverride', 'expertRate'];
     const moneyOnly = Object.entries(input).every(([k, v]) => v === undefined || MONEY_FIELDS.includes(k));
-    const recipients = [...new Set([...before, ...after])].filter(
-      (uid) => uid !== actor.id && !(moneyOnly && uid === updated.expertId),
-    );
+    // A finished call's note is the Founder's alone: changing it tells nobody anything.
+    const privateNoteOnly =
+      FINANCE_STATUSES.includes(current.status as CallStatus) && Object.entries(input).every(([k, v]) => v === undefined || k === 'notes');
+    const recipients = privateNoteOnly
+      ? []
+      : [...new Set([...before, ...after])].filter((uid) => uid !== actor.id && !(moneyOnly && uid === updated.expertId));
     const newlyAssigned = [updated.expertId, updated.associateId].filter(
       (uid): uid is string => Boolean(uid) && !before.has(uid!) && uid !== actor.id,
     );

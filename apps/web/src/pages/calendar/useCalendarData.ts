@@ -44,6 +44,16 @@ export function useExpertCalendar(fromIso: string, toIso: string, expertId: stri
   });
 }
 
+/** The viewer's own events (§6.9b). */
+export function usePersonalEvents(fromIso: string, toIso: string, enabled: boolean) {
+  return useQuery({
+    queryKey: qk.calendar.personal(fromIso, toIso),
+    queryFn: () => api.personalEvents.list({ from: fromIso, to: toIso }),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+}
+
 export function useExpertsCalendar(fromIso: string, toIso: string, enabled: boolean) {
   return useQuery({
     queryKey: qk.calendar.experts(fromIso, toIso),
