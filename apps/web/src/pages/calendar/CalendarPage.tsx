@@ -31,7 +31,7 @@ import {
   type Occurrence,
   type PersonalEventOccurrence,
 } from '@god/shared';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -74,6 +74,7 @@ import {
   useExpertCalendar,
   useExpertDirectory,
   useExpertsCalendar,
+  usePersonalEvents,
   type CalendarSubject,
 } from './useCalendarData';
 import { useNow } from './useNow';
@@ -163,12 +164,7 @@ export default function CalendarPage() {
 
   // The viewer's own events, on their single-column calendar (not beside the Experts).
   const showOwnEvents = hasOwnEvents && !allMode;
-  const personal = useQuery({
-    queryKey: qk.calendar.personal(range.fromIso, range.toIso),
-    queryFn: () => api.personalEvents.list({ from: range.fromIso, to: range.toIso }),
-    enabled: showOwnEvents,
-    placeholderData: keepPreviousData,
-  });
+  const personal = usePersonalEvents(range.fromIso, range.toIso, showOwnEvents);
   const ownEvents = showOwnEvents ? personal.data : undefined;
   const eventTitles = useMemo(() => new Map((ownEvents?.events ?? []).map((e) => [e.id, e.title])), [ownEvents]);
 

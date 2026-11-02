@@ -802,3 +802,52 @@ describe('when a call entered its status', () => {
     expect(Math.abs(Date.parse(shown.statusSince) - Date.parse(res.body.createdAt))).toBeLessThan(5000);
   });
 });
+
+describe('a call’s note once it has taken place', () => {
+  const noteOf = async (who: FixtureUser, id: string) => (await (await as(who)).get(`/calls/${id}`)).body.notes as string | null;
+
+  it('goes to everyone on the call before, and to the Founder alone after', async () => {
+    const before = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'scheduled', notes: 'Bring the deck' });
+    for (const who of [fx.founder, fx.m1, fx.a1, fx.e1]) expect(await noteOf(who, before.id)).toBe('Bring the deck');
+
+    for (const status of ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'] as const) {
+      const call = await makeCall(fx, { associate: fx.a1, expert: fx.e2, status, notes: 'Bank is slow on this one', scheduledAt: `2027-03-0${1 + ['finished', 'invoice_submit', 'invoice_approve', 'process_to_bank'].indexOf(status)}T09:00:00Z` });
+      expect(await noteOf(fx.founder, call.id)).toBe('Bank is slow on this one');
+      for (const who of [fx.m1, fx.a1, fx.a2, fx.e2]) {
+        expect(await noteOf(who, call.id)).toBeNull();
+        const res = await (await as(who)).get(`/calls/${call.id}`);
+        expect(res.text).not.toContain('Bank is slow');
+      }
+    }
+  });
+
+  it('the Finance list and the calendar keep it from everyone but the Founder', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished', notes: 'Bank is slow on this one' });
+    const query = { paid: 'unpaid', page: 1, pageSize: 100 };
+    const founder = await (await as(fx.founder)).get('/finance/calls', query);
+    expect(founder.body.items.find((c: { id: string }) => c.id === call.id).notes).toBe('Bank is slow on this one');
+    for (const who of [fx.m1, fx.a1, fx.e1]) {
+      const list = await (await as(who)).get('/finance/calls', query);
+      expect(list.status, list.text).toBe(200);
+      expect(list.text).not.toContain('Bank is slow');
+    }
+  });
+
+  it('only the Founder writes it, and saving it tells nobody', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
+    for (const who of [fx.m1, fx.a1, fx.e1]) expectError(await (await as(who)).patch(`/calls/${call.id}`, { notes: 'mine' }), 403);
+    const founder = await as(fx.founder);
+    const saved = await founder.patch(`/calls/${call.id}`, { notes: 'Chase the bank on Friday' });
+    expect(saved.status, saved.text).toBe(200);
+    expect(saved.body.notes).toBe('Chase the bank on Friday');
+    expect(await prisma.notification.count({ where: { payload: { path: ['callId'], equals: call.id } } })).toBe(0);
+    // Emptying it clears it.
+    expect((await founder.patch(`/calls/${call.id}`, { notes: '' })).body.notes).toBeNull();
+  });
+
+  it('other changes to a finished call are still announced', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'finished' });
+    expect((await (await as(fx.founder)).patch(`/calls/${call.id}`, { rateOverride: 900 })).status).toBe(200);
+    expect(await prisma.notification.count({ where: { payload: { path: ['callId'], equals: call.id } } })).toBeGreaterThan(0);
+  });
+});

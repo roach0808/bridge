@@ -73,7 +73,8 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role' | 'ma
     scheduledAt: iso(call.scheduledAt),
     durationMinutes: call.durationMinutes,
     endsAt: iso(call.endsAt),
-    notes: call.notes,
+    // Once a call has taken place, its note is the Founder's working note on the Finance table.
+    notes: viewer.role === 'founder' || !FINANCE_STATUSES.includes(call.status as CallStatus) ? call.notes : null,
     projectDetails: call.projectDetails,
     platformAssociateName: call.platformAssociateName,
     meetingDetails: call.meetingDetails,

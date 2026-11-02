@@ -27,6 +27,8 @@ import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { dayLabel, formatDateTime, inZone, relativeTime, zoneAbbr } from '@/lib/time';
 import { errorMessage } from '@/lib/errors';
+import { TwoDayCalendar } from './calendar/TwoDayCalendar';
+import { FinanceTab } from './calls/FinanceTab';
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -46,9 +48,9 @@ function shortDay(iso: string, zone: string) {
   return ['Today', 'Tomorrow', 'Yesterday'].includes(label) ? label : inZone(iso, zone).toFormat('LLL d');
 }
 
-function Panel({ title, count, action, children }: { title: string; count?: number; action?: ReactNode; children: ReactNode }) {
+function Panel({ title, count, action, height, children }: { title: string; count?: number; action?: ReactNode; height?: number | string; children: ReactNode }) {
   return (
-    <Card sx={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+    <Card sx={{ display: 'flex', flexDirection: 'column', minWidth: 0, ...(height ? { maxHeight: height } : {}) }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 2, pt: 1.75, pb: 1 }}>
         <Typography variant="subtitle2">{title}</Typography>
         {count !== undefined && (
@@ -59,7 +61,7 @@ function Panel({ title, count, action, children }: { title: string; count?: numb
         <Box sx={{ flex: 1 }} />
         {action}
       </Stack>
-      <Box sx={{ px: 1, pb: 1 }}>{children}</Box>
+      <Box sx={{ px: 1, pb: 1, ...(height ? { overflowY: 'auto', flex: 1, minHeight: 0 } : {}) }}>{children}</Box>
     </Card>
   );
 }
@@ -73,7 +75,7 @@ function Empty({ children }: { children: ReactNode }) {
 }
 
 /** One call in a line: time, profile, platform, expert. */
-function CallLine({ call, zone, showDay = false }: { call: CallDTO; zone: string; showDay?: boolean }) {
+function CallLine({ call, zone, showDay = false, hideExpert = false }: { call: CallDTO; zone: string; showDay?: boolean; hideExpert?: boolean }) {
   const start = inZone(call.scheduledAt, zone);
   return (
     <ButtonBase
@@ -108,9 +110,11 @@ function CallLine({ call, zone, showDay = false }: { call: CallDTO; zone: string
           {call.platform.name}
         </Typography>
       </Box>
-      <Box sx={{ flexShrink: 0, maxWidth: '38%', display: { xs: 'none', sm: 'block' } }}>
-        <UserChip user={call.expert} size={22} showRole={false} />
-      </Box>
+      {!hideExpert && (
+        <Box sx={{ flexShrink: 0, maxWidth: '38%', display: { xs: 'none', sm: 'block' } }}>
+          <UserChip user={call.expert} size={22} showRole={false} />
+        </Box>
+      )}
     </ButtonBase>
   );
 }
@@ -189,76 +193,67 @@ function RateTaskLine({ item }: { item: ProfileNeedingRate }) {
   );
 }
 
-function PendingTasks({ tasks, zone }: { tasks: NonNullable<DashboardSummary['tasks']>; zone: string }) {
+/** A heading in the pending tasks, with where to go for all of them. */
+function TaskHeading({ title, count, to, linkLabel }: { title: string; count: number; to?: string; linkLabel?: string }) {
+  return (
+    <Stack direction="row" alignItems="center" sx={{ px: 1, pt: 1, pb: 0.25, minHeight: 30 }}>
+      <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ flex: 1 }}>
+        {title} · {count}
+      </Typography>
+      {to && count > 0 && (
+        <Button size="small" component={RouterLink} to={to} endIcon={<ChevronRightRounded />} sx={{ minHeight: 24 }}>
+          {linkLabel}
+        </Button>
+      )}
+    </Stack>
+  );
+}
+
+/** What is waiting on the Founder: one narrow column, no taller than `height`; the rest scrolls. */
+function PendingTasks({ tasks, zone, height }: { tasks: NonNullable<DashboardSummary['tasks']>; zone: string; height: number | string }) {
   const [bankFor, setBankFor] = useState<ProfileNeedingBank['profile'] | null>(null);
   const total =
     tasks.invoicesToSubmit.length + tasks.callsNeedingResearch.length + tasks.profilesNeedingBank.length + tasks.profilesNeedingRate.length;
   return (
     <>
-      <Panel title="Pending tasks" count={total}>
+      <Panel title="Pending tasks" count={total} height={height}>
         {total === 0 ? (
           <Empty>All clear. Nothing waiting on you.</Empty>
         ) : (
-          <Box sx={{ display: 'grid', gap: 1, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' } }}>
-            <Box sx={{ minWidth: 0 }}>
-              <Stack direction="row" alignItems="center" sx={{ px: 1, py: 0.5 }}>
-                <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ flex: 1 }}>
-                  Submit invoice · {tasks.invoicesToSubmit.length}
-                </Typography>
-                {tasks.invoicesToSubmit.length > 0 && (
-                  <Button size="small" component={RouterLink} to="/invoicing" endIcon={<ChevronRightRounded />} sx={{ minHeight: 26 }}>
-                    Invoicing
-                  </Button>
-                )}
-              </Stack>
-              {tasks.invoicesToSubmit.length === 0 ? (
-                <Empty>Every finished call is invoiced.</Empty>
-              ) : (
-                tasks.invoicesToSubmit.slice(0, 8).map((c) => <CallLine key={c.id} call={c} zone={zone} showDay />)
-              )}
-              {tasks.callsNeedingResearch.length > 0 && (
-                <>
-                  <Box sx={{ px: 1, py: 0.5, mt: 1, minHeight: 34, display: 'flex', alignItems: 'center' }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                      Prepare research data · {tasks.callsNeedingResearch.length}
-                    </Typography>
-                  </Box>
-                  {tasks.callsNeedingResearch.slice(0, 8).map((c) => (
-                    <CallLine key={c.id} call={c} zone={zone} showDay />
-                  ))}
-                </>
-              )}
-            </Box>
-            <Box sx={{ minWidth: 0 }}>
-              <Box sx={{ px: 1, py: 0.5, minHeight: 34, display: 'flex', alignItems: 'center' }}>
-                <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                  Add bank · {tasks.profilesNeedingBank.length}
-                </Typography>
-              </Box>
-              {tasks.profilesNeedingBank.length === 0 ? (
-                <Empty>Every booked profile has a bank.</Empty>
-              ) : (
-                tasks.profilesNeedingBank.slice(0, 8).map((p) => (
+          <>
+            {tasks.invoicesToSubmit.length > 0 && (
+              <>
+                <TaskHeading title="Submit invoice" count={tasks.invoicesToSubmit.length} to="/invoicing" linkLabel="Invoicing" />
+                {tasks.invoicesToSubmit.slice(0, 8).map((c) => (
+                  <CallLine key={c.id} call={c} zone={zone} showDay hideExpert />
+                ))}
+              </>
+            )}
+            {tasks.callsNeedingResearch.length > 0 && (
+              <>
+                <TaskHeading title="Prepare research data" count={tasks.callsNeedingResearch.length} />
+                {tasks.callsNeedingResearch.slice(0, 8).map((c) => (
+                  <CallLine key={c.id} call={c} zone={zone} showDay hideExpert />
+                ))}
+              </>
+            )}
+            {tasks.profilesNeedingBank.length > 0 && (
+              <>
+                <TaskHeading title="Add bank" count={tasks.profilesNeedingBank.length} />
+                {tasks.profilesNeedingBank.slice(0, 8).map((p) => (
                   <BankTaskLine key={p.profile.id} item={p} zone={zone} onAdd={() => setBankFor(p.profile)} />
-                ))
-              )}
-              {tasks.profilesNeedingRate.length > 0 && (
-                <>
-                  <Stack direction="row" alignItems="center" sx={{ px: 1, py: 0.5, mt: 1 }}>
-                    <Typography variant="caption" color="text.secondary" fontWeight={600} sx={{ flex: 1 }}>
-                      Set hourly rate · {tasks.profilesNeedingRate.length}
-                    </Typography>
-                    <Button size="small" component={RouterLink} to="/profiles" endIcon={<ChevronRightRounded />} sx={{ minHeight: 26 }}>
-                      Profiles
-                    </Button>
-                  </Stack>
-                  {tasks.profilesNeedingRate.slice(0, 8).map((r) => (
-                    <RateTaskLine key={`${r.profile.id}-${r.platform.id}`} item={r} />
-                  ))}
-                </>
-              )}
-            </Box>
-          </Box>
+                ))}
+              </>
+            )}
+            {tasks.profilesNeedingRate.length > 0 && (
+              <>
+                <TaskHeading title="Set hourly rate" count={tasks.profilesNeedingRate.length} to="/profiles" linkLabel="Profiles" />
+                {tasks.profilesNeedingRate.slice(0, 8).map((r) => (
+                  <RateTaskLine key={`${r.profile.id}-${r.platform.id}`} item={r} />
+                ))}
+              </>
+            )}
+          </>
         )}
       </Panel>
       <BanksDialog profile={bankFor} open={Boolean(bankFor)} onClose={() => setBankFor(null)} startAdding />
@@ -425,6 +420,38 @@ function TeamPanel({ team }: { team: NonNullable<DashboardSummary['team']> }) {
   );
 }
 
+/** The calendar and the pending tasks beside it are the same height. */
+const TOP_ROW_HEIGHT = 520;
+const CALENDAR_HEADER = 48;
+
+/**
+ * The Founder's dashboard: today and tomorrow on the calendar, what is waiting
+ * on them, and below it the Finance table of the Calls page, their main place of
+ * work (the same component and data as that tab).
+ */
+function FounderDashboard({ data, zone }: { data: DashboardSummary; zone: string }) {
+  return (
+    <Stack spacing={2}>
+      <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 7fr) minmax(0, 3fr)' }, alignItems: 'start' }}>
+        <TwoDayCalendar height={TOP_ROW_HEIGHT - CALENDAR_HEADER} />
+        {data.tasks && <PendingTasks tasks={data.tasks} zone={zone} height={TOP_ROW_HEIGHT} />}
+      </Box>
+      <Box>
+        <Typography variant="h6" component="h2" sx={{ mb: 1.5 }}>
+          Finance
+        </Typography>
+        <FinanceTab />
+      </Box>
+      {data.database && (
+        <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }, alignItems: 'start' }}>
+          <DatabaseCard database={data.database} />
+          <BackupsCard />
+        </Box>
+      )}
+    </Stack>
+  );
+}
+
 export default function DashboardPage() {
   const me = useMe();
   const { zone } = useAuth();
@@ -470,22 +497,20 @@ export default function DashboardPage() {
     );
   }
 
+  if (me.role === 'founder') {
+    return (
+      <>
+        {header}
+        <FounderDashboard data={data} zone={zone} />
+      </>
+    );
+  }
+
   return (
     <>
       {header}
       <Stack spacing={2}>
         <TodayBoard today={data.today} />
-        {(data.tasks || data.database) && (
-          <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', lg: 'minmax(0, 2fr) minmax(0, 1fr)' }, alignItems: 'start' }}>
-            {data.tasks && <PendingTasks tasks={data.tasks} zone={zone} />}
-            {data.database && (
-              <Stack spacing={2}>
-                <DatabaseCard database={data.database} />
-                <BackupsCard />
-              </Stack>
-            )}
-          </Box>
-        )}
         {data.team && <TeamPanel team={data.team} />}
       </Stack>
     </>
