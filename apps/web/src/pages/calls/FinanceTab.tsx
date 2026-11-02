@@ -41,7 +41,7 @@ import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
 import { qk } from '@/lib/queryKeys';
 import { formatUsd, inZone } from '@/lib/time';
-import { ColumnFilter } from '@/components/ColumnFilter';
+import { ColumnFilter, UntilDateFilter } from '@/components/ColumnFilter';
 import { TableSurface, useIsPhone } from '../admin/adminShared';
 import { PaidMark } from './money';
 
@@ -75,7 +75,14 @@ export function FinanceTab() {
   const columns = useMemo(() => columnsFor(me.role, zone), [me.role, zone]);
   const all = data?.items ?? [];
   const passes = (c: CallDTO, except?: string) =>
-    columns.every((col) => col.key === except || !filters[col.key]?.length || filters[col.key]!.includes(col.value(c)));
+    columns.every((col) => {
+      const picked = filters[col.key];
+      if (col.key === except || !picked?.length) return true;
+      if (!col.until) return picked.includes(col.value(c));
+      // Up to and including the date picked; a row with no date has nothing to compare.
+      const date = col.until(c);
+      return date !== null && date <= picked[0]!;
+    });
   const rows = all.filter((c) => passes(c));
   const shown = rows.slice(page * pageSize, (page + 1) * pageSize);
   const filtering = Object.values(filters).some((v) => v.length);
@@ -155,7 +162,7 @@ export function FinanceTab() {
             </Typography>
             {phone &&
               columns.map((col) => (
-                <ColumnFilter key={col.key} label={col.label} chip options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
+                <FilterFor key={col.key} col={col} chip options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
               ))}
             {filtering && (
               <Button size="small" color="inherit" onClick={() => { setFilters({}); setPage(0); }}>
@@ -210,7 +217,7 @@ export function FinanceTab() {
                         <TableCell key={col.key} align={col.align} data-col={col.key}>
                           <Stack direction="row" alignItems="center" flexWrap="wrap" justifyContent={col.align === 'right' ? 'flex-end' : 'flex-start'}>
                             <span>{col.label}</span>
-                            <ColumnFilter label={col.label} options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
+                            <FilterFor col={col} options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
                           </Stack>
                         </TableCell>
                       ))}
@@ -260,6 +267,8 @@ interface Column {
   key: string;
   label: string;
   align?: 'right';
+  /** A date column filtered up to a date picked (yyyy-mm-dd), instead of by ticking values. */
+  until?: (c: CallDTO) => string | null;
   /** Its share of the table's width, against the other columns'. */
   width?: number;
   /** What the top row says for every row the filters leave, on all pages. */
@@ -366,6 +375,12 @@ function PersonPay({ name, children }: { name: string | null; children?: ReactNo
       {children}
     </Stack>
   );
+}
+
+/** A column's filter in the header or, on phones, as a chip. */
+function FilterFor({ col, options, selected, onChange, chip }: { col: Column; options: Array<{ value: string; count: number }>; selected: string[]; onChange: (values: string[]) => void; chip?: boolean }) {
+  if (col.until) return <UntilDateFilter label={col.label} chip={chip} value={selected[0] ?? null} onChange={(v) => onChange(v ? [v] : [])} />;
+  return <ColumnFilter label={col.label} chip={chip} options={options} selected={selected} onChange={onChange} />;
 }
 
 /** Saves a change made right in a table row. */
@@ -652,8 +667,9 @@ function columnsFor(role: Role, zone: string): Column[] {
               key: 'eta',
               label: 'ETA',
               width: 50,
-              value: (c: CallDTO) => (c.paymentEta ? DateTime.fromISO(c.paymentEta).toFormat('MM/dd/yyyy') : NONE),
-              sort: (c: CallDTO) => c.paymentEta ?? '',
+              value: (c: CallDTO) => c.paymentEta ?? NONE,
+              // Filtering by a date shows what should have arrived by then.
+              until: (c: CallDTO) => c.paymentEta,
               render: (c: CallDTO) => <EtaCell call={c} />,
             },
             {

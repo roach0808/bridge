@@ -1,5 +1,7 @@
 import FilterListRounded from '@mui/icons-material/FilterListRounded';
-import { Badge, Box, Button, Checkbox, Chip, IconButton, Popover, Stack, TextField, Typography } from '@mui/material';
+import { Badge, Box, Button, Checkbox, Chip, IconButton, Popover, Stack, TextField, Tooltip, Typography } from '@mui/material';
+import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
+import { DateTime } from 'luxon';
 import { useState } from 'react';
 
 /** A table column's values, with how many rows have each. */
@@ -126,3 +128,77 @@ function ColumnFilter({
   );
 }
 
+
+/**
+ * A date column's filter: pick a date to keep the rows up to and including it.
+ * `value` is that date (yyyy-mm-dd), or null for every row.
+ */
+export function UntilDateFilter({
+  label,
+  value,
+  onChange,
+  chip,
+}: {
+  label: string;
+  value: string | null;
+  onChange: (value: string | null) => void;
+  /** Phones: a chip in the row above the cards, since there are no headers. */
+  chip?: boolean;
+}) {
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
+  const date = value ? DateTime.fromISO(value) : null;
+  const active = date !== null;
+  return (
+    <>
+      {chip ? (
+        <Chip
+          size="small"
+          clickable
+          icon={<FilterListRounded />}
+          label={date ? `${label} until ${date.toFormat('MM/dd')}` : label}
+          color={active ? 'primary' : 'default'}
+          variant={active ? 'filled' : 'outlined'}
+          onClick={(e) => setAnchor(e.currentTarget)}
+        />
+      ) : (
+        <Tooltip title={date ? `Until ${date.toFormat('LLL d, yyyy')}` : `Filter ${label} until a date`} disableInteractive>
+          <IconButton
+            size="small"
+            aria-label={date ? `${label} until ${date.toFormat('LLLL d, yyyy')}` : `Filter ${label}`}
+            onClick={(e) => setAnchor(e.currentTarget)}
+            sx={{ p: 0.25, color: active ? 'primary.main' : 'text.disabled', '&:hover': { color: active ? 'primary.main' : 'text.secondary' } }}
+          >
+            <Badge variant="dot" color="primary" invisible={!active}>
+              <FilterListRounded sx={{ fontSize: 17 }} />
+            </Badge>
+          </IconButton>
+        </Tooltip>
+      )}
+      <Popover open={Boolean(anchor)} anchorEl={anchor} onClose={() => setAnchor(null)} anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 2, pt: 1.5 }}>
+          <Typography variant="subtitle2">{date ? `${label} until ${date.toFormat('LLL d, yyyy')}` : `${label} until…`}</Typography>
+          <Button
+            size="small"
+            color="inherit"
+            disabled={!active}
+            onClick={() => {
+              onChange(null);
+              setAnchor(null);
+            }}
+          >
+            Clear
+          </Button>
+        </Stack>
+        <DateCalendar
+          value={date}
+          onChange={(v, state) => {
+            if (v?.isValid && state === 'finish') {
+              onChange(v.toISODate());
+              setAnchor(null);
+            }
+          }}
+        />
+      </Popover>
+    </>
+  );
+}
