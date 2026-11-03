@@ -173,7 +173,7 @@ describe('talking in a group', () => {
     expect((await (await as(fx.a1)).post(`/chat/messages/${pic.body.id}/reactions`, { emoji: '👍' })).body.reactions).toEqual([{ emoji: '👍', userIds: [fx.a1.id] }]);
     const system = (await messages(m1, id)).find((m) => m.kind === 'system')!;
     expectError(await m1.post(`/chat/messages/${system.id}/reactions`, { emoji: '👍' }), 409);
-    expectError(await m1.delete(`/chat/messages/${system.id}`), 409);
+    expectError(await m1.delete(`/chat/messages/${system.id}`), 403);
 
     expectError(await m1.post(`/chat/conversations/${id}/ring`), 400);
     const text = (await send(m1, id, { body: 'Do this' })).body;
@@ -246,18 +246,30 @@ describe('running a group', () => {
     expect((await founder.post(`/chat/groups/${mixed}/members`, { userIds: [fx.a2.id] })).status).toBe(200);
   });
 
-  it('admins take out members and delete their messages; nobody else does', async () => {
+  it('nobody deletes a message in a group: not its sender, an admin, the owner or a Founder', async () => {
+    const { client: owner, id } = await group(fx.m1, [fx.a1, fx.a2, fx.founder]);
+    await owner.put(`/chat/groups/${id}/members/${fx.a1.id}/role`, { role: 'admin' });
+    const said = (await send(await as(fx.a2), id, { body: 'stays here' })).body;
+    for (const who of [fx.a2, fx.a1, fx.m1, fx.founder]) {
+      const res = await (await as(who)).delete(`/chat/messages/${said.id}`);
+      expectError(res, 403);
+      expect(res.body.error.message).toBe('Messages in a group chat cannot be deleted');
+    }
+    expect((await messages(owner, id)).find((m) => m.id === said.id)).toMatchObject({ body: 'stays here', deleted: false });
+    // A one-to-one chat is as before: the sender deletes their own.
+    const a1 = await as(fx.a1);
+    const chat = (await a1.post('/chat/conversations', { userId: fx.m1.id })).body.id as string;
+    const mine = (await send(a1, chat, { body: 'oops' })).body;
+    expect((await a1.delete(`/chat/messages/${mine.id}`)).body.deleted).toBe(true);
+  });
+
+  it('admins take out members; nobody else does', async () => {
     // The Founder may bring people of both teams together.
     const { client: owner, id } = await group(fx.founder, [fx.a1, fx.a2, fx.a3]);
     await owner.put(`/chat/groups/${id}/members/${fx.a1.id}/role`, { role: 'admin' });
     await owner.put(`/chat/groups/${id}/members/${fx.a2.id}/role`, { role: 'admin' });
     const a1 = await as(fx.a1);
     const a3 = await as(fx.a3);
-    const said = (await send(a3, id, { body: 'something off' })).body;
-    // A plain member deletes only their own.
-    expectError(await a3.delete(`/chat/messages/${(await send(a1, id, { body: 'mine' })).body.id}`), 403);
-    expect((await a1.delete(`/chat/messages/${said.id}`)).body.deleted).toBe(true);
-
     expectError(await a3.delete(`/chat/groups/${id}/members/${fx.a1.id}`), 403);
     expectError(await a1.delete(`/chat/groups/${id}/members/${fx.a2.id}`), 403); // another admin
     expectError(await a1.delete(`/chat/groups/${id}/members/${fx.founder.id}`), 403); // the owner

@@ -1091,9 +1091,9 @@ async function loadMessageForReaction(actor: Actor, id: string | null) {
 chatRouter.delete('/chat/messages/:id', async (req, res) => {
   const actor = actorOf(req);
   const m = await loadMessageForReaction(actor, idParam(req));
-  // A group's owner and admins also take down anyone's message.
-  const moderates = !isDirect(m.conversation) && runsGroup(roleIn(m.conversation, actor.id));
-  if (m.senderId !== actor.id && !moderates) throw forbidden('You can only delete your own messages');
+  // What is said in a group stays in it, whoever said it and whoever asks.
+  if (!isDirect(m.conversation)) throw forbidden('Messages in a group chat cannot be deleted');
+  if (m.senderId !== actor.id) throw forbidden('You can only delete your own messages');
   if (m.deletedAt) throw conflict('This message is already deleted');
   if (m.kind === 'ring') throw conflict('A ring stays in the chat');
   if (m.kind === 'system') throw conflict('What happened in a group stays in it');

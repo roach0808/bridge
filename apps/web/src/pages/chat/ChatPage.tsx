@@ -46,7 +46,6 @@ import {
   canJoinGroups,
   canRemoveTask,
   isActiveTodo,
-  runsGroup,
   type ChatMessageDTO,
   type ConversationDTO,
   type ChatMessagePage,
@@ -443,9 +442,8 @@ function MessageMenu({
   const me = useMe();
   const canMake = !message.todo && conversation.canGiveTask && !message.image && !message.deleted;
   const canRemove = message.todo !== null && canRemoveTask(me, message.todo);
-  // A group's owner and admins also take down anyone's message.
-  const moderates = Boolean(conversation.group) && runsGroup(conversation.group?.myRole) && message.sender.id !== me.id;
-  const canDelete = (message.sender.id === me.id || moderates) && !message.todo && !message.deleted;
+  // What is said in a group stays in it: only a one-to-one message can be deleted, by its sender.
+  const canDelete = !conversation.group && message.sender.id === me.id && !message.todo && !message.deleted;
   const canReact = conversation.canSend && !message.deleted;
   const canReply = conversation.canSend && conversation.mode === 'free' && !message.deleted;
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -522,7 +520,7 @@ function MessageMenu({
       <ConfirmDialog
         open={confirmDelete}
         title="Delete this message?"
-        description={`It will be deleted for ${conversation.group ? 'everyone in the group' : `you and ${conversation.other?.nickname ?? 'them'}`}${message.image ? ', including the picture' : ''}. This cannot be undone.`}
+        description={`It will be deleted for you and ${conversation.other?.nickname ?? 'them'}${message.image ? ', including the picture' : ''}. This cannot be undone.`}
         confirmLabel="Delete"
         destructive
         onClose={() => setConfirmDelete(false)}
