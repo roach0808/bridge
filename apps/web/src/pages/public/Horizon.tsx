@@ -10,6 +10,10 @@ export const PUBLIC_COLORS = {
   accent: '#1c3955',
   ink: '#12263b',
   muted: '#55687d',
+  /** The solid navy the landing page comes to rest on. */
+  ground: '#12263b',
+  paperOnGround: '#e8eef5',
+  mutedOnGround: '#a7b6c6',
 } as const;
 
 const rise = keyframes`
