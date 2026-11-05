@@ -11,7 +11,7 @@ The spec is [docs/SPEC.md](docs/SPEC.md).
 | **API** | Node 22 · Express 5 · Prisma 6 · PostgreSQL 16 · Socket.IO 4 · Zod · argon2id + JWT with rotating refresh tokens |
 | **Web** | React 19 · Vite · Material UI 7 (light/dark, CSS variables) · TanStack Query 5 · React Router 7 · Luxon |
 | **Shared** | `@god/shared` holds the status workflow, transition rules, Zod schemas, DTO types and the recurrence engine. `@god/api-client` is a typed fetch and socket client with no browser globals, so the mobile app can reuse it |
-| **Tests** | Vitest (1487 shared unit tests) · Supertest (410 API tests on `god_testsuite`) · Playwright (end-to-end workflow with a live observer) |
+| **Tests** | Vitest (1596 shared unit tests) · Supertest (528 API tests on `god_testsuite`) · Playwright (end-to-end workflow with a live observer) |
 
 ## Quick start
 
@@ -53,7 +53,9 @@ apps/api            Express + Socket.IO server
   prisma/           schema, migrations (incl. exclusion/check constraints, ends_at trigger, avatar catalog), seed
   src/auth          login, refresh rotation with reuse detection, role guards
   src/calls         access rules, service (locking, transitions, notifications), routes, messages
-  src/calendar      calendar privacy (calls vs busy), schedule blocks with this/following/all edits
+  src/calendar      calendar privacy (calls vs busy), schedule blocks with this/following/all edits, a Founder's own events
+  src/credentials   password managers: a Profile's and a team's saved logins, encrypted
+  src/public        what anyone may see without signing in: rounded figures for the landing page
   src/notifications notify() is the single entry point: DB row + socket + Expo push adapter
   src/realtime      socket auth, call rooms, per-viewer call:updated broadcasts
   test/             Supertest suites + anonymity guard on every response
@@ -61,6 +63,8 @@ apps/web            React + MUI app
   src/pages/calls     dashboard cards, list, detail (transitions, thread, history), new call form
   src/pages/calendar  day/week/month, all-experts columns, time off editor, extra clocks
   src/pages/admin     profiles, platforms, team, users, invoicing, notifications, settings
+  src/pages/passwords a team's shared logins
+  src/pages/public    the landing page and the look it shares with Sign in
   e2e/                Playwright workflow test
 packages/shared     workflow rules, schemas, types, recurrence engine (+ tests)
 packages/api-client typed client used by web (and the future Expo app)
