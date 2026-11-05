@@ -2,11 +2,12 @@ import type { Role } from '@god/shared';
 import { lazy, Suspense, type ComponentType, type ReactNode } from 'react';
 import { Button } from '@mui/material';
 import { createBrowserRouter, Navigate, Outlet, useLocation, useRouteError } from 'react-router';
-import { useAuth } from '@/auth/AuthProvider';
+import { mayBeSignedIn, useAuth } from '@/auth/AuthProvider';
 import { EmptyState, FullPageSpinner, LoadingRows } from '@/components/common';
 import { errorMessage } from '@/lib/errors';
 import { AppLayout } from '@/layout/AppLayout';
 import LoginPage from '@/pages/LoginPage';
+import LandingPage from '@/pages/public/LandingPage';
 
 /**
  * A deploy replaces every page file, so a tab left open asks for files that are gone.
@@ -56,6 +57,9 @@ const SettingsPage = lazyPage(() => import('@/pages/admin/SettingsPage'));
 function RequireAuth() {
   const { status } = useAuth();
   const location = useLocation();
+  // The site's address is public: a visitor gets the landing page, right away.
+  const home = location.pathname === '/';
+  if (home && (status === 'anonymous' || (status === 'loading' && !mayBeSignedIn()))) return <LandingPage />;
   if (status === 'loading') return <FullPageSpinner />;
   if (status === 'anonymous') return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   return <Outlet />;
@@ -94,7 +98,7 @@ function PageError() {
 function AnonymousOnly() {
   const { status } = useAuth();
   const location = useLocation();
-  if (status === 'loading') return <FullPageSpinner />;
+  if (status === 'loading' && mayBeSignedIn()) return <FullPageSpinner />;
   if (status === 'authenticated') {
     const from = (location.state as { from?: string } | null)?.from ?? '/';
     return <Navigate to={from} replace />;

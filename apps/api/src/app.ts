@@ -11,6 +11,7 @@ import { avatarsRouter } from './avatars/avatars.routes';
 import { banksRouter } from './banks/banks.routes';
 import { calendarRouter } from './calendar/calendar.routes';
 import { personalEventsRouter } from './calendar/personalEvents';
+import { publicRouter } from './public/public.routes';
 import { credentialsRouter } from './credentials/credentials.routes';
 import { callsRouter } from './calls/calls.routes';
 import { chatRouter } from './chat/chat.routes';
@@ -72,6 +73,7 @@ export function createApp() {
   const api = Router();
   // Records changes and sensitive reads once each response is known.
   api.use(auditRequests);
+  api.use(publicRouter);
   api.use(authRouter);
   api.use(avatarsRouter);
   api.use(usersRouter);

@@ -481,6 +481,16 @@ export interface PersonalEventsResponse {
   events: PersonalEventDTO[];
 }
 
+/** The landing page's totals (§6.18): open to anyone, so rounded and with nothing about any one call. */
+export interface PublicStats {
+  /** Calls that took place. */
+  deliveredCalls: number;
+  /** Whole hours of those calls. */
+  hoursDelivered: number;
+  /** Income that reached the bank, rounded down to the nearest $1,000. */
+  incomeAtLeast: number;
+}
+
 export interface PersonalEventMutationResult {
   updated: PersonalEventDTO | null;
   deleted: string[];

@@ -4,6 +4,7 @@ import type { ListCallsParams } from '@god/api-client';
 export const qk = {
   me: ['me'] as const,
   dashboard: ['dashboard'] as const,
+  publicStats: ['public-stats'] as const,
   calls: {
     all: ['calls'] as const,
     list: (params: ListCallsParams) => ['calls', 'list', params] as const,
