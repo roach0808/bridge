@@ -1,13 +1,15 @@
+import '@fontsource-variable/newsreader/opsz.css';
+import '@fontsource-variable/newsreader/opsz-italic.css';
 import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded';
-import CheckRounded from '@mui/icons-material/CheckRounded';
 import { Box, Button, Stack, Typography } from '@mui/material';
+import { keyframes } from '@mui/material/styles';
 import { useQuery } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
-import { Horizon, PUBLIC_COLORS as C, riseIn } from './Horizon';
+import { PUBLIC_COLORS as C, riseIn } from './Horizon';
 
 const PILLARS = [
   {
@@ -58,90 +60,132 @@ const STEPS = [
 
 const JOURNEY = ['Arranged', 'Confirmed', 'On the call', 'Finished', 'Settled'];
 
-const container = { width: '100%', maxWidth: 1180, mx: 'auto', px: { xs: 2.5, sm: 4 } } as const;
+// ---- The page's system: one measure, one display face, one hairline. --------------
 
-const silverText = {
-  background: `linear-gradient(180deg, ${C.ink} 25%, ${C.accent} 62%, #4a6b8f 100%)`,
-  WebkitBackgroundClip: 'text',
-  backgroundClip: 'text',
-  color: 'transparent',
+const MEASURE = 1240;
+const GUTTER = 'max(20px, 4vw)';
+const container = { width: `calc(100% - 2 * ${GUTTER})`, maxWidth: MEASURE, mx: 'auto' } as const;
+/** Set on the measure's fourth column of five, which the path, the figures and the lists all share. */
+const fourthColumn = { ml: { md: 'auto' }, width: { md: '40%' } } as const;
+/** Sections breathe by the same amount all the way down. */
+const SECTION_GAP = { xs: 10, md: 20 };
+
+const DISPLAY = '"Newsreader Variable", "Iowan Old Style", Georgia, serif';
+const display = {
+  fontFamily: DISPLAY,
+  fontOpticalSizing: 'auto',
+  fontWeight: 400,
+  fontFeatureSettings: '"lnum"',
+  letterSpacing: '-0.022em',
+  color: C.ink,
 } as const;
+const h2 = { ...display, fontSize: 'clamp(36px, 5vw, 68px)', lineHeight: 1.04, textWrap: 'balance' } as const;
 
+const hairline = `1px solid ${C.line}`;
 const focusRing = { '&:focus-visible': { outline: `2px solid ${C.accent}`, outlineOffset: 3 } } as const;
+const QUIET = '160ms cubic-bezier(0.2, 0.7, 0.2, 1)';
 
-function SignInButton({ large }: { large?: boolean }) {
+const drawLine = keyframes`
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+`;
+
+// ---- Small parts -----------------------------------------------------------------
+
+/** Solid and square-shouldered: the page's one strong action, in navy or, on the navy ground, in paper. */
+function ActionButton({ children, to, href, inverse, down }: { children: ReactNode; to?: string; href?: string; inverse?: boolean; down?: boolean }) {
+  const Arrow = down ? ArrowDownwardRounded : ArrowForwardRounded;
   return (
     <Button
-      component={RouterLink}
-      to="/login"
-      endIcon={large ? <ArrowForwardRounded /> : undefined}
+      {...(to ? { component: RouterLink, to } : { component: 'a', href })}
+      endIcon={<Arrow sx={{ transition: `transform ${QUIET}` }} />}
       sx={{
-        ...focusRing,
-        px: large ? 3.5 : 2.25,
-        py: large ? 1.4 : 0.75,
-        fontSize: large ? 16 : 14,
-        fontWeight: 600,
-        borderRadius: 99,
-        color: '#ffffff',
-        bgcolor: C.accent,
-        boxShadow: large ? '0 10px 34px rgba(28, 57, 85, 0.28)' : 'none',
-        transition: 'transform 160ms, background-color 160ms',
-        '&:hover': { bgcolor: C.ink, transform: 'translateY(-1px)' },
+        ...(inverse ? { '&:focus-visible': { outline: `2px solid ${C.paperOnGround}`, outlineOffset: 3 } } : focusRing),
+        px: 2.75,
+        py: 1.375,
+        fontSize: 15,
+        fontWeight: 500,
+        letterSpacing: '0.005em',
+        borderRadius: '2px',
+        boxShadow: 'none',
+        color: inverse ? C.ground : '#ffffff',
+        bgcolor: inverse ? C.paperOnGround : C.accent,
+        transition: `background-color ${QUIET}`,
+        '&:hover': {
+          boxShadow: 'none',
+          bgcolor: inverse ? '#ffffff' : C.ink,
+          '& .MuiButton-endIcon svg': { transform: down ? 'translateY(2px)' : 'translateX(3px)' },
+        },
+        '@media (prefers-reduced-motion: reduce)': { '&:hover .MuiButton-endIcon svg': { transform: 'none' } },
       }}
     >
-      Sign in
+      {children}
     </Button>
   );
 }
 
+/** Text with a rule that comes in under it on hover. */
+const quietLink = {
+  ...focusRing,
+  color: C.ink,
+  fontSize: 15,
+  fontWeight: 500,
+  textDecoration: 'none',
+  borderRadius: '1px',
+  backgroundImage: `linear-gradient(${C.ink}, ${C.ink})`,
+  backgroundRepeat: 'no-repeat',
+  backgroundPosition: '0 100%',
+  backgroundSize: '0 1px',
+  paddingBottom: '2px',
+  transition: `background-size ${QUIET}`,
+  '&:hover': { backgroundSize: '100% 1px' },
+} as const;
+
 function Eyebrow({ children }: { children: string }) {
   return (
-    <Typography component="p" sx={{ color: C.muted, fontSize: 13, fontWeight: 600, letterSpacing: '0.16em', textTransform: 'uppercase', mb: 2 }}>
+    <Typography component="p" sx={{ color: C.muted, fontSize: 15, fontWeight: 500, mb: { xs: 2, md: 3 } }}>
       {children}
     </Typography>
   );
 }
 
-/** A call's path, as a line of light moving along its stages. */
+/** The path of a call, sitting on the horizon: one line across the whole screen. */
 function Journey() {
   return (
-    <Box
-      role="img"
-      aria-label={`The path of a call: ${JOURNEY.join(', ')}`}
-      sx={{
-        position: 'relative',
-        display: 'grid',
-        gridTemplateColumns: `repeat(${JOURNEY.length}, minmax(0, 1fr))`,
-        px: { xs: 0.5, sm: 2 },
-        py: { xs: 2.25, sm: 3 },
-        borderRadius: { xs: '18px', sm: '24px' },
-        border: `1px solid ${C.line}`,
-        background: 'rgba(255, 255, 255, 0.78)',
-        boxShadow: '0 16px 50px rgba(28, 57, 85, 0.1)',
-        backdropFilter: 'blur(14px)',
-      }}
-    >
-      {JOURNEY.map((step, i) => (
-        <Stack key={step} alignItems="center" useFlexGap spacing={1.25} sx={{ position: 'relative', minWidth: 0 }}>
-          {i > 0 && (
-            <Box sx={{ position: 'absolute', top: 6, right: '50%', width: '100%', height: '1px', background: `linear-gradient(90deg, ${C.line}, ${C.accent})` }} />
-          )}
-          <Box
-            sx={{
-              position: 'relative',
-              width: 13,
-              height: 13,
-              borderRadius: '50%',
-              bgcolor: i === JOURNEY.length - 1 ? C.accent : C.surface,
-              border: `2px solid ${C.accent}`,
-              boxShadow: i === JOURNEY.length - 1 ? '0 0 0 5px rgba(28, 57, 85, 0.12)' : 'none',
-            }}
-          />
-          <Typography sx={{ color: i === JOURNEY.length - 1 ? C.ink : C.muted, fontSize: { xs: 11, sm: 14 }, fontWeight: 500, textAlign: 'center', lineHeight: 1.25 }}>
-            {step}
-          </Typography>
-        </Stack>
-      ))}
+    // The sky above ends on this line, so it starts a dot's half-height up into it.
+    <Box role="img" aria-label={`The path of a call: ${JOURNEY.join(', ')}`} sx={{ position: 'relative', mt: '-5px' }}>
+      <Box
+        sx={{
+          position: 'absolute',
+          top: 4,
+          left: 0,
+          right: 0,
+          height: '1px',
+          bgcolor: C.accent,
+          transformOrigin: 'left',
+          animation: `${drawLine} 1400ms cubic-bezier(0.2, 0.7, 0.2, 1) both`,
+          '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
+        }}
+      />
+      <Box sx={{ ...container, position: 'relative', display: 'grid', gridTemplateColumns: `repeat(${JOURNEY.length}, minmax(0, 1fr))` }}>
+        {JOURNEY.map((step, i) => {
+          const last = i === JOURNEY.length - 1;
+          return (
+            <Box key={step} sx={{ minWidth: 0 }}>
+              <Box
+                sx={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: '50%',
+                  bgcolor: last ? C.accent : C.page,
+                  border: `1px solid ${C.accent}`,
+                }}
+              />
+              <Typography sx={{ mt: 1.5, pr: 0.5, color: last ? C.ink : C.muted, fontSize: { xs: 'clamp(10.5px, 3.1vw, 12px)', sm: 14 }, fontWeight: last ? 500 : 400, lineHeight: 1.25 }}>{step}</Typography>
+            </Box>
+          );
+        })}
+      </Box>
     </Box>
   );
 }
@@ -168,32 +212,24 @@ function Numbers() {
       ]
     : [];
   if (!isLoading && figures.length === 0) return null;
+  // All three hang from stops on the path above: the first, the third and the fourth.
+  const wideSpans = figures.length === 3 ? [2, 1, 2] : [2, 2];
   return (
-    <Box component="section" aria-label="What has been delivered so far" sx={{ ...container, pt: { xs: 7, md: 12 } }}>
+    <Box component="section" aria-label="What has been delivered so far" sx={{ ...container, pt: { xs: 6, md: 9 } }}>
       <Box
         sx={{
           display: 'grid',
-          gridTemplateColumns: { xs: '1fr', sm: `repeat(${isLoading ? 3 : figures.length}, minmax(0, 1fr))` },
-          borderTop: `1px solid ${C.line}`,
-          borderBottom: `1px solid ${C.line}`,
-          minHeight: { sm: 158 },
+          // A column grows if its figure ever outgrows it, rather than running into the next.
+          gridTemplateColumns: { xs: 'repeat(2, minmax(min-content, 1fr))', sm: 'repeat(3, minmax(min-content, 1fr))', md: 'repeat(5, minmax(min-content, 1fr))' },
+          rowGap: 3,
+          // Room kept while the server wakes, so the page does not jump when it answers.
+          ...(isLoading ? { minHeight: { xs: 168, sm: 94 } } : {}),
         }}
       >
         {figures.map((f, i) => (
-          <Box
-            key={f.label}
-            sx={{
-              ...riseIn(i * 100),
-              py: { xs: 2.5, sm: 4 },
-              pl: { sm: i ? 4 : 0 },
-              borderLeft: { sm: i ? `1px solid ${C.line}` : 'none' },
-              borderTop: { xs: i ? `1px solid ${C.line}` : 'none', sm: 'none' },
-            }}
-          >
-            <Typography sx={{ ...silverText, fontSize: 'clamp(38px, 5vw, 64px)', fontWeight: 600, lineHeight: 1.05, letterSpacing: '-0.035em', fontVariantNumeric: 'tabular-nums' }}>
-              {f.value}
-            </Typography>
-            <Typography sx={{ color: C.muted, fontSize: 15, mt: 0.75 }}>{f.label}</Typography>
+          <Box key={f.label} sx={{ ...riseIn(i * 90), pr: { xs: 2, md: 3 }, gridColumn: { xs: figures.length === 3 && i === 2 ? 'span 2' : 'span 1', sm: 'span 1', md: `span ${wideSpans[i]}` } }}>
+            <Typography sx={{ ...display, fontSize: 'clamp(42px, 4.6vw, 64px)', lineHeight: 1, fontVariantNumeric: 'lining-nums tabular-nums' }}>{f.value}</Typography>
+            <Typography sx={{ color: C.muted, fontSize: 15, mt: 1 }}>{f.label}</Typography>
           </Box>
         ))}
       </Box>
@@ -201,29 +237,20 @@ function Numbers() {
   );
 }
 
-/** A window of the app, drawn for the page: an illustration, with nothing real in it. */
-function Picture({ label, children }: { label: string; children: ReactNode }) {
+// ---- Fragments of the app, drawn for the page: illustrations with nothing real in them. ----
+
+function Sheet({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Box
-      role="img"
-      aria-label={label}
-      sx={{
-        borderRadius: '20px',
-        border: `1px solid ${C.line}`,
-        bgcolor: C.surface,
-        boxShadow: '0 24px 60px rgba(28, 57, 85, 0.14)',
-        p: { xs: 2, md: 2.5 },
-        minWidth: 0,
-      }}
-    >
+    <Box role="img" aria-label={label} sx={{ width: '100%', maxWidth: { xs: 520, md: 'none' }, bgcolor: C.surface, border: hairline, borderRadius: '3px', minWidth: 0 }}>
       {children}
     </Box>
   );
 }
 
-const PICTURE_ROW = { display: 'flex', alignItems: 'center', gap: 1.25, px: 1.5, py: 1.25, borderRadius: '12px', bgcolor: C.tint } as const;
-const pictureTitle = { color: C.ink, fontSize: 15, fontWeight: 600 } as const;
-const pictureNote = { color: C.muted, fontSize: 13 } as const;
+const sheetHead = { px: { xs: 2, sm: 2.5 }, pt: { xs: 2, sm: 2.5 }, pb: 2, borderBottom: hairline } as const;
+const sheetTitle = { color: C.ink, fontSize: 15, fontWeight: 600, letterSpacing: '-0.005em' } as const;
+const sheetNote = { color: C.muted, fontSize: 13 } as const;
+const sheetAction = { px: 1.5, py: 0.625, borderRadius: '2px', fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap' } as const;
 
 /** Who is free for a time, as an Associate sees it. */
 function AssociatePicture() {
@@ -233,70 +260,65 @@ function AssociatePicture() {
     { where: 'Expert in Seoul', local: '11:00 PM', free: false },
   ];
   return (
-    <Picture label="Illustration: choosing a time and seeing which Experts are free, each in their own time zone">
-      <Typography sx={pictureTitle}>Who is free at 10:00 AM?</Typography>
-      <Typography sx={{ ...pictureNote, mb: 1.75 }}>Tuesday · 60 minutes</Typography>
-      <Stack spacing={1}>
-        {experts.map((e) => (
-          <Box key={e.where} sx={{ ...PICTURE_ROW, opacity: e.free ? 1 : 0.55 }}>
-            <Box sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: e.free ? '#2f9e6e' : C.muted }} />
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography sx={{ color: C.ink, fontSize: 14, fontWeight: 500 }}>{e.where}</Typography>
-              <Typography sx={pictureNote}>{e.local} their time</Typography>
-            </Box>
-            <Box component="span" sx={{ px: 1.5, py: 0.5, borderRadius: 99, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', ...(e.free ? { bgcolor: C.accent, color: '#ffffff' } : { color: C.muted }) }}>
-              {e.free ? 'Schedule' : 'Busy'}
-            </Box>
+    <Sheet label="Illustration: choosing a time and seeing which Experts are free, each in their own time zone">
+      <Box sx={sheetHead}>
+        <Typography sx={sheetTitle}>Who is free at 10:00 AM?</Typography>
+        <Typography sx={sheetNote}>Tuesday · 60 minutes</Typography>
+      </Box>
+      {experts.map((e, i) => (
+        <Stack key={e.where} direction="row" alignItems="center" spacing={1.5} sx={{ px: { xs: 2, sm: 2.5 }, py: 1.5, borderTop: i ? hairline : 'none', opacity: e.free ? 1 : 0.55 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography sx={{ color: C.ink, fontSize: 14, fontWeight: 500 }}>{e.where}</Typography>
+            <Typography sx={sheetNote}>{e.local} their time</Typography>
           </Box>
-        ))}
-      </Stack>
-    </Picture>
+          <Box component="span" sx={{ ...sheetAction, ...(e.free ? { bgcolor: C.accent, color: '#ffffff' } : { color: C.muted, px: 0 }) }}>
+            {e.free ? 'Schedule' : 'Busy'}
+          </Box>
+        </Stack>
+      ))}
+    </Sheet>
   );
 }
 
 /** A new call to confirm, as an Expert sees it. */
 function ExpertPicture() {
+  const days = [{ day: 'Mon' }, { day: 'Tue', call: true }, { day: 'Wed' }, { day: 'Thu' }, { day: 'Fri', off: true }];
   return (
-    <Picture label="Illustration: a new call to confirm in the Expert's own time zone, beside their calendar">
-      <Typography sx={pictureTitle}>New call to confirm</Typography>
-      <Typography sx={{ ...pictureNote, mb: 1.75 }}>Tuesday, 3:00 PM your time · 60 minutes</Typography>
-      <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-        <Box component="span" sx={{ px: 2, py: 0.75, borderRadius: 99, bgcolor: C.accent, color: '#ffffff', fontSize: 14, fontWeight: 600 }}>
-          Confirm
-        </Box>
-        <Box component="span" sx={{ px: 2, py: 0.75, borderRadius: 99, border: `1px solid ${C.line}`, color: C.accent, fontSize: 14, fontWeight: 500 }}>
-          Ask to move it
-        </Box>
-      </Stack>
-      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 0.75 }}>
-        {[
-          { day: 'Mon' },
-          { day: 'Tue', call: true },
-          { day: 'Wed' },
-          { day: 'Thu' },
-          { day: 'Fri', off: true },
-        ].map((d) => (
-          <Box
-            key={d.day}
-            sx={{
-              height: 92,
-              borderRadius: '10px',
-              p: 0.75,
-              bgcolor: C.tint,
-              position: 'relative',
-            }}
-          >
-            <Typography sx={{ ...pictureNote, fontSize: 12 }}>{d.day}</Typography>
-            {d.call && <Box sx={{ position: 'absolute', left: 5, right: 5, top: 42, height: 30, borderRadius: '6px', bgcolor: C.accent }} />}
+    <Sheet label="Illustration: a new call to confirm in the Expert's own time zone, beside their calendar">
+      <Box sx={sheetHead}>
+        <Typography sx={sheetTitle}>New call to confirm</Typography>
+        <Typography sx={{ ...sheetNote, mb: 1.75 }}>Tuesday, 3:00 PM your time · 60 minutes</Typography>
+        <Stack direction="row" spacing={1}>
+          <Box component="span" sx={{ ...sheetAction, bgcolor: C.accent, color: '#ffffff' }}>
+            Confirm
+          </Box>
+          <Box component="span" sx={{ ...sheetAction, border: hairline, color: C.ink }}>
+            Ask to move it
+          </Box>
+        </Stack>
+      </Box>
+      <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))' }}>
+        {days.map((d, i) => (
+          <Box key={d.day} sx={{ position: 'relative', height: 124, borderLeft: i ? hairline : 'none', px: 1, pt: 1 }}>
+            <Typography sx={{ ...sheetNote, fontSize: 12 }}>{d.day}</Typography>
+            {d.call && <Box sx={{ position: 'absolute', left: 4, right: 4, top: 58, height: 34, borderRadius: '2px', bgcolor: C.accent }} />}
             {d.off && (
-              <Box sx={{ position: 'absolute', left: 5, right: 5, top: 26, bottom: 5, borderRadius: '6px', border: `1px dashed ${C.muted}`, display: 'grid', placeItems: 'center' }}>
-                <Typography sx={{ ...pictureNote, fontSize: 11 }}>Off</Typography>
+              <Box
+                sx={{
+                  position: 'absolute',
+                  inset: '32px 0 0 0',
+                  display: 'grid',
+                  placeItems: 'center',
+                  backgroundImage: `repeating-linear-gradient(135deg, ${C.line} 0 1px, transparent 1px 7px)`,
+                }}
+              >
+                <Typography sx={{ ...sheetNote, fontSize: 12, bgcolor: C.surface, px: 0.75 }}>Off</Typography>
               </Box>
             )}
           </Box>
         ))}
       </Box>
-    </Picture>
+    </Sheet>
   );
 }
 
@@ -305,197 +327,199 @@ function ExpertPicture() {
  * is public: it sells Silver Horizon, showing at a high level how Associates and
  * Experts work on it, with illustrations and no real data. There is nothing to
  * load, so it never waits on the server.
+ *
+ * Its language is meant to carry into the app: type before decoration, a serif for
+ * what is said and Inter for what is used, hairlines rather than boxes, square
+ * shoulders, and navy kept for what matters.
  */
 export default function LandingPage() {
   return (
     <Box className="light" sx={{ minHeight: '100vh', bgcolor: C.page, color: C.ink, overflowX: 'hidden', '& ::selection': { bgcolor: C.accent, color: '#ffffff' } }}>
-      {/* ---------------- first screen ---------------- */}
-      <Box component="section" sx={{ position: 'relative', minHeight: { xs: 720, md: '100vh' }, display: 'flex', flexDirection: 'column', pb: { xs: 3, md: 5 } }}>
-        <Horizon top={{ xs: '66%', md: '66%' }} />
-
-        <Box component="header" sx={{ ...container, position: 'relative', pt: { xs: 2.5, md: 3.5 }, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* ---------------- first screen: sky, and the horizon ---------------- */}
+      <Box
+        component="section"
+        sx={{
+          minHeight: { xs: 640, md: '92svh' },
+          display: 'flex',
+          flexDirection: 'column',
+          // The sky deepens a little toward the horizon, and stops on it.
+          background: `linear-gradient(180deg, ${C.page} 30%, #e4ebf3 100%)`,
+        }}
+      >
+        <Box component="header" sx={{ ...container, pt: { xs: 2.5, md: 3.5 }, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <Box component="img" src="/brand/logo.png" alt="Silver Horizon" sx={{ height: { xs: 30, md: 36 }, width: 'auto', display: 'block' }} />
-          <Stack direction="row" spacing={{ xs: 1, sm: 3 }} alignItems="center">
-            <Box
-              component="a"
-              href="#how-it-works"
-              sx={{ ...focusRing, display: { xs: 'none', sm: 'block' }, color: C.muted, fontSize: 14, fontWeight: 500, textDecoration: 'none', borderRadius: 1, '&:hover': { color: C.ink } }}
-            >
+          <Stack direction="row" spacing={{ xs: 2.5, sm: 4 }} alignItems="center">
+            <Box component="a" href="#how-it-works" sx={{ ...quietLink, display: { xs: 'none', sm: 'block' }, color: C.muted, '&:hover': { color: C.ink, backgroundSize: '100% 1px' } }}>
               How it works
             </Box>
-            <SignInButton />
+            <Box component={RouterLink} to="/login" sx={quietLink}>
+              Sign in
+            </Box>
           </Stack>
         </Box>
 
-        <Box sx={{ ...container, position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', pt: { xs: 7, md: '9vh' } }}>
+        <Box sx={{ ...container, flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', py: { xs: 6, md: 5 } }}>
           <Typography
             component="h1"
             sx={{
-              ...silverText,
+              ...display,
               ...riseIn(),
-              fontSize: 'clamp(42px, 7vw, 92px)',
-              fontWeight: 600,
-              lineHeight: 1.04,
-              letterSpacing: '-0.04em',
-              // Room for the g and p: the gradient text is clipped to this box.
-              pb: '0.14em',
+              fontSize: 'clamp(50px, 8.8vw, 132px)',
+              lineHeight: 0.98,
+              letterSpacing: '-0.032em',
               '& span': { display: 'block' },
+              '& em': { fontStyle: 'italic', color: C.accent },
             }}
           >
-            <span>Connecting expertise.</span> <span>Expanding perspective.</span>
+            <span>Connecting expertise.</span> <span><em>Expanding perspective.</em></span>
           </Typography>
-          <Typography
-            sx={{
-              ...riseIn(120),
-              mt: { xs: 1.5, md: 2 },
-              maxWidth: 620,
-              color: C.accent,
-              opacity: 0.86,
-              fontSize: { xs: 17, md: 20 },
-              lineHeight: 1.5,
-            }}
-          >
-            A trusted platform for expert consulting, strategic connections, and professional insight.
-          </Typography>
-          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ ...riseIn(240), mt: { xs: 3, md: 3.5 } }}>
-            <Button
-              component="a"
-              href="#how-it-works"
-              endIcon={<ArrowDownwardRounded />}
-              sx={{
-                ...focusRing,
-                px: 3.5,
-                py: 1.4,
-                fontSize: 16,
-                fontWeight: 600,
-                borderRadius: 99,
-                color: '#ffffff',
-                bgcolor: C.accent,
-                boxShadow: '0 10px 34px rgba(28, 57, 85, 0.28)',
-                transition: 'transform 160ms, background-color 160ms',
-                '&:hover': { bgcolor: C.ink, transform: 'translateY(-1px)' },
-              }}
-            >
+          {/* Set off to the right: the headline runs the full measure, its answer sits under its far end. */}
+          <Box sx={{ ...riseIn(140), ...fourthColumn, mt: { xs: 3.5, md: 5 } }}>
+            <Typography sx={{ color: C.ink, fontSize: { xs: 18, md: 20 }, lineHeight: 1.45, letterSpacing: '-0.005em', textWrap: 'pretty', mb: { xs: 3, md: 3.5 } }}>
+              A trusted platform for expert consulting, strategic connections, and professional insight.
+            </Typography>
+            <ActionButton href="#how-it-works" down>
               See how it works
-            </Button>
-          </Stack>
-
-          <Box sx={{ ...riseIn(380), width: '100%', maxWidth: 860, mt: 'auto', pt: { xs: 7, md: 6 } }}>
-            <Journey />
+            </ActionButton>
           </Box>
         </Box>
       </Box>
 
+      <Journey />
+
       <Numbers />
 
       {/* ---------------- what it is ---------------- */}
-      <Box component="section" aria-labelledby="what-heading" sx={{ ...container, pt: { xs: 9, md: 16 } }}>
+      <Box component="section" aria-labelledby="what-heading" sx={{ ...container, pt: SECTION_GAP }}>
         <Eyebrow>What we do</Eyebrow>
-        <Typography id="what-heading" component="h2" sx={{ fontSize: 'clamp(32px, 4.6vw, 56px)', fontWeight: 600, lineHeight: 1.08, letterSpacing: '-0.03em', maxWidth: 820 }}>
+        <Typography id="what-heading" component="h2" sx={{ ...h2, maxWidth: 920 }}>
           The answers that matter are held by people, not documents.
         </Typography>
-        <Box sx={{ display: 'grid', gap: { xs: 1.5, md: 2 }, gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' }, mt: { xs: 4, md: 7 } }}>
+        <Box sx={{ mt: { xs: 5, md: 9 }, borderBottom: hairline }}>
           {PILLARS.map((p) => (
             <Box
               key={p.title}
               sx={{
-                p: { xs: 3, md: 4 },
-                borderRadius: '24px',
-                border: `1px solid ${C.line}`,
-                background: `linear-gradient(160deg, ${C.tint}, ${C.surface} 55%)`,
+                display: 'grid',
+                gridTemplateColumns: { xs: '1fr', md: 'repeat(5, minmax(0, 1fr))' },
+                rowGap: 1,
+                py: { xs: 2.5, md: 3.5 },
+                borderTop: hairline,
+                alignItems: 'baseline',
               }}
             >
-              <Typography component="h3" sx={{ fontSize: { xs: 22, md: 26 }, fontWeight: 600, letterSpacing: '-0.02em', mb: 1.25 }}>
+              <Typography component="h3" sx={{ ...display, fontSize: { xs: 26, md: 32 }, lineHeight: 1.15, letterSpacing: '-0.015em', gridColumn: { md: 'span 3' } }}>
                 {p.title}
               </Typography>
-              <Typography sx={{ color: C.muted, fontSize: 16, lineHeight: 1.55 }}>{p.body}</Typography>
+              <Typography sx={{ color: C.muted, fontSize: { xs: 16, md: 17 }, lineHeight: 1.5, gridColumn: { md: 'span 2' } }}>{p.body}</Typography>
             </Box>
           ))}
         </Box>
       </Box>
 
       {/* ---------------- who does what ---------------- */}
-      <Box component="section" id="how-it-works" aria-labelledby="how-heading" sx={{ ...container, pt: { xs: 9, md: 16 }, scrollMarginTop: 24 }}>
-        <Eyebrow>How it works</Eyebrow>
-        <Typography id="how-heading" component="h2" sx={{ fontSize: 'clamp(32px, 4.6vw, 56px)', fontWeight: 600, lineHeight: 1.08, letterSpacing: '-0.03em', maxWidth: 820 }}>
-          Everyone on a call, working from the same page.
-        </Typography>
-        <Stack spacing={{ xs: 2, md: 3 }} sx={{ mt: { xs: 4, md: 7 } }}>
-          {ROLES.map((r, i) => (
-            <Box
-              key={r.role}
-              sx={{
-                display: 'grid',
-                gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' },
-                gap: { xs: 3, md: 6 },
-                alignItems: 'center',
-                p: { xs: 3, md: 6 },
-                borderRadius: '28px',
-                border: `1px solid ${C.line}`,
-                background: `linear-gradient(160deg, ${C.tint}, ${C.surface} 60%)`,
-              }}
-            >
-              <Box sx={{ order: { md: i % 2 } }}>
-                <Typography component="p" sx={{ color: C.accent, fontSize: 15, fontWeight: 600, mb: 1.25 }}>
-                  {r.role}
-                </Typography>
-                <Typography component="h3" sx={{ fontSize: 'clamp(26px, 3vw, 38px)', fontWeight: 600, lineHeight: 1.12, letterSpacing: '-0.025em', mb: { xs: 2.5, md: 3 } }}>
-                  {r.title}
-                </Typography>
-                <Stack component="ul" spacing={1.5} sx={{ listStyle: 'none', m: 0, p: 0 }}>
-                  {r.points.map((point) => (
-                    <Stack key={point} component="li" direction="row" spacing={1.25} alignItems="flex-start">
-                      <CheckRounded sx={{ fontSize: 20, color: C.accent, mt: 0.2, flexShrink: 0 }} />
-                      <Typography sx={{ color: C.muted, fontSize: 16, lineHeight: 1.5 }}>{point}</Typography>
-                    </Stack>
-                  ))}
-                </Stack>
+      <Box component="section" id="how-it-works" aria-labelledby="how-heading" sx={{ pt: SECTION_GAP, scrollMarginTop: 24 }}>
+        <Box sx={container}>
+          <Eyebrow>How it works</Eyebrow>
+          <Typography id="how-heading" component="h2" sx={{ ...h2, maxWidth: 820 }}>
+            Everyone on a call, working from the same page.
+          </Typography>
+        </Box>
+        <Stack spacing={{ xs: 7, md: 12 }} sx={{ mt: { xs: 6, md: 10 } }}>
+          {ROLES.map((r, i) => {
+            // The tinted ground runs off the screen, on alternating sides; what stands on it stays on the measure.
+            const flipped = i % 2 === 1;
+            return (
+              <Box
+                key={r.role}
+                sx={{
+                  display: 'grid',
+                  gridTemplateColumns: {
+                    xs: `${GUTTER} minmax(0, 1fr) ${GUTTER}`,
+                    md: `minmax(${GUTTER}, 1fr) repeat(2, minmax(0, ${MEASURE / 2}px)) minmax(${GUTTER}, 1fr)`,
+                  },
+                  rowGap: { xs: 4, md: 0 },
+                }}
+              >
+                <Box sx={{ gridRow: 1, gridColumn: { xs: 2, md: flipped ? 3 : 2 }, alignSelf: 'center', ...(flipped ? { pl: { md: 9 } } : { pr: { md: 9 } }) }}>
+                  <Typography component="p" sx={{ color: C.muted, fontSize: 15, fontWeight: 500, mb: 1.5 }}>
+                    {r.role}
+                  </Typography>
+                  <Typography component="h3" sx={{ ...display, fontSize: 'clamp(30px, 3.2vw, 44px)', lineHeight: 1.08, letterSpacing: '-0.02em', textWrap: 'balance', mb: { xs: 3, md: 4 } }}>
+                    {r.title}
+                  </Typography>
+                  <Box component="ul" sx={{ listStyle: 'none', m: 0, p: 0, borderBottom: hairline }}>
+                    {r.points.map((point) => (
+                      <Box component="li" key={point} sx={{ py: 1.5, borderTop: hairline, color: C.ink, fontSize: 16, lineHeight: 1.45 }}>
+                        {point}
+                      </Box>
+                    ))}
+                  </Box>
+                </Box>
+                <Box sx={{ gridRow: { xs: 2, md: 1 }, gridColumn: { xs: '1 / -1', md: flipped ? '1 / 3' : '3 / -1' }, bgcolor: C.tint }} />
+                <Box
+                  sx={{
+                    gridRow: { xs: 2, md: 1 },
+                    gridColumn: { xs: 2, md: flipped ? 2 : 3 },
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    py: { xs: 4, md: 9 },
+                    ...(flipped ? { pr: { md: 7 } } : { pl: { md: 7 } }),
+                  }}
+                >
+                  {r.picture === 'associate' ? <AssociatePicture /> : <ExpertPicture />}
+                </Box>
               </Box>
-              {r.picture === 'associate' ? <AssociatePicture /> : <ExpertPicture />}
-            </Box>
-          ))}
+            );
+          })}
         </Stack>
       </Box>
 
       {/* ---------------- the path of a call ---------------- */}
-      <Box component="section" aria-labelledby="path-heading" sx={{ ...container, pt: { xs: 9, md: 16 } }}>
+      <Box component="section" aria-labelledby="path-heading" sx={{ ...container, pt: SECTION_GAP, pb: SECTION_GAP }}>
         <Eyebrow>The path of a call</Eyebrow>
-        <Typography id="path-heading" component="h2" sx={{ fontSize: 'clamp(32px, 4.6vw, 56px)', fontWeight: 600, lineHeight: 1.08, letterSpacing: '-0.03em' }}>
+        <Typography id="path-heading" component="h2" sx={h2}>
           From first booking to paid.
         </Typography>
-        <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0, mt: { xs: 3, md: 6 }, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, gap: { md: 4 } }}>
+        <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0, mt: { xs: 4, md: 8 }, display: 'grid', gridTemplateColumns: { xs: '1fr', md: 'repeat(4, minmax(0, 1fr))' }, columnGap: 4 }}>
           {STEPS.map((s, i) => (
-            <Box component="li" key={s.title} sx={{ borderTop: `1px solid ${C.line}`, pt: 2.5, pb: { xs: 3.5, md: 0 } }}>
-              <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: { xs: 1.25, md: 3 } }}>
-                <Typography sx={{ color: C.muted, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>0{i + 1}</Typography>
-                <Box component="span" sx={{ px: 1.25, py: 0.25, borderRadius: 99, border: `1px solid ${C.line}`, color: C.accent, fontSize: 12.5, fontWeight: 500 }}>
-                  {s.who}
-                </Box>
-              </Stack>
-              <Typography component="h3" sx={{ fontSize: { xs: 24, md: 28 }, fontWeight: 600, letterSpacing: '-0.02em', mb: 1 }}>
+            <Box component="li" key={s.title} sx={{ borderTop: `1px solid ${C.accent}`, pt: 1.75, pb: { xs: 4, md: 0 } }}>
+              <Typography sx={{ color: C.muted, fontSize: 14, fontVariantNumeric: 'tabular-nums', mb: { xs: 2, md: 5 } }}>
+                0{i + 1}&ensp;·&ensp;{s.who}
+              </Typography>
+              <Typography component="h3" sx={{ ...display, fontSize: { xs: 28, md: 32 }, lineHeight: 1.12, letterSpacing: '-0.015em', mb: 1.25 }}>
                 {s.title}
               </Typography>
-              <Typography sx={{ color: C.muted, fontSize: 16, lineHeight: 1.55 }}>{s.body}</Typography>
+              <Typography sx={{ color: C.muted, fontSize: 16, lineHeight: 1.5 }}>{s.body}</Typography>
             </Box>
           ))}
         </Box>
       </Box>
 
-      {/* ---------------- closing ---------------- */}
-      <Box component="section" aria-labelledby="close-heading" sx={{ position: 'relative', mt: { xs: 8, md: 14 }, pt: { xs: 9, md: 14 }, pb: { xs: 22, md: 30 }, textAlign: 'center' }}>
-        <Horizon top={{ xs: '74%', md: '72%' }} />
-        <Box sx={{ ...container, position: 'relative' }}>
-          <Typography id="close-heading" component="h2" sx={{ ...silverText, fontSize: 'clamp(36px, 6vw, 76px)', fontWeight: 600, lineHeight: 1.05, letterSpacing: '-0.035em' }}>
+      {/* ---------------- closing: below the horizon, the page comes to ground ---------------- */}
+      <Box sx={{ bgcolor: C.ground, color: C.paperOnGround }}>
+        <Box component="section" aria-labelledby="close-heading" sx={{ ...container, pt: { xs: 9, md: 16 }, pb: { xs: 9, md: 14 } }}>
+          <Typography
+            id="close-heading"
+            component="h2"
+            sx={{ ...display, color: '#ffffff', fontStyle: 'italic', fontSize: 'clamp(64px, 12vw, 184px)', lineHeight: 0.95, letterSpacing: '-0.035em' }}
+          >
             See further.
           </Typography>
-          <Typography sx={{ color: C.accent, opacity: 0.86, fontSize: { xs: 16, md: 18 }, mt: 2, mb: 3.5 }}>Accounts are by invitation.</Typography>
-          <SignInButton large />
+          <Box sx={{ ...fourthColumn, mt: { xs: 5, md: 8 } }}>
+            <Typography sx={{ color: C.paperOnGround, fontSize: { xs: 18, md: 20 }, lineHeight: 1.45, mb: { xs: 3, md: 3.5 } }}>Accounts are by invitation.</Typography>
+            <ActionButton to="/login" inverse>
+              Sign in
+            </ActionButton>
+          </Box>
         </Box>
-      </Box>
-
-      <Box component="footer" sx={{ ...container, position: 'relative', py: 3, borderTop: `1px solid ${C.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-        <Box component="img" src="/brand/logo.png" alt="" sx={{ height: 22, width: 'auto', display: 'block', opacity: 0.75 }} />
-        <Typography sx={{ color: C.muted, fontSize: 13 }}>© {new Date().getFullYear()} Silver Horizon</Typography>
+        <Box component="footer" sx={{ borderTop: '1px solid rgba(232, 238, 245, 0.16)' }}>
+          <Box sx={{ ...container, py: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
+            <Box component="img" src="/brand/logo-dark.png" alt="" sx={{ height: 24, width: 'auto', display: 'block', opacity: 0.85 }} />
+            <Typography sx={{ color: C.mutedOnGround, fontSize: 13 }}>© {new Date().getFullYear()} Silver Horizon</Typography>
+          </Box>
+        </Box>
       </Box>
     </Box>
   );
