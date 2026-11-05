@@ -20,6 +20,7 @@ import type {
   BlockBodyInput,
   BlockPatchInput,
   CalendarResponse,
+  PublicStats,
   CredentialDTO,
   CredentialInput,
   UpdateCredentialInput,
@@ -446,6 +447,9 @@ export function createApiClient(options: ClientOptions) {
       remove: (id: string, scope: EditScope = 'all', date?: string) =>
         del<PersonalEventMutationResult>(`/personal-events/${enc(id)}`, { scope, date }),
     },
+
+    /** Open to anyone, without signing in. */
+    publicStats: () => get<PublicStats>('/public/stats'),
 
     dashboard: {
       get: () => get<DashboardSummary>('/dashboard'),

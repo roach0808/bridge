@@ -33,6 +33,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     queryClient.clear();
   }, [queryClient]);
 
+  // Remembers that this browser has a session, for `mayBeSignedIn`.
+  useEffect(() => {
+    if (status !== 'loading') rememberSession(status === 'authenticated');
+  }, [status]);
+
   // Restore the session from the httpOnly refresh cookie on first load.
   useEffect(() => {
     let cancelled = false;
@@ -101,6 +106,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+const SESSION_HINT = 'god.signedIn';
+
+function rememberSession(signedIn: boolean) {
+  try {
+    if (signedIn) window.localStorage.setItem(SESSION_HINT, '1');
+    else window.localStorage.removeItem(SESSION_HINT);
+  } catch {
+    /* storage unavailable: the public pages just wait for the answer from the server */
+  }
+}
+
+/**
+ * Whether this browser was signed in last time. Asking the server takes a while
+ * when it has been asleep, and a visitor should not wait for it just to read the
+ * public pages; someone signed in should not see them flash by. Only ever decides
+ * what to show meanwhile: the session cookie and the server have the last word.
+ */
+export function mayBeSignedIn(): boolean {
+  try {
+    return window.localStorage.getItem(SESSION_HINT) === '1';
+  } catch {
+    return true;
+  }
 }
 
 export function useAuth(): AuthContextValue {

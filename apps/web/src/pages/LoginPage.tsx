@@ -1,3 +1,4 @@
+import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
 import VisibilityOffRounded from '@mui/icons-material/VisibilityOffRounded';
 import VisibilityRounded from '@mui/icons-material/VisibilityRounded';
 import {
@@ -14,11 +15,12 @@ import {
   Typography,
 } from '@mui/material';
 import { useEffect, useState, type FormEvent } from 'react';
-import { BrandLogo } from '@/components/BrandLogo';
+import { Link as RouterLink } from 'react-router';
 import { useAuth } from '@/auth/AuthProvider';
 import { GoogleSignInButton } from '@/components/GoogleSignInButton';
 import { api } from '@/lib/api';
 import { errorMessage } from '@/lib/errors';
+import { Horizon, PUBLIC_COLORS, riseIn } from './public/Horizon';
 
 export default function LoginPage() {
   const { login, loginWithGoogle } = useAuth();
@@ -64,36 +66,26 @@ export default function LoginPage() {
   return (
     <Box
       sx={{
+        position: 'relative',
         minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        px: 2,
-        py: 6,
-        bgcolor: 'background.default',
+        bgcolor: PUBLIC_COLORS.night,
+        overflow: 'hidden',
       }}
     >
-      {/* The brand banner on wider screens; its tagline is part of the picture. */}
-      <Box
-        component="img"
-        src="/brand/banner.jpg"
-        alt="Silver Horizon — Connecting Expertise. Expanding Perspective."
-        sx={{
-          display: { xs: 'none', sm: 'block' },
-          width: '100%',
-          maxWidth: 1080,
-          height: 'auto',
-          borderRadius: '18px',
-          mb: 4,
-          boxShadow: '0 12px 40px rgba(28, 57, 85, 0.12)',
-        }}
-      />
-      <Box sx={{ width: '100%', maxWidth: 380 }}>
-        <Box sx={{ display: { xs: 'flex', sm: 'none' }, justifyContent: 'center', mb: 3 }}>
-          <BrandLogo height={40} />
+      <Horizon top="78%" />
+      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ position: 'relative', px: { xs: 2.5, sm: 4 }, pt: { xs: 2.5, md: 3.5 } }}>
+        <Box component={RouterLink} to="/" aria-label="Silver Horizon home" sx={{ display: 'block', borderRadius: 1, '&:focus-visible': { outline: `2px solid ${PUBLIC_COLORS.glow}`, outlineOffset: 3 } }}>
+          <Box component="img" src="/brand/logo-dark.png" alt="" sx={{ height: { xs: 30, md: 36 }, width: 'auto', display: 'block' }} />
         </Box>
-        <Card component="form" onSubmit={submit} noValidate sx={{ p: { xs: 3, sm: 4 } }}>
+        <Button component={RouterLink} to="/" startIcon={<ArrowBackRounded />} sx={{ color: PUBLIC_COLORS.muted, '&:hover': { color: PUBLIC_COLORS.text, bgcolor: 'transparent' } }}>
+          Home
+        </Button>
+      </Stack>
+      <Box sx={{ ...riseIn(), position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', px: 2, py: 5 }}>
+      <Box sx={{ width: '100%', maxWidth: 400 }}>
+        <Card component="form" onSubmit={submit} noValidate sx={{ p: { xs: 3, sm: 4 }, borderRadius: '24px', boxShadow: '0 24px 80px rgba(0, 0, 0, 0.45)' }}>
           <Typography variant="h5" component="h1" sx={{ mb: 0.5 }}>
             Welcome back
           </Typography>
@@ -141,9 +133,10 @@ export default function LoginPage() {
             </Button>
           </Stack>
         </Card>
-        <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 3, textAlign: 'center' }}>
-          Accounts are created by the Founder or a Manager.
+        <Typography variant="body2" component="p" sx={{ mt: 2.5, textAlign: 'center', color: PUBLIC_COLORS.silver }}>
+          Accounts are by invitation.
         </Typography>
+      </Box>
       </Box>
     </Box>
   );
