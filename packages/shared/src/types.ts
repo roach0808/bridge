@@ -487,7 +487,7 @@ export interface PublicStats {
   deliveredCalls: number;
   /** Whole hours of those calls. */
   hoursDelivered: number;
-  /** Income that reached the bank, rounded down to the nearest $1,000. */
+  /** The invoice amounts of those calls, rounded down to the nearest $1,000. */
   incomeAtLeast: number;
 }
 

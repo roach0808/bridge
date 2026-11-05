@@ -158,12 +158,12 @@ const whole = new Intl.NumberFormat('en-US');
  * if it cannot answer, the section is simply not there.
  */
 function Numbers() {
-  const { data, isLoading } = useQuery({ queryKey: qk.publicStats, queryFn: () => api.publicStats(), staleTime: 10 * 60_000, retry: 1 });
+  const { data, isLoading } = useQuery({ queryKey: qk.publicStats, queryFn: () => api.publicStats(), staleTime: 60_000, refetchInterval: 60_000, retry: 1 });
   const figures = data
     ? [
         ...(data.deliveredCalls >= MIN_CALLS ? [{ value: whole.format(data.deliveredCalls), label: 'Calls delivered' }] : []),
         ...(data.hoursDelivered >= MIN_HOURS ? [{ value: whole.format(data.hoursDelivered), label: 'Hours of expertise' }] : []),
-        ...(data.incomeAtLeast >= MIN_INCOME ? [{ value: `$${whole.format(data.incomeAtLeast)}+`, label: 'Total income' }] : []),
+        ...(data.incomeAtLeast >= MIN_INCOME ? [{ value: `$${whole.format(data.incomeAtLeast)}+`, label: 'Total income on invoice' }] : []),
       ]
     : [];
   if (!isLoading && figures.length === 0) return null;
