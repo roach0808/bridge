@@ -65,27 +65,28 @@ export default function LoginPage() {
 
   return (
     <Box
+      className="light"
       sx={{
         position: 'relative',
         minHeight: '100vh',
         display: 'flex',
         flexDirection: 'column',
-        bgcolor: PUBLIC_COLORS.night,
+        bgcolor: PUBLIC_COLORS.page,
         overflow: 'hidden',
       }}
     >
       <Horizon top="78%" />
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ position: 'relative', px: { xs: 2.5, sm: 4 }, pt: { xs: 2.5, md: 3.5 } }}>
-        <Box component={RouterLink} to="/" aria-label="Silver Horizon home" sx={{ display: 'block', borderRadius: 1, '&:focus-visible': { outline: `2px solid ${PUBLIC_COLORS.glow}`, outlineOffset: 3 } }}>
-          <Box component="img" src="/brand/logo-dark.png" alt="" sx={{ height: { xs: 30, md: 36 }, width: 'auto', display: 'block' }} />
+        <Box component={RouterLink} to="/" aria-label="Silver Horizon home" sx={{ display: 'block', borderRadius: 1, '&:focus-visible': { outline: `2px solid ${PUBLIC_COLORS.accent}`, outlineOffset: 3 } }}>
+          <Box component="img" src="/brand/logo.png" alt="" sx={{ height: { xs: 30, md: 36 }, width: 'auto', display: 'block' }} />
         </Box>
-        <Button component={RouterLink} to="/" startIcon={<ArrowBackRounded />} sx={{ color: PUBLIC_COLORS.muted, '&:hover': { color: PUBLIC_COLORS.text, bgcolor: 'transparent' } }}>
+        <Button component={RouterLink} to="/" startIcon={<ArrowBackRounded />} sx={{ color: PUBLIC_COLORS.muted, '&:hover': { color: PUBLIC_COLORS.ink, bgcolor: 'transparent' } }}>
           Home
         </Button>
       </Stack>
       <Box sx={{ ...riseIn(), position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', px: 2, py: 5 }}>
       <Box sx={{ width: '100%', maxWidth: 400 }}>
-        <Card component="form" onSubmit={submit} noValidate sx={{ p: { xs: 3, sm: 4 }, borderRadius: '24px', boxShadow: '0 24px 80px rgba(0, 0, 0, 0.45)' }}>
+        <Card component="form" onSubmit={submit} noValidate sx={{ p: { xs: 3, sm: 4 }, borderRadius: '24px', boxShadow: '0 24px 70px rgba(28, 57, 85, 0.16)' }}>
           <Typography variant="h5" component="h1" sx={{ mb: 0.5 }}>
             Welcome back
           </Typography>
@@ -133,7 +134,7 @@ export default function LoginPage() {
             </Button>
           </Stack>
         </Card>
-        <Typography variant="body2" component="p" sx={{ mt: 2.5, textAlign: 'center', color: PUBLIC_COLORS.silver }}>
+        <Typography variant="body2" component="p" sx={{ mt: 2.5, textAlign: 'center', color: PUBLIC_COLORS.muted }}>
           Accounts are by invitation.
         </Typography>
       </Box>

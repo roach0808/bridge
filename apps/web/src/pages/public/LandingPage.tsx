@@ -61,13 +61,13 @@ const JOURNEY = ['Arranged', 'Confirmed', 'On the call', 'Finished', 'Settled'];
 const container = { width: '100%', maxWidth: 1180, mx: 'auto', px: { xs: 2.5, sm: 4 } } as const;
 
 const silverText = {
-  background: `linear-gradient(180deg, #ffffff 20%, ${C.silver} 62%, #8ea6c0 100%)`,
+  background: `linear-gradient(180deg, ${C.ink} 25%, ${C.accent} 62%, #4a6b8f 100%)`,
   WebkitBackgroundClip: 'text',
   backgroundClip: 'text',
   color: 'transparent',
 } as const;
 
-const focusRing = { '&:focus-visible': { outline: `2px solid ${C.glow}`, outlineOffset: 3 } } as const;
+const focusRing = { '&:focus-visible': { outline: `2px solid ${C.accent}`, outlineOffset: 3 } } as const;
 
 function SignInButton({ large }: { large?: boolean }) {
   return (
@@ -82,11 +82,11 @@ function SignInButton({ large }: { large?: boolean }) {
         fontSize: large ? 16 : 14,
         fontWeight: 600,
         borderRadius: 99,
-        color: C.night,
-        bgcolor: C.glow,
-        boxShadow: large ? '0 8px 40px rgba(190, 214, 240, 0.28)' : 'none',
+        color: '#ffffff',
+        bgcolor: C.accent,
+        boxShadow: large ? '0 10px 34px rgba(28, 57, 85, 0.28)' : 'none',
         transition: 'transform 160ms, background-color 160ms',
-        '&:hover': { bgcolor: '#ffffff', transform: 'translateY(-1px)' },
+        '&:hover': { bgcolor: C.ink, transform: 'translateY(-1px)' },
       }}
     >
       Sign in
@@ -116,14 +116,15 @@ function Journey() {
         py: { xs: 2.25, sm: 3 },
         borderRadius: { xs: '18px', sm: '24px' },
         border: `1px solid ${C.line}`,
-        background: 'rgba(13, 28, 43, 0.62)',
+        background: 'rgba(255, 255, 255, 0.78)',
+        boxShadow: '0 16px 50px rgba(28, 57, 85, 0.1)',
         backdropFilter: 'blur(14px)',
       }}
     >
       {JOURNEY.map((step, i) => (
         <Stack key={step} alignItems="center" useFlexGap spacing={1.25} sx={{ position: 'relative', minWidth: 0 }}>
           {i > 0 && (
-            <Box sx={{ position: 'absolute', top: 6, right: '50%', width: '100%', height: '1px', background: `linear-gradient(90deg, ${C.line}, ${C.silver})` }} />
+            <Box sx={{ position: 'absolute', top: 6, right: '50%', width: '100%', height: '1px', background: `linear-gradient(90deg, ${C.line}, ${C.accent})` }} />
           )}
           <Box
             sx={{
@@ -131,12 +132,12 @@ function Journey() {
               width: 13,
               height: 13,
               borderRadius: '50%',
-              bgcolor: i === JOURNEY.length - 1 ? C.glow : C.navy,
-              border: `2px solid ${C.silver}`,
-              boxShadow: i === JOURNEY.length - 1 ? '0 0 18px rgba(234, 242, 251, 0.8)' : 'none',
+              bgcolor: i === JOURNEY.length - 1 ? C.accent : C.surface,
+              border: `2px solid ${C.accent}`,
+              boxShadow: i === JOURNEY.length - 1 ? '0 0 0 5px rgba(28, 57, 85, 0.12)' : 'none',
             }}
           />
-          <Typography sx={{ color: i === JOURNEY.length - 1 ? C.text : C.muted, fontSize: { xs: 11, sm: 14 }, fontWeight: 500, textAlign: 'center', lineHeight: 1.25 }}>
+          <Typography sx={{ color: i === JOURNEY.length - 1 ? C.ink : C.muted, fontSize: { xs: 11, sm: 14 }, fontWeight: 500, textAlign: 'center', lineHeight: 1.25 }}>
             {step}
           </Typography>
         </Stack>
@@ -209,8 +210,8 @@ function Picture({ label, children }: { label: string; children: ReactNode }) {
       sx={{
         borderRadius: '20px',
         border: `1px solid ${C.line}`,
-        bgcolor: C.navy,
-        boxShadow: '0 30px 80px rgba(0, 0, 0, 0.4)',
+        bgcolor: C.surface,
+        boxShadow: '0 24px 60px rgba(28, 57, 85, 0.14)',
         p: { xs: 2, md: 2.5 },
         minWidth: 0,
       }}
@@ -220,8 +221,8 @@ function Picture({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-const PICTURE_ROW = { display: 'flex', alignItems: 'center', gap: 1.25, px: 1.5, py: 1.25, borderRadius: '12px', bgcolor: C.panel } as const;
-const pictureTitle = { color: C.text, fontSize: 15, fontWeight: 600 } as const;
+const PICTURE_ROW = { display: 'flex', alignItems: 'center', gap: 1.25, px: 1.5, py: 1.25, borderRadius: '12px', bgcolor: C.tint } as const;
+const pictureTitle = { color: C.ink, fontSize: 15, fontWeight: 600 } as const;
 const pictureNote = { color: C.muted, fontSize: 13 } as const;
 
 /** Who is free for a time, as an Associate sees it. */
@@ -238,12 +239,12 @@ function AssociatePicture() {
       <Stack spacing={1}>
         {experts.map((e) => (
           <Box key={e.where} sx={{ ...PICTURE_ROW, opacity: e.free ? 1 : 0.55 }}>
-            <Box sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: e.free ? '#4cc38a' : C.muted }} />
+            <Box sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: e.free ? '#2f9e6e' : C.muted }} />
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography sx={{ color: C.text, fontSize: 14, fontWeight: 500 }}>{e.where}</Typography>
+              <Typography sx={{ color: C.ink, fontSize: 14, fontWeight: 500 }}>{e.where}</Typography>
               <Typography sx={pictureNote}>{e.local} their time</Typography>
             </Box>
-            <Box component="span" sx={{ px: 1.5, py: 0.5, borderRadius: 99, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', ...(e.free ? { bgcolor: C.glow, color: C.night } : { color: C.muted }) }}>
+            <Box component="span" sx={{ px: 1.5, py: 0.5, borderRadius: 99, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap', ...(e.free ? { bgcolor: C.accent, color: '#ffffff' } : { color: C.muted }) }}>
               {e.free ? 'Schedule' : 'Busy'}
             </Box>
           </Box>
@@ -260,10 +261,10 @@ function ExpertPicture() {
       <Typography sx={pictureTitle}>New call to confirm</Typography>
       <Typography sx={{ ...pictureNote, mb: 1.75 }}>Tuesday, 3:00 PM your time · 60 minutes</Typography>
       <Stack direction="row" spacing={1} sx={{ mb: 2 }}>
-        <Box component="span" sx={{ px: 2, py: 0.75, borderRadius: 99, bgcolor: C.glow, color: C.night, fontSize: 14, fontWeight: 600 }}>
+        <Box component="span" sx={{ px: 2, py: 0.75, borderRadius: 99, bgcolor: C.accent, color: '#ffffff', fontSize: 14, fontWeight: 600 }}>
           Confirm
         </Box>
-        <Box component="span" sx={{ px: 2, py: 0.75, borderRadius: 99, border: `1px solid ${C.line}`, color: C.silver, fontSize: 14, fontWeight: 500 }}>
+        <Box component="span" sx={{ px: 2, py: 0.75, borderRadius: 99, border: `1px solid ${C.line}`, color: C.accent, fontSize: 14, fontWeight: 500 }}>
           Ask to move it
         </Box>
       </Stack>
@@ -281,12 +282,12 @@ function ExpertPicture() {
               height: 92,
               borderRadius: '10px',
               p: 0.75,
-              bgcolor: C.panel,
+              bgcolor: C.tint,
               position: 'relative',
             }}
           >
             <Typography sx={{ ...pictureNote, fontSize: 12 }}>{d.day}</Typography>
-            {d.call && <Box sx={{ position: 'absolute', left: 5, right: 5, top: 42, height: 30, borderRadius: '6px', bgcolor: 'rgba(234, 242, 251, 0.85)' }} />}
+            {d.call && <Box sx={{ position: 'absolute', left: 5, right: 5, top: 42, height: 30, borderRadius: '6px', bgcolor: C.accent }} />}
             {d.off && (
               <Box sx={{ position: 'absolute', left: 5, right: 5, top: 26, bottom: 5, borderRadius: '6px', border: `1px dashed ${C.muted}`, display: 'grid', placeItems: 'center' }}>
                 <Typography sx={{ ...pictureNote, fontSize: 11 }}>Off</Typography>
@@ -307,18 +308,18 @@ function ExpertPicture() {
  */
 export default function LandingPage() {
   return (
-    <Box sx={{ minHeight: '100vh', bgcolor: C.night, color: C.text, overflowX: 'hidden', '& ::selection': { bgcolor: C.silver, color: C.night } }}>
+    <Box className="light" sx={{ minHeight: '100vh', bgcolor: C.page, color: C.ink, overflowX: 'hidden', '& ::selection': { bgcolor: C.accent, color: '#ffffff' } }}>
       {/* ---------------- first screen ---------------- */}
       <Box component="section" sx={{ position: 'relative', minHeight: { xs: 720, md: '100vh' }, display: 'flex', flexDirection: 'column', pb: { xs: 3, md: 5 } }}>
         <Horizon top={{ xs: '66%', md: '66%' }} />
 
         <Box component="header" sx={{ ...container, position: 'relative', pt: { xs: 2.5, md: 3.5 }, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <Box component="img" src="/brand/logo-dark.png" alt="Silver Horizon" sx={{ height: { xs: 30, md: 36 }, width: 'auto', display: 'block' }} />
+          <Box component="img" src="/brand/logo.png" alt="Silver Horizon" sx={{ height: { xs: 30, md: 36 }, width: 'auto', display: 'block' }} />
           <Stack direction="row" spacing={{ xs: 1, sm: 3 }} alignItems="center">
             <Box
               component="a"
               href="#how-it-works"
-              sx={{ ...focusRing, display: { xs: 'none', sm: 'block' }, color: C.muted, fontSize: 14, fontWeight: 500, textDecoration: 'none', borderRadius: 1, '&:hover': { color: C.text } }}
+              sx={{ ...focusRing, display: { xs: 'none', sm: 'block' }, color: C.muted, fontSize: 14, fontWeight: 500, textDecoration: 'none', borderRadius: 1, '&:hover': { color: C.ink } }}
             >
               How it works
             </Box>
@@ -348,7 +349,7 @@ export default function LandingPage() {
               ...riseIn(120),
               mt: { xs: 1.5, md: 2 },
               maxWidth: 620,
-              color: C.silver,
+              color: C.accent,
               opacity: 0.86,
               fontSize: { xs: 17, md: 20 },
               lineHeight: 1.5,
@@ -368,11 +369,11 @@ export default function LandingPage() {
                 fontSize: 16,
                 fontWeight: 600,
                 borderRadius: 99,
-                color: C.night,
-                bgcolor: C.glow,
-                boxShadow: '0 8px 40px rgba(190, 214, 240, 0.28)',
+                color: '#ffffff',
+                bgcolor: C.accent,
+                boxShadow: '0 10px 34px rgba(28, 57, 85, 0.28)',
                 transition: 'transform 160ms, background-color 160ms',
-                '&:hover': { bgcolor: '#ffffff', transform: 'translateY(-1px)' },
+                '&:hover': { bgcolor: C.ink, transform: 'translateY(-1px)' },
               }}
             >
               See how it works
@@ -401,7 +402,7 @@ export default function LandingPage() {
                 p: { xs: 3, md: 4 },
                 borderRadius: '24px',
                 border: `1px solid ${C.line}`,
-                background: `linear-gradient(160deg, rgba(120, 165, 215, 0.12), ${C.panel} 55%)`,
+                background: `linear-gradient(160deg, ${C.tint}, ${C.surface} 55%)`,
               }}
             >
               <Typography component="h3" sx={{ fontSize: { xs: 22, md: 26 }, fontWeight: 600, letterSpacing: '-0.02em', mb: 1.25 }}>
@@ -431,11 +432,11 @@ export default function LandingPage() {
                 p: { xs: 3, md: 6 },
                 borderRadius: '28px',
                 border: `1px solid ${C.line}`,
-                background: `linear-gradient(160deg, rgba(120, 165, 215, 0.1), ${C.panel} 60%)`,
+                background: `linear-gradient(160deg, ${C.tint}, ${C.surface} 60%)`,
               }}
             >
               <Box sx={{ order: { md: i % 2 } }}>
-                <Typography component="p" sx={{ color: C.silver, fontSize: 15, fontWeight: 600, mb: 1.25 }}>
+                <Typography component="p" sx={{ color: C.accent, fontSize: 15, fontWeight: 600, mb: 1.25 }}>
                   {r.role}
                 </Typography>
                 <Typography component="h3" sx={{ fontSize: 'clamp(26px, 3vw, 38px)', fontWeight: 600, lineHeight: 1.12, letterSpacing: '-0.025em', mb: { xs: 2.5, md: 3 } }}>
@@ -444,7 +445,7 @@ export default function LandingPage() {
                 <Stack component="ul" spacing={1.5} sx={{ listStyle: 'none', m: 0, p: 0 }}>
                   {r.points.map((point) => (
                     <Stack key={point} component="li" direction="row" spacing={1.25} alignItems="flex-start">
-                      <CheckRounded sx={{ fontSize: 20, color: C.silver, mt: 0.2, flexShrink: 0 }} />
+                      <CheckRounded sx={{ fontSize: 20, color: C.accent, mt: 0.2, flexShrink: 0 }} />
                       <Typography sx={{ color: C.muted, fontSize: 16, lineHeight: 1.5 }}>{point}</Typography>
                     </Stack>
                   ))}
@@ -467,7 +468,7 @@ export default function LandingPage() {
             <Box component="li" key={s.title} sx={{ borderTop: `1px solid ${C.line}`, pt: 2.5, pb: { xs: 3.5, md: 0 } }}>
               <Stack direction="row" alignItems="center" spacing={1.25} sx={{ mb: { xs: 1.25, md: 3 } }}>
                 <Typography sx={{ color: C.muted, fontSize: 14, fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>0{i + 1}</Typography>
-                <Box component="span" sx={{ px: 1.25, py: 0.25, borderRadius: 99, border: `1px solid ${C.line}`, color: C.silver, fontSize: 12.5, fontWeight: 500 }}>
+                <Box component="span" sx={{ px: 1.25, py: 0.25, borderRadius: 99, border: `1px solid ${C.line}`, color: C.accent, fontSize: 12.5, fontWeight: 500 }}>
                   {s.who}
                 </Box>
               </Stack>
@@ -487,13 +488,13 @@ export default function LandingPage() {
           <Typography id="close-heading" component="h2" sx={{ ...silverText, fontSize: 'clamp(36px, 6vw, 76px)', fontWeight: 600, lineHeight: 1.05, letterSpacing: '-0.035em' }}>
             See further.
           </Typography>
-          <Typography sx={{ color: C.silver, opacity: 0.86, fontSize: { xs: 16, md: 18 }, mt: 2, mb: 3.5 }}>Accounts are by invitation.</Typography>
+          <Typography sx={{ color: C.accent, opacity: 0.86, fontSize: { xs: 16, md: 18 }, mt: 2, mb: 3.5 }}>Accounts are by invitation.</Typography>
           <SignInButton large />
         </Box>
       </Box>
 
       <Box component="footer" sx={{ ...container, position: 'relative', py: 3, borderTop: `1px solid ${C.line}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-        <Box component="img" src="/brand/logo-dark.png" alt="" sx={{ height: 22, width: 'auto', display: 'block', opacity: 0.75 }} />
+        <Box component="img" src="/brand/logo.png" alt="" sx={{ height: 22, width: 'auto', display: 'block', opacity: 0.75 }} />
         <Typography sx={{ color: C.muted, fontSize: 13 }}>© {new Date().getFullYear()} Silver Horizon</Typography>
       </Box>
     </Box>

@@ -1,8 +1,8 @@
 # Silver Horizon — Project Specification
 
-The product is branded **Silver Horizon** (logo, favicon, app icons and sign-in banner in `apps/web/public/brand`); earlier versions of this document call it the God System, and the code keeps the `god` names.
+The product is branded **Silver Horizon** (logo, favicon, app icons and banner in `apps/web/public/brand`); earlier versions of this document call it the God System, and the code keeps the `god` names.
 
-Version 1.10 · 2026-09-25 · Status: Phase 1 implemented, deployed
+Version 1.11 · 2026-11-05 · Status: Phase 1 implemented, deployed
 
 This document is the single source of truth for the God System. It covers the
 web version (Phase 1) and the mobile version (Phase 2) and is meant to be
@@ -936,7 +936,7 @@ Rules:
   Founder may act after `finished`.
 - A call can be called off while it has not started (`CANCELLABLE_STATUSES`:
   `on_scheduling`, `scheduled`, `confirmed`, `research_ready`, `on_rescheduling`) by whoever runs
-  it, any Manager, or the Founder. The Expert never cancels — they ask for
+  it or their team (§2.4: its Associates and Manager), or the Founder. The Expert never cancels — they ask for
   rescheduling instead — and a call that has run cannot be cancelled. An
   optional comment says why, and reaches everyone with the notification.
 - `process_to_bank` and `cancelled` are terminal.
@@ -1100,7 +1100,10 @@ apps/api/src/
 ├── avatars/               catalog + SVG rendering
 ├── platforms/
 ├── profiles/
-├── chat/                  one-to-one chat, pictures, reactions and tasks
+├── banks/                 a Profile's banks; encrypting saved passwords (secret.ts)
+├── credentials/           password managers: a Profile's and a team's saved logins
+├── public/                what anyone may see without signing in: the landing page's figures
+├── chat/                  one-to-one and group chat, pictures, reactions and tasks
 ├── stats/                 statistics by Associate, by Profile, and finance
 ├── audit/                 audit trail middleware and the Founder's audit list
 ├── backup/                nightly database dumps and audit trail trimming
@@ -1110,7 +1113,7 @@ apps/api/src/
 │   ├── calls.service.ts   create, list, get, update, transition, broadcast
 │   ├── calls.serialize.ts
 │   └── calls.access.ts    who can see / act on a call
-├── calendar/              calendar privacy, schedule blocks
+├── calendar/              calendar privacy, schedule blocks, a Founder's own events
 ├── dashboard/             role landing data
 ├── notifications/
 │   ├── notify.ts          single entry point: db row + socket + (push)
@@ -1385,19 +1388,6 @@ PATCH and DELETE return { updated, deleted, created }.
 Response: { from, to, expert, canEditBlocks, calls, busy, occurrences, rules }.
 `occurrences` are the blocks expanded for the range.
 
-### 6.9b A Founder's own events **[Implementation]**
-
-| Method | Path | Who | Notes |
-|---|---|---|---|
-| GET | /personal-events | Founder | Query: from, to (at most 62 days apart). { from, to, occurrences, events }: `occurrences` are { eventId, date, startsAt, endsAt, allDay, isRecurring } for the range; `events` are the rules behind them, with titles and notes |
-| POST | /personal-events | Founder | { title, startDate, allDay, startMinute, durationMinutes, repeat, note? }, as a block body (§6.9) with a title and no kind |
-| PATCH | /personal-events/:id | its owner | { scope, occurrenceDate?, changes } with the scopes of §6.9. A new title goes to what the edit changes: with `this` the one-off, with `following` the new series; the rest keeps its title |
-| DELETE | /personal-events/:id | its owner | Query: scope, date? |
-
-Only the owner learns an event exists: anyone else's is 404. The events never
-appear in `GET /calendar` or `/calendar/experts`, for anyone. Changes are in
-the audit trail without the event's title or note.
-
 ### 6.9a Banks and photos
 
 | Method | Path | Who | Notes |
@@ -1424,6 +1414,19 @@ are all closed counts as having no bank.
 
 **[Implementation] Sign-in details (Founder).** `GET /users/:id/sign-in` (audited) returns { email, google }; `PATCH /users/:id/sign-in` { email } changes the sign-in email; `DELETE /users/:id/google` unlinks the Google account so the next Google sign-in links again by email. `GET /me/google` shows the caller's own link. These are the only endpoints besides /me and sign-in that return an email, and only to the Founder.
 
+### 6.9b A Founder's own events **[Implementation]**
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /personal-events | Founder | Query: from, to (at most 62 days apart). { from, to, occurrences, events }: `occurrences` are { eventId, date, startsAt, endsAt, allDay, isRecurring } for the range; `events` are the rules behind them, with titles and notes |
+| POST | /personal-events | Founder | { title, startDate, allDay, startMinute, durationMinutes, repeat, note? }, as a block body (§6.9) with a title and no kind |
+| PATCH | /personal-events/:id | its owner | { scope, occurrenceDate?, changes } with the scopes of §6.9. A new title goes to what the edit changes: with `this` the one-off, with `following` the new series; the rest keeps its title |
+| DELETE | /personal-events/:id | its owner | Query: scope, date? |
+
+Only the owner learns an event exists: anyone else's is 404. The events never
+appear in `GET /calendar` or `/calendar/experts`, for anyone. Changes are in
+the audit trail without the event's title or note.
+
 ### 6.10 Dashboard **[Implementation]**
 
 | Method | Path | Who | Notes |
@@ -1445,6 +1448,10 @@ are all closed counts as having no bank.
   no rate, which therefore cannot be invoiced.
 - `team` (Manager): per-Associate counts by status for their own team.
 - `database`: current database size and per-table sizes.
+
+The Founder's dashboard draws `tasks` and `database` but not `today`: in its place
+it reads the calendar (§6.9, §6.9b) for today and tomorrow, and the Finance list
+(§6.5a), with the same queries as those pages. The API still sends `today`.
 
 ### 6.11 Chat and tasks **[Implementation]**
 
@@ -1706,21 +1713,6 @@ Periods are weeks (Monday start), two-week blocks (aligned on Monday 2026-01-05)
 
 Web: **Statistics** (Founder, Manager, Associate — call counts only for Associates, without the Finance tab) with Weekly / Bi-weekly / Monthly, the *By associate* and *Finance* tabs (Expected, Real income, Gap on paid calls, Not paid yet; tables by period, platform and Profile with expected-vs-real bars), each scoped to the calls the viewer can see. Founders also get the *By profile* table (filters All / Active / Deactivated / Pending / Rejected, sort, search).
 
-### 6.18 Public figures **[Implementation]**
-
-| Method | Path | Who | Notes |
-|---|---|---|---|
-| GET | /public/stats | anyone, without signing in | { deliveredCalls, hoursDelivered, incomeAtLeast } for the landing page |
-
-`deliveredCalls` are calls that took place (`finished` or being invoiced) and
-`hoursDelivered` their whole hours, by the real length where one was reported.
-`incomeAtLeast` is their invoice amounts (`expectedPrice`, as on the Finance table),
-rounded down to the nearest $1,000. The figures are live, counted at most once a
-minute, and the page asks again every minute. The page is open to
-Associates and Experts, who never see a call's income, so nothing here may let
-anyone read one call's income from the total: nothing per call or per person,
-and never an exact amount.
-
 ### 6.15 Health
 
 `GET /healthz` (outside `/api/v1`) returns `{ status, db, uptime }`; 503 when
@@ -1750,8 +1742,6 @@ has one.
 Entries are kept 365 days, trimmed after each nightly dump. Web: **Audit**
 (Founder) with filters by person, action and dates.
 
----
-
 ### 6.17 Password managers **[Implementation]**
 
 Saved logins, like a browser's password manager, in two places: each
@@ -1774,6 +1764,23 @@ add, change and delete it. Anyone else gets 404.
 A login comes back as { id, profileId, teamId, nickname, platform, login,
 hasPassword, createdBy, updatedBy, createdAt, updatedAt } — never with its
 password. Moving a Profile to another team moves its logins with it.
+
+### 6.18 Public figures **[Implementation]**
+
+| Method | Path | Who | Notes |
+|---|---|---|---|
+| GET | /public/stats | anyone, without signing in | { deliveredCalls, hoursDelivered, incomeAtLeast } for the landing page |
+
+`deliveredCalls` are calls that took place (`finished` or being invoiced) and
+`hoursDelivered` their whole hours, by the real length where one was reported.
+`incomeAtLeast` is their invoice amounts (`expectedPrice`, as on the Finance table),
+rounded down to the nearest $1,000. The figures are live, counted at most once a
+minute, and the page asks again every minute. The page is open to
+Associates and Experts, who never see a call's income, so nothing here may let
+anyone read one call's income from the total: nothing per call or per person,
+and never an exact amount.
+
+---
 
 ## 7. Real-time (Socket.IO)
 
@@ -1894,6 +1901,11 @@ Everyone sees whether the people they may chat with are at their screen.
 - Helmet headers, strict CORS allowlist, request body limit 2 MB (chat pictures).
 - Audit: every status change recorded with actor and override flag, plus the
   full audit trail of changes and sensitive reads (§6.16).
+- **[Implementation]** Bank passwords and saved logins (§6.17) are encrypted with
+  AES-256-GCM, are never sent with their record, and each reveal is audited.
+- **[Implementation]** Teams are closed to each other on the server (§2.4).
+- **[Implementation]** The only data open without signing in is `GET /public/stats`
+  (§6.18): rounded totals, with nothing per call or per person.
 - Deleting a user or a Profile erases its identifying data rather than its
   history (§6.2, §6.4).
 - Deactivated users: refresh rejected, refresh tokens revoked, sockets disconnected.
@@ -1909,14 +1921,14 @@ Everyone sees whether the people they may chat with are at their screen.
 
 | Screen | Roles | Content |
 |---|---|---|
-| Login | all | Email + password, and "Sign in with Google" when the API has a Google client ID |
-| Landing | public | The site's address for anyone not signed in (signed-in people get the Dashboard there): an advertisement for first-time visitors: what Silver Horizon is, how Associates and Experts work on it at a high level (with drawn illustrations, never real data), live rounded totals (§6.18: calls delivered, hours of expertise, total income on invoice, each shown once it says something; the section fills in when the server answers and is left out if it cannot), the path of a call from booking to paid, and Sign in. It appears at once, without waiting for the server: a marker in the browser (`god.signedIn`) says whether to wait for a session, and the session cookie has the last word. Other addresses still go to Sign in and back |
+| Sign in | all | Email + password, and "Sign in with Google" when the API has a Google client ID, with the Landing page's look and a way back to it. Always bright. The form appears at once, without waiting for the server unless this browser was signed in last time. "Accounts are by invitation" |
+| Landing | public | Always bright, whatever the device or app colour scheme. The site's address for anyone not signed in (signed-in people get the Dashboard there): an advertisement for first-time visitors: what Silver Horizon is, how Associates and Experts work on it at a high level (with drawn illustrations, never real data), live rounded totals (§6.18: calls delivered, hours of expertise, total income on invoice, each shown once it says something; the section fills in when the server answers and is left out if it cannot), the path of a call from booking to paid, and Sign in. It appears at once, without waiting for the server: a marker in the browser (`god.signedIn`) says whether to wait for a session, and the session cookie has the last word. Other addresses still go to Sign in and back |
 | Dashboard | all | Managers, Associates and Experts: **Today**: Ongoing, Coming up and Finished calls, one line each (time, profile, platform, Expert). Founder, in their place: **Today and tomorrow** on a two-day calendar (the Calendar's grid and data, their own events included; calls open and own events edit on click), then the **Finance** table of the Calls page (the same component and query as that tab), then Database and Backups. Founder: **Pending tasks**, one narrow column beside the calendar, no taller than it, the rest scrolling (finished calls to invoice, calls to prepare research data for (confirmed ones waiting for “Research data ready”, and booked ones without a link), Profiles that need a bank, with an Add bank shortcut, and Profiles that need a rate), the **database size**, and **Backups** (the last nightly dump with its size and row count, Run now, and Download per kept dump). Manager: team counts per stage |
 | Calls | all | Three tabs. **In progress**: the calls still on their way (being scheduled or running; cancelled ones on request), a table with filters (status, associate, expert, date range, search) and live updates, filters in the URL; **When** reads in plain words ("in 13 hours" over "Tomorrow 11 AM · 45 min"); a **Research data** column for the Founder and the Expert (Open, or "Not added yet" on a booked call); and a Cancel button on every call the viewer may cancel. **Finance**: what is still to pay on the calls that took place (§6.5a); a call leaves the tab once everyone on it has been paid. The Founder and Managers see one row per call: **Profile, Platform, Time** (MM/DD hh:mm AM), **Status**, **Rate** (the call's special rate when it has one, else the Profile's rate on the platform), **Duration** (the real one), **Invoice amount** (rate × duration), **Real income**, **Expert** and **Manager** — names only, no avatars; the Founder also sees what each of the two is paid, with a paid mark ("exp." until the bank has paid), a Manager their own share and their Associate's part still to pass on. An Associate sees Profile, Platform, Time, Status, Duration, their Manager's share and their part; an Expert the same first five with their rate and pay. Every column has a filter that ticks any number of its values (the time by day), each listing the values the other filters leave. Above the table, totals for the rows shown: for the Founder and Managers **Total income on invoice** (the invoice amount of every finished call shown, whatever its invoice stage) and **Real income**; for the Founder **To pay Experts** and **To pay Managers**; for a Manager their share to receive; for an Associate their part to come; for an Expert their pay to come. A warning lists the calls without a rate — which Profile on which platform, or which Expert — each opening its call. The Founder and Managers select rows and press **Paid to expert / manager / associate**; the menu undoes a payment that did not happen. **Payment records**: statistics by **week, month or year** (the last 12 weeks, 12 months or 5 years): for the Founder the income received, what was paid to Experts and to Managers and the balance, as tiles, a chart of money in and out per period, a table per period that opens on who was paid, and who was paid over the whole stretch; for everyone else what they were paid. Every call's status, in the tables and on the cards, says since when ("since 10/12"; the full date and time on hover). The **Finance** table fits a whole row on the screen (it wraps rather than scrolling sideways, on screens from about 1280 wide), keeps its headings and totals frozen while its rows scroll beneath them, numbers its rows (#, across pages), has its page controls above and below, and its top row totals each money and duration column over every row the filters leave, on all pages; where someone is already paid on a call, a line under the total says what is left to pay, and shares still expected are marked. On phones the totals are a card above the others. The Founder's table also has an **ETA** column (when the money should arrive: click to pick a date or clear it; its filter takes a date and keeps the calls due up to and including it, leaving out those with no ETA) and a **Note** column: the call's note, typed right in the row (Enter or leaving the field saves, Shift+Enter a new line, Esc cancels), filtered by Has a note / No note |
 | Call detail | participants | Header with "View profile details", the platform, when it is in plain words, and — once finished, for the Founder and Managers — its income as a pill with both figures (Expected and Real). The Details card has **Income** ("Expected $1,000/h × 33 min = $550", "Real $540" or "waiting for bank") and **Meeting details** (link, passcode…; whoever runs the call, their Manager or the Founder edits it in place; everyone on the call reads it, links clickable). A **Delete call** button for the Founder, the status bar (Experts: without Invoicing; Associates and Managers: without the research step), transition buttons from `allowedTransitions` — the Founder's **Research data ready** asks for the research data link — and a quiet **Cancel call** button while the call has not started; a warning before **Invoice submitted** when the Profile has no open bank account; assignment controls; status history; a Call card (Ninja link, Founder and Expert only); a **Research data** card (the Founder adds the link, the Expert opens it; first on the page while the call is being prepared); a **Payouts** card (each visible payee's amount, expected until the bank pays, and whether it is paid, with Mark paid for whoever pays; the Founder corrects the Expert's rate for the call there); and a **Rate** card for the Founder and Managers. Starting asks for the Ninja link; finishing asks only for the real duration; an Expert requesting rescheduling is reminded to update their calendar and must give a reason |
 | New Call | Founder, Manager, Associate | Required fields are marked with *. In this order: Profile (approved and active only, no inline create); Project (platform, platform associate, project details, meeting details, notes; Associate for Founder and Manager); When (date, time, duration); Expert last, with the Expert's local time and whether they're free. A Manager runs the call themselves by default, or picks any Associate. Past times are refused. Saving asks for confirmation when the time is today, clashes with another call, or falls in time off. Accepts `?expertId=&start=&duration=` from the calendar |
 | Calendar | all | Day, week and month views of an Expert's time off and calls (§6.9). Every call block carries a status badge (SCHEDULING, SCHEDULED, CONFIRMED, RESCHEDULING, ONGOING, DONE, INVOICED, APPROVED, PAID) next to its colour; others' calls still being scheduled show as "Being scheduled"; past slots cannot start a call. Experts drag to add time off; others drag to start a call. The Founder also keeps **their own events** (§6.9b) on their one-column calendar — all their calls, or one Expert's — in their own colour: **Add event**, or drag across a time and pick **Add my event** (or **Schedule a call**); clicking one edits it, repeating ones with this / following / all. They are not shown when several Experts are side by side. Extra clocks for team time, the Expert's zone and a client zone. Availability (working hours) is hidden in the web app for now; the API still supports it. For everyone but Experts, three filters above the grid, each ticking any number of values, kept in the address (`?expert=`, `?profile=`, `?manager=`, ids separated by commas): **Experts** — none ticked shows every call the viewer can see in one column; one Expert shows their calendar (time off, busy time, drag to start a call with them); several, or **All experts** (`?expert=all`), split each day into one column per Expert, each in a fixed color: an empty column is a free Expert, and dragging across a time lists who is free, with a Schedule button for each. **Profiles** and, for the Founder and Managers, **Managers** narrow the calls shown — an Associate's call is their Manager's — and list the values with calls in view first, with how many; others' busy time and time off stay, since they are about the Expert. Cancelled calls stay where they were booked as an empty box with a dotted outline (never filled, so they never look like a call being scheduled), struck through and badged CANCELLED, under the calls still on; they never count as busy, in "who is free", in the New Call clash check or in the side-by-side month dots |
-| Profiles | all | Two tabs. **Profiles**: one table: profile, status, **Team** (the Manager whose team handles it), **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with a green dot where the Profile is registered and a red one where it is not (a red ring when banned), and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons (anyone but an Expert may edit). No rates in the table. Filters All / My team (the Profiles the viewer's team handles) / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) | **Platform status** (not for Experts): **every** Profile, with no status filter and no review banner — those belong to the Profiles tab. One row per Profile and one narrow column per platform, the platform's name on its side and a green or red dot in each cell (the words are in the tooltip and in the menu). Because the company works with dozens of networks, the columns are **one priority at a time**: a row of buttons, one per platform priority in use with how many platforms it holds, plus All. A **Manager** column (whose team handles the Profile) and a Manager filter beside the priority buttons. The Founder, every Manager and every Associate change a status in the cell. The **Platform status** tab also shows each Profile's **Onboarded** date, **Total income** (Founder and Managers) and how many platforms it is **Registered** on, and sorts by any of them or by name — by its headings or the **Sort by** menu, kept in the address (`?sort=income-desc`). In the **Platform status** table each cell reads **applied projects / delivered calls**: green where the Profile is registered, red where it is banned, empty where it is not registered (click it to change the status) |
+| Profiles | all | Two tabs. **Profiles**: one table: profile, status, **Team** (the Manager whose team handles it; Founders only, since everyone else sees only their own team's), **Pending** (what is still missing, one item per line: review, email, phone, bank, onboard date, platform registration), **Platforms** — the priority-one platform by name with a green dot where the Profile is registered and a red one where it is not (a red ring when banned), and "+N"; clicking unfolds every platform's status underneath the row — and open / edit buttons (anyone but an Expert may edit). No rates in the table. Filters All / Pending / Approved / Rejected, and for the Founder Needs bank / Deactivated; search. Anyone but Experts adds a profile (the Founder's are approved at once) | **Platform status** (not for Experts): **every** Profile, with no status filter and no review banner — those belong to the Profiles tab. One row per Profile and one narrow column per platform, the platform's name on its side and a green or red dot in each cell (the words are in the tooltip and in the menu). Because the company works with dozens of networks, the columns are **one priority at a time**: a row of buttons, one per platform priority in use with how many platforms it holds, plus All. A **Manager** column (whose team handles the Profile) and a Manager filter beside the priority buttons. The Founder, every Manager and every Associate change a status in the cell. The **Platform status** tab also shows each Profile's **Onboarded** date, **Total income** (Founder and Managers) and how many platforms it is **Registered** on, and sorts by any of them or by name — by its headings or the **Sort by** menu, kept in the address (`?sort=income-desc`). In the **Platform status** table each cell reads **applied projects / delivered calls**: green where the Profile is registered, red where it is banned, empty where it is not registered (click it to change the status) |
 | Profile page | all | `/profiles/:id` inside the app: header with status, Deactivate and **Delete** (Founder), Edit, **Looked after by** (with a hand-on button for the Founder and the team's Manager) and **Manager share** (the Founder edits it, Managers read it); a "Still to do" list; Approve / Reject for pending ones (Founder); personal details, platforms (one row each with its green or red dot; clicking a platform unfolds its status and rate, which the Founder edits there) and, for the Founder, addresses and banks (open, closed, primary). Edit shows the form on the page |
 | Everyone's chats | Founder | `/chat/all`: every conversation in the system, the two people on each row, and the thread as a plain transcript — who said it, when and what, oldest first, older pages on request. Read only: no message box, no reactions, no read receipt, and a line on the page saying every chat opened is recorded in the audit trail. Reached by the eye button beside **New chat**, shown to Founders alone |
 | Chat | all | Each chat row has a menu with **Clear chat history**. Messages in one-to-one chats can be deleted by their sender (a placeholder stays; never in a group), carry pictures (paste, drop or attach; click to enlarge) and emoji reactions; an emoji picker sits by the message box. An arriving message raises a toast with an Open button unless that chat is already on screen, plus a browser notification when one is allowed. Chat list (search, unread counts, open task marker) beside the conversation; the thread loads 40 messages at a time as you scroll up or down and keeps at most 5 pages (200 messages) in memory, with "Jump to latest" while an older window is shown; New chat lists only people the rules allow. Live messages, "Seen", read-only when the other person is inactive. Founders and Managers open a message's menu to give it as a task (when `canGiveTask`); the taker gets "Mark done" on it and the giver "Confirm" once done |
@@ -1934,9 +1946,11 @@ Everyone sees whether the people they may chat with are at their screen.
 
 ### 9.2 Role landing pages
 
-Every role lands on **Today** (their visible calls for the day). The Manager
-also sees per-Associate counts by stage; the Founder also sees pending tasks and
-the database size.
+Anyone not signed in gets the public Landing page at the site's address; any
+other address goes to Sign in and then back. Once signed in, Managers, Associates
+and Experts land on **Today** (their visible calls for the day), and the Manager
+also sees per-Associate counts by stage. The Founder lands on today and tomorrow
+on a calendar, their pending tasks, the Finance table, the database size and backups.
 
 ### 9.3 Behaviour
 
@@ -2082,12 +2096,12 @@ run, to be corrected on the Platforms page.
 
 ### 12.4 Testing
 
-- Unit (`packages/shared`, 1487 tests): `canTransition` against every (role,
+- Unit (`packages/shared`, 1596 tests): `canTransition` against every (role,
   from, to) combination with and without the relationship; who may chat with
   whom; what Experts see of invoicing; repeat expansion
   for each repeat form, checked against a day-by-day reference, including
   daylight saving changes; block validation; edit scopes.
-- API (`apps/api`, 410 tests): transition endpoint returns 403 for wrong role,
+- API (`apps/api`, 528 tests): transition endpoint returns 403 for wrong role,
   409 for wrong edge, 200 and a history row for valid moves; confirmation,
   rescheduling requests, Ninja link and duration rules; Experts never seeing
   invoicing, rates, bank data or invoice figures; platform rates (Founder-only,
@@ -2110,7 +2124,12 @@ run, to be corrected on the Platforms page.
   Managers (status, history, filters, notifications); meeting details; the
   payment records by week, month and year (who sees what, payments counted in
   the period they were made); Associates' shares as a portion of the Manager's,
-  set by their own Manager; who may set platform statuses.
+  set by their own Manager; who may set platform statuses; teams closed to each
+  other (Profiles, calls, people, statistics, tasks, chat, presence, groups);
+  a Founder's own events; password managers (encryption, reveals, who may do
+  what); Founder-only notes and ETA on finished calls, and saving them silently;
+  who may be in a group and that group messages cannot be deleted; the public
+  figures (what counts, rounding, caching, nothing per call).
 - CI runs `pnpm typecheck` across every package (including test files), then
   the shared and API tests against a Postgres service, then both builds.
 - API tests run against a separate local database, `god_testsuite`, migrated
@@ -2137,8 +2156,17 @@ run, to be corrected on the Platforms page.
   before the API redeploys, so they must only add things; press Manual Deploy
   when auto-deploy lags. Auto-deploy needs Render's GitHub app to have access to the
   repository. On the free plan the API sleeps after about 15 minutes idle.
-- Database: **Aiven** PostgreSQL, database `god`, shared by production and
-  local development.
+- Database: **Aiven** PostgreSQL, database `god`. Development normally uses its
+  own local Postgres and seed data, so previews cannot touch real data.
+- A merge to `main` reaches Vercel first and Render some minutes later, so for a
+  while the new web app talks to the old API. The web app must cope with fields
+  the API does not send yet, and a change that adds a migration or API field is
+  not fully live until Render has restarted (`GET /healthz` gives its uptime).
+- Previewing without deploying: on the development machine, `pnpm --filter web
+  build`, serve it with `vite preview --host 127.0.0.1 --port 5173`, run the API on
+  :4000, and open it from another computer through an SSH tunnel
+  (`ssh -N -L 5999:127.0.0.1:5173 <host>`, then `http://localhost:5999`). The built
+  files load far faster over a tunnel than the dev server's hundreds of modules.
 
 Container alternative:
 
@@ -2162,6 +2190,7 @@ Container alternative:
 | 1d | Tests in §12.4, deployment — done |
 | 1e | Call confirmation and feedback, Profile details and platform statuses, chat and to-dos, browser push — done |
 | 1f | Sessions and audit trail, expected price and real income, tasks with confirmation, statistics, Google sign-in, Managers with every Associate function, chat pictures and reactions, Profile pages, deleting users, Profiles and Calls — done |
+| 1g | A Founder's own calendar, teams closed to each other, password managers, Finance table as the Founder's main workplace (bank, status dates, notes, ETA, totals), group chats with Experts, public landing page with live figures — done |
 | 2 | Expo mobile app (§10), push notifications |
 | 3+ | See §14 |
 
@@ -2169,7 +2198,12 @@ Container alternative:
 
 ## 14. Future extensions
 
-- `cancelled` and `no_show` statuses (§4.5).
+- **Project applications** (next): recording the projects a Profile applies to on
+  each platform. The Platform status table already shows applied projects / delivered
+  calls, with applied projects at 0 until this exists. Still to decide: who logs them,
+  whether they carry an outcome, whether a call links to its application, and where
+  they are logged.
+- A `no_show` status (§4.5).
 - File attachments on Calls (invoice PDFs, call notes).
 - Recommend Experts on the New Call form from the chosen time and each
   Expert's availability. The form keeps Expert as the last field for this, and
@@ -2177,7 +2211,7 @@ Container alternative:
 - Calendar sync (ICS feed per user, Google Calendar).
 - More analytics: cycle time per stage (per-Platform, per-Profile and
   per-Associate figures exist in Statistics).
-- Group chats; typing indicators and file attachments in chat (pictures exist).
+- Typing indicators and file attachments in chat (pictures exist).
 - "View as": the Founder sees the app exactly as another user does, read-only
   and audited, in its own tab (agreed, not built yet).
 - Turning per-Call message threads back on (`FEATURES.messages`).
@@ -2205,6 +2239,15 @@ Container alternative:
 6. ~~Should Managers add Profiles?~~ Yes, for review like Associates. Platform
    statuses and rates stay with the Founder.
 7. ~~Can a done to-do be reopened?~~ Yes: the giver reopens done or completed tasks.
+8. Should a group's owner keep **clear history** and **delete group**, now that
+   single messages in a group cannot be deleted? (Currently: yes.)
+9. How does an interested visitor reach the company from the Landing page?
+   (Currently: Sign in is the only action, and accounts are by invitation.)
+10. The Landing page's income follows finished calls within a minute, so someone
+    watching it could tell roughly what a call was worth, in $1,000 steps. Should
+    that figure refresh once a day instead? (Currently: no.)
+11. The Landing page's wording beyond the existing tagline and brand line is a first
+    draft for the Founder to approve.
 
 ---
 
@@ -2227,7 +2270,11 @@ Container alternative:
 | Confirmed | The Expert has confirmed they are available for the scheduled time |
 | Ninja link | The VDO.Ninja meeting link the Expert adds when a call starts |
 | Platform status | A Profile's standing on an expert network platform: not registered, registered or banned |
-| Conversation | A one-to-one chat between two users |
+| Team | One Manager and the Associates under them; closed to other teams (§2.4) |
+| Saved login | A password manager entry: nickname, platform, email or username, password; a Profile's or a team's (§6.17) |
+| ETA | When a finished call's money should arrive: the Founder's estimate, then the day it is processed to bank |
+| Own event | A Founder's own entry on their calendar, not a consultation call (§6.9b) |
+| Conversation | A one-to-one chat between two users, or a group |
 | Task (to-do) | Work given by someone above you (Founder → anyone, Manager → their own team's Associates), from a chat message or New task. The taker ticks it done, the giver confirms it: completed, and it stays in view for a week |
 
 ## Appendix B. Change log
@@ -2306,6 +2353,7 @@ Container alternative:
 | 2026-11-03 | **Messages in a group chat can no longer be deleted**, by anyone. One-to-one chats are unchanged |
 | 2026-11-05 | A public **landing page** at the site's address, and a Sign in page to match it |
 | 2026-11-05 | The landing page's income is the **invoice amount** of the calls delivered, and its figures refresh every minute |
+| 2026-11-05 | The landing and Sign in pages are **bright**, whatever colour scheme the device or app is set to |
 | 2026-09-25 | Dragging came back to the table: by the handle, up and down for a person's own order, or onto someone else's row to hand the task over — the two things dragging always did, without the quadrants |
 | 2026-09-25 | The Tasks page is **one table** — Owner, Start, End date, Description, Status — sorted and filtered by its own headings. It replaced four tabbed views on the day they were built, and then the four quadrants as well: the model underneath is right, the screen was too much. `todos.urgency` and `todos.importance` stay in the database, unused by the interface |
 | 2026-09-25 | **Start By and Complete By** on every task, kept apart everywhere: an **Execution** view sorted by when work should begin (the default) and a **Deadline** view sorted by when it must be finished, plus a **Today** view with the team's workload. Five statuses — Not Started, In Progress, Blocked (which must say why), Ready for Review, Completed — an expected deliverable and a definition of done, what a task waits for, editing after it was given, overdue and at-risk indicators, and P1/P2/P3 read off the quadrant. From the Task Management System PRS v1.0 |
