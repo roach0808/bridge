@@ -28,7 +28,7 @@ import {
 } from '@mui/material';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { TimePicker } from '@mui/x-date-pickers/TimePicker';
-import { CALL_DURATIONS, type ExpertColumn, type ProfileDTO } from '@god/shared';
+import { CALL_DURATIONS, CALL_KINDS, CALL_KIND_LABELS, type CallKind, type ExpertColumn, type ProfileDTO } from '@god/shared';
 import { useCallOwners } from './callOwners';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
@@ -44,6 +44,7 @@ import { qk } from '@/lib/queryKeys';
 import { zoneAbbr, zoneCity } from '@/lib/time';
 import { expertColor } from '@/theme/theme';
 import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround, type ExpertAvailability } from './expertAvailability';
+import { ExpertiseLine } from '@/components/ExpertiseLine';
 
 const flag = (cc: string) =>
   cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65)) : '';
@@ -176,6 +177,7 @@ function ExpertOption({
 }
 
 interface FormState {
+  kind: CallKind;
   profile: ProfileDTO | null;
   platformId: string;
   associateId: string | null;
@@ -203,6 +205,7 @@ export default function NewCallPage() {
     const validStart = start?.isValid ? start : null;
     const duration = Number(params.get('duration'));
     return {
+      kind: params.get('kind') === 'network' ? 'network' : 'consultation',
       profile: null,
       platformId: '',
       // A Manager runs the call themselves unless they pick someone on their team.
@@ -242,6 +245,7 @@ export default function NewCallPage() {
   const create = useMutation({
     mutationFn: () =>
       api.calls.create({
+        kind: form.kind,
         profileId: form.profile!.id,
         platformId: form.platformId,
         associateId: needsAssociate ? form.associateId : undefined,
@@ -334,7 +338,7 @@ export default function NewCallPage() {
               isOptionEqualToValue={(a, b) => a.id === b.id}
               filterOptions={(opts, { inputValue }) => {
                 const q = inputValue.toLowerCase();
-                return opts.filter((o) => o.name.toLowerCase().includes(q) || o.briefExperience.toLowerCase().includes(q));
+                return opts.filter((o) => o.name.toLowerCase().includes(q) || o.expertise.toLowerCase().includes(q) || o.briefExperience.toLowerCase().includes(q));
               }}
               renderOption={({ key, ...props }, p) => (
                 <li key={key} {...props}>
@@ -345,13 +349,13 @@ export default function NewCallPage() {
                         {p.name}
                       </Typography>
                       <Typography variant="caption" color="text.secondary" component="div" noWrap sx={{ maxWidth: 520 }}>
-                        {p.briefExperience}
+                        {[p.expertise, p.briefExperience].filter(Boolean).join(' · ')}
                       </Typography>
                     </Box>
                   </Stack>
                 </li>
               )}
-              renderInput={(p) => <TextField {...p} label="Profile" required placeholder="Search by name or experience" error={Boolean(errors.profileId)} helperText={errors.profileId} autoFocus />}
+              renderInput={(p) => <TextField {...p} label="Profile" required placeholder="Search by name, expertise or experience" error={Boolean(errors.profileId)} helperText={errors.profileId} autoFocus />}
             />
             {form.profile && (
               <Stack direction="row" spacing={1.5} sx={{ mt: 2, p: 1.5, borderRadius: '10px', bgcolor: 'background.subtle' }}>
@@ -367,6 +371,7 @@ export default function NewCallPage() {
                       </a>
                     )}
                   </Stack>
+                  <ExpertiseLine expertise={form.profile.expertise} />
                   <Typography variant="body2" color="text.secondary">
                     {form.profile.briefExperience}
                   </Typography>
@@ -377,6 +382,20 @@ export default function NewCallPage() {
 
           <Step n={2} title="Project *">
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
+              <Box sx={{ gridColumn: '1 / -1' }}>
+                <ToggleButtonGroup exclusive fullWidth size="small" value={form.kind} onChange={(_, v: CallKind | null) => v && set('kind', v)} aria-label="Call type">
+                  {CALL_KINDS.map((k) => (
+                    <ToggleButton key={k} value={k}>
+                      {CALL_KIND_LABELS[k]}
+                    </ToggleButton>
+                  ))}
+                </ToggleButtonGroup>
+                <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.75, px: 0.5 }}>
+                  {form.kind === 'network'
+                    ? 'The Expert talks with the expert network’s associate. Unpaid: no invoice, and nobody is paid for it.'
+                    : 'A call with the client, invoiced and paid as usual.'}
+                </Typography>
+              </Box>
               <TextField
                 select
                 label="Platform"
@@ -447,7 +466,7 @@ export default function NewCallPage() {
                 value={form.projectDetails}
                 onChange={(e) => set('projectDetails', e.target.value)}
                 error={Boolean(errors.projectDetails)}
-                helperText={errors.projectDetails ?? 'The project brief from the platform'}
+                helperText={errors.projectDetails ?? (form.kind === 'network' ? 'What the call with the network associate is about' : 'The project brief from the platform')}
               />
               <TextField
                 sx={{ gridColumn: '1 / -1' }}
@@ -555,6 +574,7 @@ export default function NewCallPage() {
               Summary
             </Typography>
             <Stack spacing={1.25}>
+              <SummaryRow label="Type" value={form.kind === 'network' ? 'Network call · unpaid' : 'Client consultation'} />
               <SummaryRow label="Profile" value={form.profile?.name} />
               <SummaryRow label="Platform" value={platforms.data?.find((p) => p.id === form.platformId)?.name} />
               {needsAssociate && <SummaryRow label="Associate" value={associates.data.find((a) => a.id === form.associateId)?.nickname} />}

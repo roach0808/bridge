@@ -1,4 +1,6 @@
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { DateTime } from 'luxon';
 import OpenInNewRounded from '@mui/icons-material/OpenInNewRounded';
 import ReceiptLongRounded from '@mui/icons-material/ReceiptLongRounded';
 import SearchOffRounded from '@mui/icons-material/SearchOffRounded';
@@ -85,7 +87,8 @@ export default function InvoicingPage() {
   const [paying, setPaying] = useState<CallDTO[] | null>(null);
 
   const query = useQuery({ queryKey: qk.calls.list(LIST_PARAMS), queryFn: () => api.calls.list(LIST_PARAMS) });
-  const calls = useMemo(() => query.data?.items ?? [], [query.data]);
+  // Network associate calls are never invoiced: nobody is paid for them.
+  const calls = useMemo(() => (query.data?.items ?? []).filter((c) => c.kind !== 'network'), [query.data]);
 
   const byStatus = useMemo(() => {
     const map = Object.fromEntries(STAGES.map((s) => [s.status, [] as CallDTO[]])) as Record<InvoiceStatus, CallDTO[]>;
@@ -132,7 +135,7 @@ export default function InvoicingPage() {
   const allChecked = rows.length > 0 && selectedRows.length === rows.length;
   const someChecked = selectedRows.length > 0 && !allChecked;
 
-  const runMove = async (incomes?: Map<string, number>, banks?: Map<string, string>) => {
+  const runMove = async (incomes?: Map<string, number>, banks?: Map<string, string>, paymentEta?: string) => {
     if (!next || eligible.length === 0) return;
     const targets = incomes ? eligible.filter((c) => incomes.has(c.id)) : banks ? eligible.filter((c) => banks.has(c.profile.id)) : eligible;
     const skipped = selectedRows.length - targets.length;
@@ -144,7 +147,7 @@ export default function InvoicingPage() {
           return await api.calls.transition(
             c.id,
             next,
-            incomes ? { realIncome: incomes.get(c.id)! } : banks ? { bankId: banks.get(c.profile.id)! } : undefined,
+            incomes ? { realIncome: incomes.get(c.id)! } : banks ? { bankId: banks.get(c.profile.id)!, ...(paymentEta ? { paymentEta } : {}) } : undefined,
           );
         } finally {
           done++;
@@ -194,9 +197,9 @@ export default function InvoicingPage() {
         open={choosingBanks}
         calls={eligible}
         onClose={() => setChoosingBanks(false)}
-        onConfirm={(banks) => {
+        onConfirm={(banks, paymentEta) => {
           setChoosingBanks(false);
-          void runMove(undefined, banks);
+          void runMove(undefined, banks, paymentEta);
         }}
       />
 
@@ -644,14 +647,29 @@ function ChooseBanksDialog({
   open: boolean;
   calls: CallDTO[];
   onClose: () => void;
-  onConfirm: (banks: Map<string, string>) => void;
+  onConfirm: (banks: Map<string, string>, paymentEta?: string) => void;
 }) {
   const profiles = [...new Map(calls.map((c) => [c.profile.id, c.profile])).values()];
   const [chosen, setChosen] = useState<Record<string, string>>({});
+  // One ETA for every invoice submitted together; each can still be changed in the Finance table.
+  const [eta, setEta] = useState<DateTime | null>(null);
   const count = (id: string) => calls.filter((c) => c.profile.id === id).length;
-  const ready = profiles.every((p) => chosen[p.id]);
+  const ready = profiles.every((p) => chosen[p.id]) && (eta === null || eta.isValid);
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth slotProps={{ transition: { onEnter: () => setChosen({}) } }}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      slotProps={{
+        transition: {
+          onEnter: () => {
+            setChosen({});
+            setEta(null);
+          },
+        },
+      }}
+    >
       <DialogTitle>Submit {calls.length} invoice{calls.length === 1 ? '' : 's'}</DialogTitle>
       <DialogContent>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -667,13 +685,22 @@ function ChooseBanksDialog({
               onChange={(id) => setChosen((c) => ({ ...c, [p.id]: id }))}
             />
           ))}
+          <DatePicker
+            label="ETA (optional)"
+            value={eta}
+            onChange={setEta}
+            slotProps={{
+              textField: { fullWidth: true, helperText: `When the money should reach the bank, for ${calls.length === 1 ? 'this invoice' : `all ${calls.length} invoices`}. You can change each later in the Finance table.` },
+              field: { clearable: true },
+            }}
+          />
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button color="inherit" onClick={onClose}>
           Cancel
         </Button>
-        <Button variant="contained" disabled={!ready} onClick={() => onConfirm(new Map(Object.entries(chosen)))}>
+        <Button variant="contained" disabled={!ready} onClick={() => onConfirm(new Map(Object.entries(chosen)), eta?.isValid ? eta.toISODate()! : undefined)}>
           Submit
         </Button>
       </DialogActions>

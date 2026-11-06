@@ -1,3 +1,4 @@
+import type { CallKind } from './callKind';
 import type { AvatarAudience, AvatarStyle } from './avatars';
 import type { CallStatus } from './callStatus';
 import type { Role } from './roles';
@@ -124,6 +125,8 @@ export interface ProfileDTO {
   name: string;
   linkedinUrl: string | null;
   briefExperience: string;
+  /** The Profile's niche field. Everyone who sees the Profile sees it. */
+  expertise: string;
   /** yyyy-mm-dd */
   dateOfBirth: string | null;
   gender: string | null;
@@ -184,9 +187,11 @@ export interface ProfileDTO {
 export interface CallDTO {
   id: string;
   status: CallStatus;
+  /** A client consultation, or an unpaid call with a network associate (§4.6). */
+  kind: CallKind;
   /** Platform links are not shown in calls. */
   platform: Pick<PlatformDTO, 'id' | 'name' | 'country' | 'priority'>;
-  profile: Pick<ProfileDTO, 'id' | 'name' | 'linkedinUrl' | 'briefExperience' | 'avatarId' | 'photoId'>;
+  profile: Pick<ProfileDTO, 'id' | 'name' | 'linkedinUrl' | 'briefExperience' | 'expertise' | 'avatarId' | 'photoId'>;
   associate: UserRef;
   manager: UserRef | null;
   /** Includes the Expert's IANA zone so clients can show their local time. */
@@ -395,6 +400,7 @@ export interface BusyInterval {
 export interface CalendarCall {
   id: string;
   status: CallStatus;
+  kind: CallKind;
   scheduledAt: string;
   endsAt: string;
   durationMinutes: number;

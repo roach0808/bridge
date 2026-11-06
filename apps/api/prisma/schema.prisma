@@ -33,6 +33,13 @@ enum CallStatus {
   cancelled
 }
 
+/// A call with a client, which is invoiced and paid; or an Expert's call with an
+/// expert network's associate, which nobody is paid for (§4.6).
+enum CallKind {
+  consultation
+  network
+}
+
 enum ProfileStatus {
   pending
   approved
@@ -219,6 +226,8 @@ model Profile {
   name                String
   linkedinUrl         String?       @map("linkedin_url")
   briefExperience     String        @default("") @map("brief_experience")
+  /// The Profile's niche: the field it is an expert in. Everyone who sees the Profile sees it.
+  expertise           String        @default("")
   dateOfBirth         DateTime?     @map("date_of_birth") @db.Date
   gender              String?
   nationality         String?
@@ -273,6 +282,7 @@ model Profile {
 model Call {
   id                    String     @id @default(uuid()) @db.Uuid
   status                CallStatus @default(on_scheduling)
+  kind                  CallKind   @default(consultation)
   platformId            String     @map("platform_id") @db.Uuid
   profileId             String     @map("profile_id") @db.Uuid
   associateId           String     @map("associate_id") @db.Uuid

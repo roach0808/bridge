@@ -81,7 +81,8 @@ export async function withCallFigures<T extends ProfileDTO | ProfileDTO[]>(actor
       : Promise.resolve([]),
     prisma.call.groupBy({
       by: ['profileId', 'platformId'],
-      where: { AND: [mine, { status: { in: [...FINANCE_STATUSES] } }] },
+      // Client consultations only: network calls are not delivered calls.
+      where: { AND: [mine, { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation' }] },
       _count: { _all: true },
     }),
   ]);
@@ -123,6 +124,7 @@ profilesRouter.get('/profiles', async (req, res) => {
               OR: [
                 { name: { contains: q, mode: 'insensitive' } },
                 { briefExperience: { contains: q, mode: 'insensitive' } },
+                { expertise: { contains: q, mode: 'insensitive' } },
               ],
             }
           : {},
@@ -169,6 +171,7 @@ profilesRouter.post('/profiles', requireRole('founder', 'manager', 'associate'),
         name: input.name,
         linkedinUrl: input.linkedinUrl ?? null,
         briefExperience: input.briefExperience,
+        expertise: input.expertise ?? '',
         ...personalDetails(input, actor),
         avatarId: input.avatarId,
         createdById: actor.id,
@@ -237,6 +240,7 @@ profilesRouter.patch('/profiles/:id', async (req, res) => {
         name: input.name,
         linkedinUrl: input.linkedinUrl === undefined ? undefined : input.linkedinUrl,
         briefExperience: input.briefExperience,
+        expertise: input.expertise,
         ...personalDetails(input, actor),
         avatarId: input.avatarId,
         // Only the Founder decides the Manager's share.

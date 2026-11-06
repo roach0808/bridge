@@ -170,6 +170,8 @@ export interface MakeCallOptions {
   meetingDetails?: string | null;
   /** Defaults to 1000 for a call already processed to bank (the database requires one). */
   realIncome?: number | null;
+  /** Defaults to a client consultation. */
+  kind?: 'consultation' | 'network';
 }
 
 const teamOfUser = (u: FixtureUser) => (u.role === 'manager' ? u.id : u.managerId);
@@ -179,6 +181,7 @@ export async function makeCall(fx: Fixtures, opts: MakeCallOptions) {
   const call = await prisma.call.create({
     data: {
       status: opts.status ?? 'on_scheduling',
+      kind: opts.kind ?? 'consultation',
       platformId: fx.platform.id,
       // Each team books its own Profiles (§2.4).
       profileId: teamOfUser(opts.associate) === fx.m2.id ? fx.approvedProfileTeam2.id : fx.approvedProfile.id,

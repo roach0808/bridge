@@ -25,6 +25,7 @@ export const callInclude = {
       name: true,
       linkedinUrl: true,
       briefExperience: true,
+      expertise: true,
       avatarId: true,
       photoId: true,
       // The rate that applies to this call comes from the row for its platform.
@@ -61,10 +62,12 @@ export function toCallDTO(call: CallRow, viewer: Pick<Actor, 'id' | 'role' | 'ma
   const platformRate = num(platformStatuses.find((s) => s.platformId === call.platformId)?.rate ?? null);
   // A special rate on the call wins over the Profile's rate on the platform.
   const rate = num(call.rateOverride) ?? platformRate;
-  const price = expectedPrice(rate, call.actualDurationMinutes);
+  // Nobody is paid for a network call: it has no price, whatever the Profile's rate.
+  const price = call.kind === 'network' ? null : expectedPrice(rate, call.actualDurationMinutes);
   return {
     id: call.id,
     status: statusForRole(viewer.role, call.status as CallStatus),
+    kind: call.kind,
     platform: call.platform,
     profile,
     associate: toUserRef(call.associate),
@@ -129,7 +132,7 @@ const round = (n: number) => Math.round(n * 100) / 100;
  */
 export function payoutsFor(call: CallRow, viewer: Pick<Actor, 'id' | 'role'>, price: number | null): CallPayouts {
   const none: CallPayouts = { expert: null, manager: null, associate: null, canMark: [] };
-  if (!FINANCE_STATUSES.includes(call.status as CallStatus)) return none;
+  if (!FINANCE_STATUSES.includes(call.status as CallStatus) || call.kind === 'network') return none;
   const founder = viewer.role === 'founder';
   const banked = call.status === 'process_to_bank';
   const settled = banked && call.managerSharePercent !== null;

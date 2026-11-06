@@ -143,6 +143,7 @@ export const toProfileDTO = (
   name: p.name,
   linkedinUrl: p.linkedinUrl,
   briefExperience: p.briefExperience,
+  expertise: p.expertise,
   dateOfBirth: p.dateOfBirth ? dateOnly(p.dateOfBirth) : null,
   gender: p.gender,
   nationality: p.nationality,

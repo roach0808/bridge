@@ -19,6 +19,7 @@ interface ProfileForm {
   name: string;
   linkedinUrl: string;
   briefExperience: string;
+  expertise: string;
   avatarId: string;
   dateOfBirth: string;
   gender: string;
@@ -33,7 +34,7 @@ interface ProfileForm {
 }
 
 const PROFILE_FIELDS = [
-  'name', 'linkedinUrl', 'briefExperience', 'avatarId',
+  'name', 'linkedinUrl', 'briefExperience', 'expertise', 'avatarId',
   'dateOfBirth', 'gender', 'nationality', 'location', 'education', 'careerHistory',
   'email', 'phone', 'onboardedAt', 'addresses',
 ];
@@ -42,6 +43,7 @@ const emptyForm = (): ProfileForm => ({
   name: '',
   linkedinUrl: '',
   briefExperience: '',
+  expertise: '',
   avatarId: 'profile-01',
   dateOfBirth: '',
   gender: '',
@@ -90,6 +92,7 @@ export function useProfileForm({
             name: profile.name,
             linkedinUrl: profile.linkedinUrl ?? '',
             briefExperience: profile.briefExperience,
+            expertise: profile.expertise ?? '',
             avatarId: profile.avatarId,
             dateOfBirth: profile.dateOfBirth ?? '',
             gender: profile.gender ?? '',
@@ -191,6 +194,15 @@ export function useProfileForm({
         helperText={errors.linkedinUrl ?? 'Optional'}
         placeholder="https://www.linkedin.com/in/…"
         type="url"
+        autoComplete="off"
+      />
+      <TextField
+        label="Expertise field"
+        value={form.expertise}
+        onChange={(e) => set('expertise', e.target.value)}
+        error={Boolean(errors.expertise)}
+        helperText={errors.expertise ?? 'The niche this profile is an expert in, such as “semiconductor supply chain”. Everyone who sees the profile sees it.'}
+        slotProps={{ htmlInput: { maxLength: 500 } }}
         autoComplete="off"
       />
       <TextField

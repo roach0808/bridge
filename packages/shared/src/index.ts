@@ -1,5 +1,6 @@
 export * from './roles';
 export * from './callStatus';
+export * from './callKind';
 export * from './callTransitions';
 export * from './avatars';
 export * from './timezones';

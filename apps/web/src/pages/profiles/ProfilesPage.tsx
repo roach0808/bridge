@@ -286,7 +286,7 @@ function ProfileRow({
                 {p.name}
               </Typography>
               <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 260 }}>
-                {p.briefExperience || '—'}
+                {[p.expertise, p.briefExperience].filter(Boolean).join(' · ') || '—'}
               </Typography>
             </Box>
           </Stack>

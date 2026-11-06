@@ -9,6 +9,7 @@ import {
   Dialog,
   DialogActions,
   DialogContent,
+  DialogTitle,
   Checkbox,
   FormControlLabel,
   InputAdornment,
@@ -52,6 +53,7 @@ import {
   FormSection,
   PasswordField,
   copyToClipboard,
+  generatePassword,
   issuesToErrors,
   splitServerError,
   useIsPhone,
@@ -472,12 +474,15 @@ function CreatedCredentials({
   user,
   email,
   password,
+  title,
 }: {
   open: boolean;
   onClose: () => void;
   user: UserDTO;
   email: string;
   password: string;
+  /** Defaults to the wording for a new account. */
+  title?: string;
 }) {
   const phone = useIsPhone();
   const [copied, setCopied] = useState(false);
@@ -488,7 +493,7 @@ function CreatedCredentials({
         <Box sx={{ display: 'inline-block', mb: 1.5 }}>
           <UserAvatar avatarId={user.avatarId} photoId={user.photoId} label={user.nickname} size={64} />
         </Box>
-        <Typography variant="h6">{user.nickname} is ready</Typography>
+        <Typography variant="h6">{title ?? `${user.nickname} is ready`}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
           Share these sign-in details privately. The password will not be shown again.
         </Typography>
@@ -723,6 +728,7 @@ export function EditUserDialog({ user, onClose }: { user: UserDTO | null; onClos
         )}
       </Box>
       {me.role === 'founder' && <SignInSection userId={current.id} nickname={current.nickname} />}
+      {me.role === 'founder' && !isSelf && <ResetPasswordSection user={current} />}
       <ConfirmDialog
         open={deleting}
         title={`Delete ${current.nickname}?`}
@@ -841,6 +847,85 @@ function SignInSection({ userId, nickname }: { userId: string; nickname: string 
           )}
         </Stack>
       )}
+    </Box>
+  );
+}
+
+/**
+ * Founder only: a new password for someone who forgot theirs. They are signed
+ * out everywhere; the new password is shown once, to be passed on privately.
+ */
+function ResetPasswordSection({ user }: { user: UserDTO }) {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState<{ email: string; password: string } | null>(null);
+  const reset = useMutation({
+    mutationFn: async () => {
+      await api.users.resetPassword(user.id, password);
+      // The email to hand over with it; reading it is recorded like any other look.
+      const details = await api.users.signIn(user.id).catch(() => null);
+      return details?.email ?? '';
+    },
+    onSuccess: (email) => {
+      setOpen(false);
+      setDone({ email, password });
+    },
+    onError: (err) => setError(errorMessage(err)),
+  });
+  const tooShort = password.length > 0 && password.length < 10;
+  return (
+    <Box sx={{ borderTop: 1, borderColor: 'divider', pt: 2 }}>
+      <Typography variant="subtitle2" sx={{ mb: 0.5 }}>
+        Password
+      </Typography>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+        Give {user.nickname} a new password if they forgot theirs. They are signed out on every device.
+      </Typography>
+      <Button
+        size="small"
+        variant="outlined"
+        onClick={() => {
+          setPassword(generatePassword());
+          setError(null);
+          reset.reset();
+          setOpen(true);
+        }}
+      >
+        Reset password
+      </Button>
+      <Dialog open={open} onClose={() => !reset.isPending && setOpen(false)} maxWidth="xs" fullWidth>
+        <DialogTitle>Reset {user.nickname}’s password</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Their old password stops working at once, and they are signed out on every device.
+          </Typography>
+          <Stack sx={{ pt: 0.5 }}>
+            <PasswordField
+              label="New password"
+              name="new-password"
+              value={password}
+              onChange={(v) => {
+                setPassword(v);
+                setError(null);
+              }}
+              generate
+              autoComplete="new-password"
+              error={error ?? (tooShort ? 'At least 10 characters' : undefined)}
+              helperText="A strong one is filled in; you can type your own."
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button color="inherit" onClick={() => setOpen(false)} disabled={reset.isPending}>
+            Cancel
+          </Button>
+          <Button variant="contained" color="warning" onClick={() => reset.mutate()} disabled={reset.isPending || password.length < 10}>
+            Reset password
+          </Button>
+        </DialogActions>
+      </Dialog>
+      {done && <CreatedCredentials open onClose={() => setDone(null)} user={user} email={done.email} password={done.password} title={`${user.nickname}’s password is reset`} />}
     </Box>
   );
 }
