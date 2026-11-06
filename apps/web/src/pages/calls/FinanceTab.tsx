@@ -32,7 +32,7 @@ import { DateCalendar } from '@mui/x-date-pickers/DateCalendar';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useMemo, useState, type ReactNode } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { ConfirmDialog, EmptyState, ErrorState, LoadingRows } from '@/components/common';
 import { STATUS_COLORS, StatusSince } from '@/components/StatusChip';
@@ -48,6 +48,9 @@ import { PaidMark } from './money';
 /** Every call with something still to pay; paid ones are on the Payment records tab. */
 const QUERY: FinanceCallsQuery = { paid: 'unpaid', page: 1, pageSize: 1000 };
 
+const PAGE_SIZES = [25, 50, 100, 200];
+const DEFAULT_PAGE_SIZE = 50;
+
 /**
  * What is still to pay on the calls that took place (§9.1): the second tab of the
  * Calls page, and the main table of the Founder's dashboard — this one component
@@ -61,10 +64,10 @@ export function FinanceTab() {
   const me = useMe();
   const { zone } = useAuth();
   const phone = useIsPhone();
-  const [filters, setFilters] = useState<Record<string, string[]>>({});
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // The filters and the page live in the address, so a filtered view can be
+  // bookmarked, shared, and survives a reload: ?status=Finished&expert=ember&page=2.
+  const [params, setParams] = useSearchParams();
 
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: qk.calls.finance(QUERY),
@@ -73,7 +76,36 @@ export function FinanceTab() {
   });
 
   const columns = useMemo(() => columnsFor(me.role, zone), [me.role, zone]);
+  const filters = useMemo(
+    () => Object.fromEntries(columns.map((col) => [col.key, params.getAll(col.key).slice(0, col.until ? 1 : undefined)])) as Record<string, string[]>,
+    [columns, params],
+  );
+  const page = Math.max(0, (Number(params.get('page')) || 1) - 1);
+  const pageSize = PAGE_SIZES.includes(Number(params.get('rows'))) ? Number(params.get('rows')) : DEFAULT_PAGE_SIZE;
+  /** Changes the address in place, keeping what else is in it (the Calls page's tab). */
+  const updateParams = (change: (next: URLSearchParams) => void) => {
+    const next = new URLSearchParams(params);
+    change(next);
+    setParams(next, { replace: true });
+  };
+  const setPage = (p: number) => updateParams((next) => (p > 0 ? next.set('page', String(p + 1)) : next.delete('page')));
+  const setPageSize = (size: number) =>
+    updateParams((next) => {
+      next.delete('page');
+      if (size === DEFAULT_PAGE_SIZE) next.delete('rows');
+      else next.set('rows', String(size));
+    });
+  const setFilters = (all: Record<string, string[]>) =>
+    updateParams((next) => {
+      next.delete('page');
+      for (const col of columns) {
+        next.delete(col.key);
+        for (const v of all[col.key] ?? []) next.append(col.key, v);
+      }
+    });
   const all = data?.items ?? [];
+  // The table loads at most QUERY.pageSize calls; past that, say so rather than leave some out quietly.
+  const truncated = data ? data.total > all.length : false;
   const passes = (c: CallDTO, except?: string) =>
     columns.every((col) => {
       const picked = filters[col.key];
@@ -88,8 +120,7 @@ export function FinanceTab() {
   const filtering = Object.values(filters).some((v) => v.length);
 
   const setFilter = (key: string, values: string[]) => {
-    setFilters((f) => ({ ...f, [key]: values }));
-    setPage(0);
+    setFilters({ ...filters, [key]: values });
     setSelected(new Set());
   };
   /** Excel-like: a column offers the values left by the other columns' filters (and keeps its own). */
@@ -130,12 +161,9 @@ export function FinanceTab() {
       count={rows.length}
       page={Math.min(page, Math.max(0, Math.ceil(rows.length / pageSize) - 1))}
       rowsPerPage={pageSize}
-      rowsPerPageOptions={[25, 50, 100, 200]}
+      rowsPerPageOptions={PAGE_SIZES}
       onPageChange={(_, p) => setPage(p)}
-      onRowsPerPageChange={(e) => {
-        setPageSize(Number(e.target.value));
-        setPage(0);
-      }}
+      onRowsPerPageChange={(e) => setPageSize(Number(e.target.value))}
     />
   );
   const firstSerial = page * pageSize + 1;
@@ -145,6 +173,11 @@ export function FinanceTab() {
   return (
     <Box>
       <Unpriced rows={rows} role={me.role} />
+      {truncated && (
+        <Alert severity="warning" sx={{ mb: 2 }}>
+          Showing the first {all.length.toLocaleString('en-US')} of {data.total.toLocaleString('en-US')} calls still to pay. Filters and totals cover those only.
+        </Alert>
+      )}
 
       {all.length === 0 ? (
         <Card>
@@ -165,7 +198,7 @@ export function FinanceTab() {
                 <FilterFor key={col.key} col={col} chip options={optionsFor(col)} selected={filters[col.key] ?? []} onChange={(v) => setFilter(col.key, v)} />
               ))}
             {filtering && (
-              <Button size="small" color="inherit" onClick={() => { setFilters({}); setPage(0); }}>
+              <Button size="small" color="inherit" onClick={() => setFilters({})}>
                 Clear filters
               </Button>
             )}
