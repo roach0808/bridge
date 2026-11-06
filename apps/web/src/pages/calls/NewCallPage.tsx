@@ -205,7 +205,8 @@ export default function NewCallPage() {
     const validStart = start?.isValid ? start : null;
     const duration = Number(params.get('duration'));
     return {
-      kind: params.get('kind') === 'network' ? 'network' : 'consultation',
+      // Only the Founder books network associate calls (§4.6).
+      kind: me.role === 'founder' && params.get('kind') === 'network' ? 'network' : 'consultation',
       profile: null,
       platformId: '',
       // A Manager runs the call themselves unless they pick someone on their team.
@@ -382,20 +383,22 @@ export default function NewCallPage() {
 
           <Step n={2} title="Project *">
             <Box sx={{ display: 'grid', gap: 2, gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' } }}>
-              <Box sx={{ gridColumn: '1 / -1' }}>
-                <ToggleButtonGroup exclusive fullWidth size="small" value={form.kind} onChange={(_, v: CallKind | null) => v && set('kind', v)} aria-label="Call type">
-                  {CALL_KINDS.map((k) => (
-                    <ToggleButton key={k} value={k}>
-                      {CALL_KIND_LABELS[k]}
-                    </ToggleButton>
-                  ))}
-                </ToggleButtonGroup>
-                <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.75, px: 0.5 }}>
-                  {form.kind === 'network'
-                    ? 'The Expert talks with the expert network’s associate. Unpaid: no invoice, and nobody is paid for it.'
-                    : 'A call with the client, invoiced and paid as usual.'}
-                </Typography>
-              </Box>
+              {me.role === 'founder' && (
+                <Box sx={{ gridColumn: '1 / -1' }}>
+                  <ToggleButtonGroup exclusive fullWidth size="small" value={form.kind} onChange={(_, v: CallKind | null) => v && set('kind', v)} aria-label="Call type">
+                    {CALL_KINDS.map((k) => (
+                      <ToggleButton key={k} value={k}>
+                        {CALL_KIND_LABELS[k]}
+                      </ToggleButton>
+                    ))}
+                  </ToggleButtonGroup>
+                  <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 0.75, px: 0.5 }}>
+                    {form.kind === 'network'
+                      ? 'The Expert talks with the expert network’s associate. Unpaid: no invoice, and nobody is paid for it.'
+                      : 'A call with the client, invoiced and paid as usual.'}
+                  </Typography>
+                </Box>
+              )}
               <TextField
                 select
                 label="Platform"
@@ -574,7 +577,7 @@ export default function NewCallPage() {
               Summary
             </Typography>
             <Stack spacing={1.25}>
-              <SummaryRow label="Type" value={form.kind === 'network' ? 'Network call · unpaid' : 'Client consultation'} />
+              {me.role === 'founder' && <SummaryRow label="Type" value={form.kind === 'network' ? 'Network call · unpaid' : 'Client consultation'} />}
               <SummaryRow label="Profile" value={form.profile?.name} />
               <SummaryRow label="Platform" value={platforms.data?.find((p) => p.id === form.platformId)?.name} />
               {needsAssociate && <SummaryRow label="Associate" value={associates.data.find((a) => a.id === form.associateId)?.nickname} />}

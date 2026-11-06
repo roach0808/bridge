@@ -88,6 +88,7 @@ export function transitionContext(actor: Viewer, call: CallAccessShape): Transit
     managesCallAssociate: actor.role === 'manager' && supervisesCall(actor, call),
     hasExpert: call.expertId !== null,
     unpaid: call.kind === 'network',
+    founderOnly: call.kind === 'network',
   };
 }
 
@@ -112,13 +113,14 @@ export function callPermissions(actor: Viewer, call: CallAccessShape): CallPermi
   const scheduling = STATUS_STAGE[call.status] === 'scheduling';
   // A Manager runs every Associate's call, and their own (which they may hand on).
   const supervises = actor.role === 'founder' || (actor.role === 'manager' && supervisesCall(actor, call));
-  const ownsScheduling = supervises || teamCallOf(actor, call);
-  // Nobody is paid for a network call, so it has no rate of any kind.
+  // Nobody is paid for a network call, so it has no rate of any kind; and only the
+  // Founder books and schedules one (§4.6): Managers and Associates only see it.
   const paid = call.kind !== 'network';
+  const ownsScheduling = paid ? supervises || teamCallOf(actor, call) : actor.role === 'founder';
 
   return {
     edit: ownsScheduling && (scheduling || actor.role === 'founder'),
-    reassignAssociate: supervises && call.status !== 'process_to_bank',
+    reassignAssociate: (paid ? supervises : actor.role === 'founder') && call.status !== 'process_to_bank',
     // The Associate may swap the Expert for as long as they own the scheduling stage.
     reassignExpert: ownsScheduling && scheduling,
     editIncome: actor.role === 'founder',

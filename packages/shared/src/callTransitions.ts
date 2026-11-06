@@ -80,6 +80,8 @@ export interface TransitionContext {
   hasExpert?: boolean;
   /** Nobody is paid for the call (an Expert's call with a network associate): it ends at Finished. */
   unpaid?: boolean;
+  /** Only the Founder books and schedules the call (a network associate call): Managers and Associates cannot move it. */
+  founderOnly?: boolean;
 }
 
 /** The steps that bill a call: an unpaid call never takes them. */
@@ -117,6 +119,7 @@ export function canTransition(
   if (!t) return false;
   if (!t.roles.includes(role)) return false;
   if (ctx.unpaid && INVOICING.includes(to)) return false;
+  if (ctx.founderOnly && (role === 'manager' || role === 'associate')) return false;
   return hasRelationship(role, ctx);
 }
 

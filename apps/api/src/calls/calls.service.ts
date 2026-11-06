@@ -229,6 +229,7 @@ export async function getCallForActor(actor: Actor, id: string | null): Promise<
 
 export async function createCall(actor: Actor, input: CreateCallInput): Promise<CallDTO> {
   if (actor.role === 'expert') throw forbidden('Experts do not create calls');
+  if (input.kind === 'network' && actor.role !== 'founder') throw forbidden('Only the Founder books network associate calls');
 
   let owner: { id: string; role: string; managerId: string | null };
   if (actor.role === 'associate') {

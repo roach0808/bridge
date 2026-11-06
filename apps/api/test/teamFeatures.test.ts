@@ -104,15 +104,32 @@ describe('Network associate calls', () => {
     ...over,
   });
 
-  it('are booked by the Founder, Managers and Associates, never by Experts; calls default to consultations', async () => {
-    for (const who of [fx.founder, fx.m1, fx.a1]) {
-      const res = await (await as(who)).post('/calls', body(who.role === 'founder' ? { associateId: fx.a1.id } : {}));
-      expect(res.status, res.text).toBe(201);
-      expect(res.body.kind).toBe('network');
-    }
-    expectError(await (await as(fx.e1)).post('/calls', body()), 403);
+  it('are booked by the Founder only; calls default to consultations', async () => {
+    const res = await (await as(fx.founder)).post('/calls', body({ associateId: fx.a1.id }));
+    expect(res.status, res.text).toBe(201);
+    expect(res.body.kind).toBe('network');
+    for (const who of [fx.m1, fx.a1, fx.e1]) expectError(await (await as(who)).post('/calls', body()), 403);
     const plain = await (await as(fx.a1)).post('/calls', body({ kind: undefined, scheduledAt: '2027-03-02T15:00:00Z' }));
     expect(plain.body.kind).toBe('consultation');
+  });
+
+  it('are scheduled by the Founder only: the team sees them but cannot move, edit or cancel them', async () => {
+    const call = await makeCall(fx, { associate: fx.a1, expert: fx.e1, status: 'on_scheduling', kind: 'network' });
+    for (const who of [fx.a1, fx.a2, fx.m1]) {
+      const c = await as(who);
+      const seen = await c.get(`/calls/${call.id}`);
+      expect(seen.status, who.nickname).toBe(200);
+      expect(seen.body.allowedTransitions, who.nickname).toEqual([]);
+      expect(seen.body.permissions, who.nickname).toMatchObject({ edit: false, reassignExpert: false, reassignAssociate: false, editMeeting: false });
+      expectError(await c.post(`/calls/${call.id}/transition`, { to: 'scheduled' }), 403);
+      expectError(await c.post(`/calls/${call.id}/transition`, { to: 'cancelled' }), 403);
+      expectError(await c.patch(`/calls/${call.id}`, { durationMinutes: 45 }), 403);
+    }
+    const founder = await as(fx.founder);
+    expect((await founder.get(`/calls/${call.id}`)).body.allowedTransitions).toEqual(expect.arrayContaining(['scheduled', 'cancelled']));
+    expect((await founder.post(`/calls/${call.id}/transition`, { to: 'scheduled' })).status).toBe(200);
+    // The Expert still confirms it.
+    expect((await (await as(fx.e1)).post(`/calls/${call.id}/transition`, { to: 'confirmed' })).status).toBe(200);
   });
 
   it('end at Finished: no invoicing, no price and no pay, even with rates set', async () => {

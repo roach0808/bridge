@@ -170,7 +170,7 @@ export default function ProfilesPage() {
       <Stack direction={{ xs: 'column', md: 'row' }} spacing={2} alignItems={{ xs: 'stretch', md: 'center' }} justifyContent="space-between" sx={{ mb: 2.5 }}>
         {platformsView ? <Box /> : <FilterChips ariaLabel="Filter by status" options={filterOptions} value={filter} onChange={setFilter} />}
         <Stack direction="row" spacing={1} alignItems="center" sx={{ flex: { md: '0 1 340px' } }}>
-          <SearchField value={search} onChange={setSearch} placeholder="Search name or experience" sx={{ maxWidth: 'none' }} />
+          <SearchField value={search} onChange={setSearch} placeholder="Search name or expertise" sx={{ maxWidth: 'none' }} />
           <Box sx={{ width: 20, display: 'grid', placeItems: 'center' }}>{searching && <CircularProgress size={16} />}</Box>
         </Stack>
       </Stack>
@@ -235,12 +235,13 @@ export default function ProfilesPage() {
             <TableHead>
               <TableRow>
                 <TableCell sx={{ minWidth: 200 }}>Profile</TableCell>
+                <TableCell sx={{ minWidth: 130 }}>Expertise field</TableCell>
                 <TableCell>Status</TableCell>
                 {/* Everyone else sees only their own team's Profiles. */}
                 {isFounder && <TableCell sx={{ minWidth: 130 }}>Team</TableCell>}
-                <TableCell sx={{ minWidth: 190 }}>Pending</TableCell>
-                {!isExpert && <TableCell sx={{ minWidth: 230 }}>Platforms</TableCell>}
-                <TableCell align="right" width={96}>
+                <TableCell sx={{ minWidth: 170 }}>Pending</TableCell>
+                {!isExpert && <TableCell sx={{ minWidth: 200 }}>Platforms</TableCell>}
+                <TableCell align="right" width={80}>
                   Open
                 </TableCell>
               </TableRow>
@@ -285,11 +286,22 @@ function ProfileRow({
               <Typography variant="body2" fontWeight={550} noWrap>
                 {p.name}
               </Typography>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 260 }}>
-                {[p.expertise, p.briefExperience].filter(Boolean).join(' · ') || '—'}
+              <Typography variant="caption" color="text.secondary" noWrap sx={{ display: 'block', maxWidth: 175 }}>
+                {p.briefExperience || '—'}
               </Typography>
             </Box>
           </Stack>
+        </TableCell>
+        <TableCell sx={{ maxWidth: 170 }}>
+          {p.expertise ? (
+            <Typography variant="body2" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }} title={p.expertise}>
+              {p.expertise}
+            </Typography>
+          ) : (
+            <Typography variant="body2" color="text.disabled">
+              —
+            </Typography>
+          )}
         </TableCell>
         <TableCell>
           <Stack spacing={0.5} alignItems="flex-start">
@@ -347,7 +359,7 @@ function ProfileRow({
       </TableRow>
       {platformsOpen && !isExpert && (
         <TableRow>
-          <TableCell colSpan={6} sx={{ bgcolor: 'action.hover', py: 1 }}>
+          <TableCell colSpan={showTeam ? 7 : 6} sx={{ bgcolor: 'action.hover', py: 1 }}>
             <AllPlatformStatuses profile={p} />
           </TableCell>
         </TableRow>
