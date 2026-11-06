@@ -70,7 +70,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <Stack sx={{ height: '100%' }}>
       <Box sx={{ px: 2.25, pt: 2.25, pb: 0.5 }}>
-        <BrandLogo height={36} />
+        <BrandLogo height={26} />
       </Box>
       <Brand />
       <Box sx={{ flex: 1, overflowY: 'auto', px: 1.25 }}>
@@ -307,7 +307,7 @@ export function AppLayout() {
                 <MenuRounded />
               </IconButton>
             )}
-            {!desktop && <BrandLogo variant="mark" height={28} />}
+            {!desktop && <BrandLogo variant="mark" height={24} />}
             <Box sx={{ flex: 1 }} />
             <ZoneClock />
             <ConnectionDot />

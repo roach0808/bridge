@@ -1,27 +1,25 @@
 import { Box } from '@mui/material';
+import { BRAND, Lockup, MARK_RATIO, Monogram } from './brand';
 
 /**
- * Silver Horizon's logo. `full` is the mark with the name (a light version
- * in dark mode, where the navy lettering would disappear); `mark` is the S alone.
+ * Silver Horizon's logo in the app: `full` is the SH mark beside the name, for
+ * the sidebar; `mark` is the SH mark alone, for the phone's top bar. Navy on the
+ * light theme, silver with its sunlit arc on the dark one, where navy would vanish.
+ * `height` is the mark's height.
  */
-export function BrandLogo({ height = 32, variant = 'full' }: { height?: number; variant?: 'full' | 'mark' }) {
-  if (variant === 'mark') {
-    return <Box component="img" src="/brand/mark.png" alt="Silver Horizon" sx={{ height, width: 'auto', display: 'block' }} />;
-  }
+export function BrandLogo({ height = 26, variant = 'full' }: { height?: number; variant?: 'full' | 'mark' }) {
+  const markWidth = Math.round(height * MARK_RATIO);
+  const both = (onDark: boolean) =>
+    variant === 'mark' ? (
+      <Monogram width={markWidth} onDark={onDark} title="Silver Horizon" />
+    ) : (
+      // Sized to sit inside the 240px sidebar.
+      <Lockup onDark={onDark} markWidth={markWidth} textSize={Math.max(10, Math.round(height * 0.4 * 10) / 10)} gap={1} />
+    );
   return (
     <>
-      <Box
-        component="img"
-        src="/brand/logo.png"
-        alt="Silver Horizon"
-        sx={(t) => ({ height, width: 'auto', display: 'block', ...t.applyStyles('dark', { display: 'none' }) })}
-      />
-      <Box
-        component="img"
-        src="/brand/logo-dark.png"
-        alt="Silver Horizon"
-        sx={(t) => ({ height, width: 'auto', display: 'none', ...t.applyStyles('dark', { display: 'block' }) })}
-      />
+      <Box sx={(t) => ({ display: 'block', ...t.applyStyles('dark', { display: 'none' }) })}>{both(false)}</Box>
+      <Box sx={(t) => ({ display: 'none', color: BRAND.silver, ...t.applyStyles('dark', { display: 'block' }) })}>{both(true)}</Box>
     </>
   );
 }
