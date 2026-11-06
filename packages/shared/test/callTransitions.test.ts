@@ -234,3 +234,13 @@ describe('unpaid network calls', () => {
     expect(allowedTransitions('founder', 'confirmed', { ...ctx, unpaid: true })).toEqual(allowedTransitions('founder', 'confirmed', ctx));
   });
 });
+
+describe('network calls are scheduled by the Founder only', () => {
+  const team = { isCallAssociate: true, isCallExpert: false, managesCallAssociate: true, hasExpert: true, founderOnly: true };
+  it('Managers and Associates cannot move them; the Founder and the Expert still can', () => {
+    expect(allowedTransitions('associate', 'on_scheduling', team)).toEqual([]);
+    expect(allowedTransitions('manager', 'scheduled', team)).toEqual([]);
+    expect(allowedTransitions('founder', 'on_scheduling', team)).toContain('scheduled');
+    expect(allowedTransitions('expert', 'scheduled', { ...team, isCallAssociate: false, isCallExpert: true })).toContain('confirmed');
+  });
+});
