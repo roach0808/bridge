@@ -1,4 +1,3 @@
-import '@fontsource-variable/montserrat/wght.css';
 import ArrowDownwardRounded from '@mui/icons-material/ArrowDownwardRounded';
 import ArrowForwardRounded from '@mui/icons-material/ArrowForwardRounded';
 import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
@@ -12,6 +11,7 @@ import { keyframes } from '@mui/material/styles';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
+import { BRAND, HEADLINE, Lockup, Monogram, silverText } from '@/components/brand';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { riseIn } from './Horizon';
@@ -90,25 +90,8 @@ const COMPOUND = [
 
 // ---- The brand: Silver Horizon's identity system. -----------------------------------
 
-/** The brand palette, with a deeper teal where teal carries small text (contrast). */
-const C = {
-  navy: '#0B1630',
-  navyDeep: '#060D1F',
-  charcoal: '#1F242B',
-  silver: '#C0C4CC',
-  silverMuted: '#8F98AA',
-  softWhite: '#F6F7F9',
-  surface: '#FFFFFF',
-  teal: '#5E8F8C',
-  tealDeep: '#3F6E6B',
-  tealLight: '#8FC1BD',
-  /** The light where the sun meets the horizon. Light only, never text. */
-  glow: '#F4B25B',
-  ink: '#0B1630',
-  muted: '#5A6474',
-  line: 'rgba(11, 22, 48, 0.14)',
-  lineOnNavy: 'rgba(192, 196, 204, 0.22)',
-} as const;
+/** The brand palette, shared with the Sign in page and the app. */
+const C = BRAND;
 
 const MEASURE = 1240;
 const GUTTER = 'max(20px, 4vw)';
@@ -116,16 +99,8 @@ const container = { width: `calc(100% - 2 * ${GUTTER})`, maxWidth: MEASURE, mx: 
 /** Sections breathe by the same amount all the way down. */
 const SECTION_GAP = { xs: 10, md: 18 };
 
-const HEADLINE = '"Montserrat Variable", Montserrat, "Helvetica Neue", Arial, sans-serif';
 const heading = { fontFamily: HEADLINE, fontWeight: 600, letterSpacing: '-0.02em', color: C.ink } as const;
 const h2 = { ...heading, fontSize: 'clamp(32px, 4.4vw, 58px)', lineHeight: 1.08, textWrap: 'balance' } as const;
-/** Silver, as on the brand mark: for type on the navy ground. */
-const silverText = {
-  backgroundImage: 'linear-gradient(180deg, #FFFFFF 0%, #E6E9EE 46%, #AEB4C0 56%, #DDE0E6 100%)',
-  WebkitBackgroundClip: 'text',
-  backgroundClip: 'text',
-  color: 'transparent',
-} as const;
 
 const hairline = `1px solid ${C.line}`;
 const focusRing = (color: string) => ({ '&:focus-visible': { outline: `2px solid ${color}`, outlineOffset: 3 } }) as const;
@@ -137,66 +112,6 @@ const dawn = keyframes`
 `;
 
 // ---- Small parts -----------------------------------------------------------------
-
-/**
- * The SH monogram with its horizon arc, drawn so it stays sharp at any size.
- * `onDark` is the silver mark with a sunlit arc; otherwise the navy mark.
- */
-function Monogram({ width, onDark = true, title }: { width: number | string | Record<string, number | string>; onDark?: boolean; title?: string }) {
-  const id = useId().replace(/:/g, '');
-  return (
-    <Box component="svg" viewBox="0 0 220 132" role={title ? 'img' : undefined} aria-label={title} aria-hidden={title ? undefined : true} sx={{ width, height: 'auto', display: 'block', overflow: 'visible' }}>
-      <defs>
-        <linearGradient id={`${id}-letters`} x1="0" y1="0" x2="0" y2="1">
-          {onDark ? (
-            <>
-              <stop offset="0" stopColor="#FFFFFF" />
-              <stop offset="0.46" stopColor="#E3E6EB" />
-              <stop offset="0.56" stopColor="#A4ABB8" />
-              <stop offset="1" stopColor="#D9DCE2" />
-            </>
-          ) : (
-            <>
-              <stop offset="0" stopColor="#3A4866" />
-              <stop offset="0.5" stopColor="#0B1630" />
-              <stop offset="1" stopColor="#1F2A44" />
-            </>
-          )}
-        </linearGradient>
-        <linearGradient id={`${id}-arc`} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stopColor={onDark ? C.glow : '#8F98AA'} stopOpacity="0" />
-          <stop offset="0.32" stopColor={onDark ? C.glow : '#8F98AA'} />
-          <stop offset="0.62" stopColor={onDark ? '#FFF6E6' : C.navy} />
-          <stop offset="0.86" stopColor={onDark ? C.glow : '#8F98AA'} />
-          <stop offset="1" stopColor={onDark ? C.glow : '#8F98AA'} stopOpacity="0" />
-        </linearGradient>
-        <radialGradient id={`${id}-flare`}>
-          <stop offset="0" stopColor="#FFFFFF" stopOpacity="0.95" />
-          <stop offset="0.25" stopColor={C.glow} stopOpacity="0.75" />
-          <stop offset="1" stopColor={C.glow} stopOpacity="0" />
-        </radialGradient>
-      </defs>
-      <text x="110" y="112" textAnchor="middle" fontFamily={HEADLINE} fontWeight="600" fontSize="128" letterSpacing="-1" fill={`url(#${id}-letters)`}>
-        SH
-      </text>
-      <path d="M2,120 C58,72 150,52 218,86 C150,63 62,82 2,120 Z" fill={`url(#${id}-arc)`} />
-      {onDark && <circle cx="138" cy="64" r="22" fill={`url(#${id}-flare)`} />}
-    </Box>
-  );
-}
-
-/** The mark beside the name, for the header and the footer. */
-function Lockup({ onDark = true }: { onDark?: boolean }) {
-  return (
-    <Stack direction="row" alignItems="center" spacing={{ xs: 1.25, sm: 1.75 }} aria-label="Silver Horizon" role="img">
-      <Monogram width={{ xs: 46, md: 54 }} onDark={onDark} />
-      <Box sx={{ width: '1px', alignSelf: 'stretch', my: 0.75, bgcolor: onDark ? C.lineOnNavy : C.line }} />
-      <Typography component="span" aria-hidden sx={{ fontFamily: HEADLINE, fontWeight: 500, fontSize: { xs: 12, md: 14 }, letterSpacing: '0.24em', color: onDark ? C.silver : C.ink, whiteSpace: 'nowrap' }}>
-        SILVER HORIZON
-      </Typography>
-    </Stack>
-  );
-}
 
 /** Square-shouldered, in teal; `ghost` is the quieter silver outline beside it on the navy. */
 function ActionButton({ children, to, href, down, ghost }: { children: ReactNode; to?: string; href?: string; down?: boolean; ghost?: boolean }) {
@@ -365,7 +280,7 @@ function Numbers() {
  * The curve of the planet and the light along its edge, brightest where the sun
  * is about to rise. Decoration only, drawn in CSS.
  */
-function Planet({ bigSun = false }: { bigSun?: boolean }) {
+export function Planet({ bigSun = false }: { bigSun?: boolean }) {
   return (
     <Box aria-hidden sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
       <Box
@@ -728,7 +643,7 @@ const glimmer = keyframes`
 `;
 
 /** The night sky before dawn: stars that twinkle, and fade out as the sky lightens toward the sun. Decoration only. */
-function MorningStars() {
+export function MorningStars() {
   return (
     <Box
       aria-hidden
