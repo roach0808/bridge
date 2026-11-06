@@ -35,6 +35,7 @@ import type {
   CreateCallInput,
   CursorPage,
   DashboardSummary,
+  DeliveredHistory,
   EditScope,
   ExpertsCalendarResponse,
   MeDTO,
@@ -455,6 +456,8 @@ export function createApiClient(options: ClientOptions) {
 
     dashboard: {
       get: () => get<DashboardSummary>('/dashboard'),
+      /** Experts only: their delivered consultations, day by day. */
+      delivered: () => get<DeliveredHistory>('/dashboard/delivered'),
     },
   };
 }
