@@ -604,6 +604,22 @@ export interface ProfileNeedingBank {
   nextCallAt: string | null;
 }
 
+/** One day of an Expert's delivered calls, in their own time zone. */
+export interface DeliveredDay {
+  /** yyyy-mm-dd */
+  date: string;
+  /** How long the calls of that day ran, in minutes. */
+  minutes: number;
+  calls: number;
+}
+
+/** An Expert's delivered client consultations, day by day, for their dashboard's chart. */
+export interface DeliveredHistory {
+  zone: string;
+  /** Only days with a delivered call, oldest first. */
+  days: DeliveredDay[];
+}
+
 export interface DashboardSummary {
   /** Calls of the viewer's local day (§9.3 zone), visible to the viewer. */
   today: {

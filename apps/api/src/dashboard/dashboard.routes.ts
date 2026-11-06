@@ -6,11 +6,12 @@ import {
   type CallDTO,
   type CallStatus,
   type DashboardSummary,
+  type DeliveredHistory,
   type ProfileNeedingRate,
 } from '@god/shared';
 import { Router } from 'express';
 import { DateTime } from 'luxon';
-import { actorOf, requireAuth, type Actor } from '../auth/middleware';
+import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
 import { visibleCallsWhere } from '../calls/calls.access';
 import { callInclude, toCallDTO } from '../calls/calls.serialize';
 import { prisma } from '../db';
@@ -200,5 +201,30 @@ dashboardRouter.get('/dashboard', requireAuth, async (req, res) => {
     });
   }
 
+  res.json(body);
+});
+
+/**
+ * An Expert's delivered client consultations, day by day in their own zone: how
+ * many minutes they ran and how many there were, for the chart on their
+ * dashboard. Network associate calls are not delivered calls (§4.6).
+ */
+dashboardRouter.get('/dashboard/delivered', requireAuth, requireRole('expert'), async (req, res) => {
+  const actor = actorOf(req);
+  const zone = displayZoneFor(actor);
+  const rows = await prisma.$queryRaw<Array<{ day: Date; minutes: bigint; calls: bigint }>>`
+    SELECT (c.scheduled_at AT TIME ZONE ${zone})::date AS day,
+           sum(COALESCE(c.actual_duration_minutes, c.duration_minutes)) AS minutes,
+           count(*) AS calls
+    FROM calls c
+    WHERE c.expert_id = ${actor.id}::uuid
+      AND c.kind = 'consultation'
+      AND c.status IN ('finished', 'invoice_submit', 'invoice_approve', 'process_to_bank')
+    GROUP BY day
+    ORDER BY day`;
+  const body: DeliveredHistory = {
+    zone,
+    days: rows.map((r) => ({ date: r.day.toISOString().slice(0, 10), minutes: Number(r.minutes), calls: Number(r.calls) })),
+  };
   res.json(body);
 });

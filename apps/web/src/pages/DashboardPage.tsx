@@ -15,7 +15,7 @@ import {
 import { STAGE_LABELS, STAGE_STATUSES, TRACK_STAGES, type CallDTO, type CallStatus, type DashboardSummary, type ProfileNeedingBank, type ProfileNeedingRate } from '@god/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import { useState, type ReactNode } from 'react';
+import { Suspense, lazy, useState, type ReactNode } from 'react';
 import { Link as RouterLink } from 'react-router';
 import { useAuth, useMe } from '@/auth/AuthProvider';
 import { BanksDialog } from '@/components/BanksDialog';
@@ -29,6 +29,9 @@ import { dayLabel, formatDateTime, inZone, relativeTime, zoneAbbr } from '@/lib/
 import { errorMessage } from '@/lib/errors';
 import { TwoDayCalendar } from './calendar/TwoDayCalendar';
 import { FinanceTab } from './calls/FinanceTab';
+
+/** Only Experts see the chart, so only they download its charting library. */
+const DeliveredChart = lazy(() => import('@/components/DeliveredChart').then((m) => ({ default: m.DeliveredChart })));
 
 const formatBytes = (bytes: number) => {
   if (bytes < 1024) return `${bytes} B`;
@@ -511,6 +514,12 @@ export default function DashboardPage() {
       {header}
       <Stack spacing={2}>
         <TodayBoard today={data.today} />
+        {/* An Expert's delivered calls over time, as a trading chart. */}
+        {me.role === 'expert' && (
+          <Suspense fallback={<Skeleton variant="rounded" height={440} sx={{ borderRadius: 3.5 }} />}>
+            <DeliveredChart />
+          </Suspense>
+        )}
         {data.team && <TeamPanel team={data.team} />}
       </Stack>
     </>
