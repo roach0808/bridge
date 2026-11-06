@@ -53,6 +53,7 @@ import { useAuth, useMe } from '@/auth/AuthProvider';
 import { EmptyState, ErrorState, LoadingRows, PageHeader } from '@/components/common';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip, StatusSince } from '@/components/StatusChip';
+import { CallKindChip } from '@/components/CallKindChip';
 import { api } from '@/lib/api';
 import { qk } from '@/lib/queryKeys';
 import { countdown, formatRange, inZone, relativeTime, soon, whenAndLength, zoneAbbr } from '@/lib/time';
@@ -430,6 +431,11 @@ function ActiveCallsTab() {
                       <TableCell>
                         <StatusChip status={c.status} />
                         <StatusSince at={c.statusSince} zone={zone} />
+                        {c.kind === 'network' && (
+                          <Box sx={{ mt: 0.5 }}>
+                            <CallKindChip kind={c.kind} />
+                          </Box>
+                        )}
                       </TableCell>
                       {showResearch && (
                         <TableCell onClick={(e) => e.stopPropagation()}>

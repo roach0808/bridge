@@ -222,3 +222,15 @@ describe('isOverride and edgeOwner', () => {
       }
   });
 });
+
+describe('unpaid network calls', () => {
+  const ctx = { isCallAssociate: false, isCallExpert: false, managesCallAssociate: false, hasExpert: true };
+  it('never take the invoicing steps, which a consultation does', () => {
+    expect(allowedTransitions('founder', 'finished', ctx)).toContain('invoice_submit');
+    expect(allowedTransitions('founder', 'finished', { ...ctx, unpaid: true })).toEqual([]);
+    expect(canTransition('founder', 'invoice_submit', 'invoice_approve', { ...ctx, unpaid: true })).toBe(false);
+  });
+  it('take every other step as usual', () => {
+    expect(allowedTransitions('founder', 'confirmed', { ...ctx, unpaid: true })).toEqual(allowedTransitions('founder', 'confirmed', ctx));
+  });
+});

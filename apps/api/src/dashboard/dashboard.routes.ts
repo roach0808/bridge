@@ -72,6 +72,7 @@ async function profilesNeedingRate(): Promise<ProfileNeedingRate[]> {
     JOIN platforms pl ON pl.id = c.platform_id
     LEFT JOIN profile_platform_statuses s ON s.profile_id = c.profile_id AND s.platform_id = c.platform_id
     WHERE c.status IN ('finished', 'invoice_submit', 'invoice_approve', 'process_to_bank')
+      AND c.kind = 'consultation'
       AND p.deleted_at IS NULL
       AND c.rate_override IS NULL
       AND s.rate IS NULL
@@ -85,10 +86,11 @@ async function profilesNeedingRate(): Promise<ProfileNeedingRate[]> {
 }
 
 async function founderTasks(actor: Actor): Promise<NonNullable<DashboardSummary['tasks']>> {
-  const booked = { status: { in: [...BLOCKING_STATUSES] } };
+  // Only a call that will be invoiced needs a bank to be paid into.
+  const booked = { status: { in: [...BLOCKING_STATUSES] }, kind: 'consultation' as const };
   const [invoices, unprepared, profiles] = await Promise.all([
     prisma.call.findMany({
-      where: { status: 'finished' },
+      where: { status: 'finished', kind: 'consultation' },
       include: callInclude,
       orderBy: { scheduledAt: 'asc' },
       take: 100,

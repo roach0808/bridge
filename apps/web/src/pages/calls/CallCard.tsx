@@ -5,6 +5,7 @@ import { Link as RouterLink } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
 import { UserAvatar, UserChip } from '@/components/identity';
 import { StatusChip, StatusSince } from '@/components/StatusChip';
+import { CallKindChip } from '@/components/CallKindChip';
 import { countdown, whenAndLength } from '@/lib/time';
 import { IncomeFigures, callIncome } from './money';
 
@@ -44,6 +45,7 @@ export function CallCard({
               <Stack alignItems="flex-end" spacing={0.25} sx={{ flexShrink: 0 }}>
                 <StatusChip status={call.status} />
                 <StatusSince at={call.statusSince} zone={zone} />
+                <CallKindChip kind={call.kind} />
               </Stack>
             </Stack>
             <Typography variant="body2" sx={{ mt: 1, fontVariantNumeric: 'tabular-nums' }}>

@@ -19,6 +19,7 @@ import { qk } from '@/lib/queryKeys';
 import { RejectProfileDialog, useProfileForm } from '../admin/ProfileDialogs';
 import { pendingItems } from './profileShared';
 import { ManagerShareField, ProfileTeamField } from './ProfileTeam';
+import { ExpertiseLine } from '@/components/ExpertiseLine';
 
 /** One profile on its own page: details, review, banks, and the edit form in place. */
 export default function ProfileDetailPage() {
@@ -87,6 +88,7 @@ export default function ProfileDetailPage() {
                       </Tooltip>
                     )}
                   </Stack>
+                  <ExpertiseLine expertise={p.expertise} sx={{ mt: 0.75 }} />
                   <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                     {p.briefExperience || 'No summary yet.'}
                   </Typography>

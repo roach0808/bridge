@@ -267,6 +267,7 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
     const created = await tx.call.create({
       data: {
         status: 'on_scheduling',
+        kind: input.kind ?? 'consultation',
         platformId: input.platformId,
         profileId: input.profileId,
         associateId,
@@ -290,7 +291,7 @@ export async function createCall(actor: Actor, input: CreateCallInput): Promise<
       callId: created.id,
       to: 'on_scheduling' as const,
       actor: actorRef(actor),
-      summary: `New call with ${created.profile.name} on ${created.platform.name}`,
+      summary: `New ${created.kind === 'network' ? 'network associate call' : 'call'} with ${created.profile.name} on ${created.platform.name}`,
     };
     const assigned = others.filter((id) => id === created.expertId || id === created.associateId);
     delivers.push(await notify(tx, assigned, 'call.assigned', payload));
@@ -534,13 +535,16 @@ export async function transitionCall(actor: Actor, id: string | null, input: Tra
     if (to === 'scheduled') data.meetingDetails = meetingDetails;
     if (to === 'ongoing') data.ninjaLink = input.ninjaLink;
     if (to === 'invoice_submit' && input.bankId) data.bank = { connect: { id: input.bankId } };
+    // Submitting the invoice is when the Founder knows best when its money should arrive.
+    if (to === 'invoice_submit' && input.paymentEta) data.paymentEta = fromDateOnly(input.paymentEta);
     if (to === 'finished') {
       data.actualDurationMinutes = input.actualDurationMinutes;
       data.rating = input.rating;
       data.feedback = input.feedback ?? null;
       // The Expert is paid at the rate they had when the call took place; changing it later
       // only changes calls still to come.
-      data.expertRate = current.expert?.hourlyRate ?? null;
+      // Nobody is paid for a network call, the Expert included.
+      data.expertRate = current.kind === 'network' ? null : (current.expert?.hourlyRate ?? null);
     }
     if (to === 'process_to_bank') {
       // The bank never pays exactly the expected price: record what actually arrived, and when

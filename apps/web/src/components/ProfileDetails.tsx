@@ -403,6 +403,7 @@ export function ProfileDetailsBody({ profile: p }: { profile: ProfileDTO }) {
           <Field label="Onboarded">{p.onboardedAt ? DateTime.fromISO(p.onboardedAt).toFormat('LLL d, yyyy') : dash}</Field>
         </Box>
       )}
+      <TextBlock label="Expertise field" text={p.expertise} />
       <TextBlock label="Brief experience" text={p.briefExperience} />
       <TextBlock label="Career history" text={p.careerHistory} />
       <TextBlock label="Education" text={p.education} />

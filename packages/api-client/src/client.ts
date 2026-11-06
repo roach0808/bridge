@@ -219,6 +219,8 @@ export function createApiClient(options: ClientOptions) {
       signIn: (id: string) => get<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`),
       setSignInEmail: (id: string, email: string) => patch<SignInDetailsDTO>(`/users/${enc(id)}/sign-in`, { email }),
       unlinkGoogle: (id: string) => del<SignInDetailsDTO>(`/users/${enc(id)}/google`),
+      /** Founder only: a new password for someone else; signs them out everywhere. */
+      resetPassword: (id: string, password: string) => post<void>(`/users/${enc(id)}/password`, { password }),
     },
 
     /** Password managers (§6.17): a Profile's saved logins, or a team's. Never Experts. */

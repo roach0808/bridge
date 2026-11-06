@@ -309,6 +309,12 @@ const money = (n: number | null | undefined) => (n == null ? NONE : formatUsd(n)
 
 /** A call's rate: the special rate for this call, or the Profile's rate on the platform. */
 const rateOf = (c: CallDTO) => c.rateOverride ?? c.platformRate;
+/** A network associate call: nobody is paid for it, so it has no money in any column (§4.6). */
+const UnpaidMark = () => (
+  <Typography variant="caption" color="text.secondary">
+    Unpaid
+  </Typography>
+);
 
 function Num({ children, muted }: { children: ReactNode; muted?: boolean }) {
   return (
@@ -600,10 +606,12 @@ function columnsFor(role: Role, zone: string): Column[] {
         label: 'Rate',
         align: 'right',
         width: 62,
-        value: (c) => (rateOf(c) === null ? NONE : `${formatUsd(rateOf(c))}/h`),
-        sort: (c) => rateOf(c) ?? 0,
+        value: (c) => (c.kind === 'network' ? 'Unpaid' : rateOf(c) === null ? NONE : `${formatUsd(rateOf(c))}/h`),
+        sort: (c) => (c.kind === 'network' ? -1 : (rateOf(c) ?? 0)),
         render: (c) =>
-          rateOf(c) === null ? (
+          c.kind === 'network' ? (
+            <UnpaidMark />
+          ) : rateOf(c) === null ? (
             <Typography variant="caption" color="warning.main">No rate</Typography>
           ) : (
             <Stack alignItems="flex-end">
@@ -618,10 +626,10 @@ function columnsFor(role: Role, zone: string): Column[] {
         label: 'Invoice amount',
         align: 'right',
         width: 76,
-        value: (c) => money(c.expectedPrice),
+        value: (c) => (c.kind === 'network' ? 'Unpaid' : money(c.expectedPrice)),
         sort: (c) => c.expectedPrice ?? 0,
         total: (rows) => <Total value={formatUsd(sumOf(rows, (c) => c.expectedPrice))} />,
-        render: (c) => <Num>{money(c.expectedPrice)}</Num>,
+        render: (c) => (c.kind === 'network' ? <UnpaidMark /> : <Num>{money(c.expectedPrice)}</Num>),
       },
       {
         key: 'real',
@@ -633,7 +641,8 @@ function columnsFor(role: Role, zone: string): Column[] {
         total: (rows) => <Total value={formatUsd(sumOf(rows, (c) => c.realIncome))} />,
         render: (c) => <Num muted={c.realIncome === null}>{money(c.realIncome)}</Num>,
       },
-      bank,
+      // Which bank an invoice went to is the Founder's business, not a Manager's.
+      ...(founder ? [bank] : []),
       {
         key: 'expert',
         label: 'Expert',
@@ -760,6 +769,8 @@ function Unpriced({ rows, role }: { rows: CallDTO[]; role: Role }) {
   const [open, setOpen] = useState(false);
   const missing = rows.flatMap((c) => {
     const why: string[] = [];
+    // Nobody is paid for a network call: it never needs a rate.
+    if (c.kind === 'network') return [];
     if ((role === 'founder' || role === 'manager') && c.expectedPrice === null && c.actualDurationMinutes !== null && rateOf(c) === null) {
       why.push(`no rate for ${c.profile.name} on ${c.platform.name}`);
     }

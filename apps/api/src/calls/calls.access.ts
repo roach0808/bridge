@@ -18,6 +18,8 @@ export interface CallAccessShape {
   associateId: string;
   expertId: string | null;
   expertPaidAt?: Date | null;
+  /** Unpaid network calls never take the invoicing steps and have no rates (§4.6). */
+  kind?: string;
   associate: { role: string; managerId: string | null };
 }
 
@@ -85,6 +87,7 @@ export function transitionContext(actor: Viewer, call: CallAccessShape): Transit
     isCallExpert: call.expertId === actor.id,
     managesCallAssociate: actor.role === 'manager' && supervisesCall(actor, call),
     hasExpert: call.expertId !== null,
+    unpaid: call.kind === 'network',
   };
 }
 
@@ -110,6 +113,8 @@ export function callPermissions(actor: Viewer, call: CallAccessShape): CallPermi
   // A Manager runs every Associate's call, and their own (which they may hand on).
   const supervises = actor.role === 'founder' || (actor.role === 'manager' && supervisesCall(actor, call));
   const ownsScheduling = supervises || teamCallOf(actor, call);
+  // Nobody is paid for a network call, so it has no rate of any kind.
+  const paid = call.kind !== 'network';
 
   return {
     edit: ownsScheduling && (scheduling || actor.role === 'founder'),
@@ -119,11 +124,11 @@ export function callPermissions(actor: Viewer, call: CallAccessShape): CallPermi
     editIncome: actor.role === 'founder',
     editResearchLink: actor.role === 'founder',
     // Associates never see a call's rate or income.
-    editRate: ownsScheduling && actor.role !== 'associate',
+    editRate: paid && ownsScheduling && actor.role !== 'associate',
     // The meeting details matter until the call has taken place; the Founder can always correct them.
     editMeeting: ownsScheduling && (ACTIVE_STATUSES.includes(call.status) || actor.role === 'founder'),
     // The Expert's rate is fixed when the call finishes; the Founder may still correct it until the Expert is paid.
-    editExpertRate: actor.role === 'founder' && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,
+    editExpertRate: paid && actor.role === 'founder' && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,
     // The Expert reports the minutes when finishing; whoever oversees the call may correct them, until the
     // Expert is paid for them.
     editActualDuration: supervises && FINANCE_STATUSES.includes(call.status) && !call.expertPaidAt,

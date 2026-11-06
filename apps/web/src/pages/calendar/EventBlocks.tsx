@@ -7,6 +7,7 @@ import { STATUS_LABELS, type CalendarCall, type Occurrence, type PersonalEventOc
 import { DateTime } from 'luxon';
 import type { KeyboardEvent, MouseEvent, ReactNode } from 'react';
 import { STATUS_COLORS, StatusBadge, StatusChip } from '@/components/StatusChip';
+import { CallKindChip } from '@/components/CallKindChip';
 import { UserChip } from '@/components/identity';
 import { formatRange } from '@/lib/time';
 
@@ -101,9 +102,10 @@ function CallTooltip({ call, zone }: { call: CalendarCall; zone: string }) {
       <Typography variant="body2" fontWeight={600}>
         {call.profile.name}
       </Typography>
-      <Box>
+      <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
         <StatusChip status={call.status} />
-      </Box>
+        <CallKindChip kind={call.kind} />
+      </Stack>
       <Typography variant="caption" component="div">
         {DateTime.fromISO(call.scheduledAt).setZone(zone).toFormat('ccc, LLL d')} ·{' '}
         {formatRange(call.scheduledAt, call.endsAt, zone)} · {call.platform.name}

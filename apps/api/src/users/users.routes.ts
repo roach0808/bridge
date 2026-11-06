@@ -6,6 +6,7 @@ import {
   defaultAvatarFor,
   isAvatarForAudience,
   listUsersQuerySchema,
+  resetPasswordSchema,
   signInEmailSchema,
   type SignInDetailsDTO,
   updateUserSchema,
@@ -210,6 +211,27 @@ usersRouter.delete('/users/:id', requireRole('founder'), async (req, res) => {
   res.status(204).end();
 });
 
+/**
+ * Founder only: gives someone a new password, for when they forgot theirs. Every
+ * device they were signed in on is signed out, so only the new password works.
+ * The password itself never reaches the audit trail, only that it was reset.
+ */
+usersRouter.post('/users/:id/password', requireRole('founder'), async (req, res) => {
+  const actor = actorOf(req);
+  const id = idParam(req);
+  const { password } = parseBody(resetPasswordSchema, req);
+  const target = id ? await prisma.user.findFirst({ where: { id, deletedAt: null }, select: { id: true } }) : null;
+  if (!target) throw notFound('User');
+  if (target.id === actor.id) throw badRequest('Change your own password in Settings, with your current one');
+  const passwordHash = await hashPassword(password);
+  await prisma.$transaction([
+    prisma.user.update({ where: { id: target.id }, data: { passwordHash } }),
+    prisma.refreshToken.updateMany({ where: { userId: target.id, revokedAt: null }, data: { revokedAt: new Date() } }),
+  ]);
+  disconnectUser(target.id);
+  res.status(204).end();
+});
+
 async function signInDetails(id: string): Promise<SignInDetailsDTO> {
   const user = await prisma.user.findUnique({
     where: { id },
@@ -298,7 +320,7 @@ usersRouter.patch('/users/:id', async (req, res) => {
     // Calls that finished before the Expert had a rate can take this one; calls with a rate keep theirs.
     if (input.applyRateToUnpricedCalls && input.hourlyRate != null) {
       await tx.call.updateMany({
-        where: { expertId: target.id, expertRate: null, status: { in: [...FINANCE_STATUSES] } },
+        where: { expertId: target.id, expertRate: null, status: { in: [...FINANCE_STATUSES] }, kind: 'consultation' },
         data: { expertRate: input.hourlyRate },
       });
     }

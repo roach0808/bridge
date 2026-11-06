@@ -78,7 +78,12 @@ export interface TransitionContext {
   managesCallAssociate: boolean;
   /** The Call has an expert assigned (required to enter `scheduled`). */
   hasExpert?: boolean;
+  /** Nobody is paid for the call (an Expert's call with a network associate): it ends at Finished. */
+  unpaid?: boolean;
 }
+
+/** The steps that bill a call: an unpaid call never takes them. */
+const INVOICING: CallStatus[] = ['invoice_submit', 'invoice_approve', 'process_to_bank'];
 
 export function findTransition(from: CallStatus, to: CallStatus): Transition | undefined {
   return TRANSITIONS.find((t) => t.from === from && t.to === to);
@@ -111,6 +116,7 @@ export function canTransition(
   const t = findTransition(from, to);
   if (!t) return false;
   if (!t.roles.includes(role)) return false;
+  if (ctx.unpaid && INVOICING.includes(to)) return false;
   return hasRelationship(role, ctx);
 }
 

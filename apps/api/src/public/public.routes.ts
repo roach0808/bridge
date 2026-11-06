@@ -22,7 +22,8 @@ export const forgetPublicStats = () => {
 };
 
 async function countStats(): Promise<PublicStats> {
-  const took = { status: { in: [...FINANCE_STATUSES] } };
+  // Client consultations only: an Expert's call with a network associate is not a delivered call.
+  const took = { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation' as const };
   const calls = await prisma.call.findMany({
     where: took,
     select: {

@@ -1,4 +1,5 @@
 import ArrowBackRounded from '@mui/icons-material/ArrowBackRounded';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import CancelOutlined from '@mui/icons-material/CancelOutlined';
 import DeleteOutlineRounded from '@mui/icons-material/DeleteOutlineRounded';
 import EditRounded from '@mui/icons-material/EditRounded';
@@ -62,6 +63,7 @@ import { ConfirmDialog, EmptyState, ErrorState, Field } from '@/components/commo
 import { ProfileDetailsDialog } from '@/components/ProfileDetails';
 import { RoleBadge, UserAvatar, UserChip } from '@/components/identity';
 import { STATUS_COLORS, StatusChip } from '@/components/StatusChip';
+import { CallKindChip } from '@/components/CallKindChip';
 import { BankPicker } from '@/components/BankPicker';
 import { useToast } from '@/components/ToastProvider';
 import { api, socket } from '@/lib/api';
@@ -74,6 +76,7 @@ import { AVAILABILITY_LABEL, availabilityFor, useExpertsAround } from './expertA
 import { MessageThread } from './MessageThread';
 import { IncomeFigures, PaidMark, callIncome, formatPercent } from './money';
 import { StatusProgress } from './StatusProgress';
+import { ExpertiseLine } from '@/components/ExpertiseLine';
 
 
 function useUpdateCall(call: CallDTO) {
@@ -109,6 +112,8 @@ function TransitionBar({ call }: { call: CallDTO }) {
   const [income, setIncome] = useState('');
   // Submitting the invoice names the Profile's bank it is paid into.
   const [bankId, setBankId] = useState('');
+  // …and, if the Founder knows it, when its money should arrive.
+  const [eta, setEta] = useState<DateTime | null>(null);
 
   const open = (to: CallStatus) => {
     setTarget(to);
@@ -120,6 +125,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
     // Start from the expected price; the bank usually pays a little less.
     setIncome(call.expectedPrice === null ? '' : String(call.expectedPrice));
     setBankId(call.bank?.isActive ? call.bank.id : '');
+    setEta(call.paymentEta ? DateTime.fromISO(call.paymentEta) : null);
     transition.reset();
   };
 
@@ -162,7 +168,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
         : target === 'process_to_bank'
           ? incomeValid
           : target === 'invoice_submit'
-            ? bankId !== ''
+            ? bankId !== '' && (eta === null || eta.isValid)
           : expertReschedule
           ? comment.trim() !== ''
           : true;
@@ -177,7 +183,7 @@ function TransitionBar({ call }: { call: CallDTO }) {
       ...(target === 'scheduled' ? { meetingDetails: meetingDetails.trim() } : {}),
       ...(target === 'finished' ? { actualDurationMinutes: minutes } : {}),
       ...(target === 'process_to_bank' ? { realIncome: incomeValue } : {}),
-      ...(target === 'invoice_submit' ? { bankId } : {}),
+      ...(target === 'invoice_submit' ? { bankId, ...(eta?.isValid ? { paymentEta: eta.toISODate()! } : {}) } : {}),
     });
   };
 
@@ -306,6 +312,15 @@ function TransitionBar({ call }: { call: CallDTO }) {
               {target === 'invoice_submit' && (
                 <Box sx={{ mb: 2 }}>
                   <BankPicker profile={call.profile} value={bankId} onChange={setBankId} error={errors.bankId} />
+                  <DatePicker
+                    label="ETA (optional)"
+                    value={eta}
+                    onChange={setEta}
+                    slotProps={{
+                      textField: { fullWidth: true, sx: { mt: 2 }, error: Boolean(errors.paymentEta), helperText: errors.paymentEta ?? 'When the money should reach the bank. You can change it later in the Finance table.' },
+                      field: { clearable: true },
+                    }}
+                  />
                 </Box>
               )}
               {expertReschedule && (
@@ -1408,6 +1423,7 @@ export default function CallDetailPage() {
                     {call.profile.name}
                   </Typography>
                   <StatusChip status={call.status} size="medium" testId="call-status" />
+                  <CallKindChip kind={call.kind} size="medium" />
                   {call.profile.linkedinUrl && (
                     <Tooltip title="LinkedIn">
                       <IconButton size="small" component="a" href={call.profile.linkedinUrl} target="_blank" rel="noopener noreferrer">
@@ -1416,6 +1432,7 @@ export default function CallDetailPage() {
                     </Tooltip>
                   )}
                 </Stack>
+                <ExpertiseLine expertise={call.profile.expertise} sx={{ mt: 0.75 }} />
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
                   {call.profile.briefExperience}
                 </Typography>

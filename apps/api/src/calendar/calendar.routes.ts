@@ -37,6 +37,7 @@ export const calendarRouter = Router();
 const calendarCallSelect = {
   id: true,
   status: true,
+  kind: true,
   scheduledAt: true,
   endsAt: true,
   durationMinutes: true,
@@ -52,6 +53,7 @@ type CalendarCallRow = Prisma.CallGetPayload<{ select: typeof calendarCallSelect
 const toCalendarCall = (c: CalendarCallRow, viewer: Pick<Actor, 'role'>): CalendarCall => ({
   id: c.id,
   status: statusForRole(viewer.role, c.status),
+  kind: c.kind,
   scheduledAt: iso(c.scheduledAt),
   endsAt: iso(c.endsAt),
   durationMinutes: c.durationMinutes,

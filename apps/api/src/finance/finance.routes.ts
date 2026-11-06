@@ -39,10 +39,11 @@ const BEFORE_BANK = FINANCE_STATUSES.filter((s) => s !== 'process_to_bank');
 
 /** The calls in someone's money: those that pay them, or that they pay out of. */
 function scopeWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.CallWhereInput {
-  const took: Prisma.CallWhereInput = { status: { in: [...FINANCE_STATUSES] } };
+  // Unpaid network calls are in nobody's money; the Founder still sees them, marked unpaid (§4.6).
+  const took: Prisma.CallWhereInput = { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation' };
   switch (actor.role) {
     case 'founder':
-      return took;
+      return { status: { in: [...FINANCE_STATUSES] } };
     case 'manager':
       // Paid to them, or on its way to them: the calls they run and their team runs.
       return {
@@ -64,7 +65,10 @@ function unpaidWhere(actor: Pick<Actor, 'id' | 'role'>): Prisma.CallWhereInput {
   const notBanked: Prisma.CallWhereInput = { status: { not: 'process_to_bank' } };
   switch (actor.role) {
     case 'founder':
-      return { OR: [{ expertPaidAt: null }, notBanked, { managerPaidAt: null, payeeManagerId: { not: null } }] };
+      // Nothing is ever paid on a network call, but the Founder keeps it in sight, marked unpaid (§4.6).
+      return {
+        OR: [{ kind: 'network' }, { kind: 'consultation', OR: [{ expertPaidAt: null }, notBanked, { managerPaidAt: null, payeeManagerId: { not: null } }] }],
+      };
     case 'manager':
       return {
         OR: [
@@ -107,6 +111,8 @@ function summarize(actor: Pick<Actor, 'id' | 'role'>, calls: CallDTO[]): Finance
   };
 
   for (const c of calls) {
+    // Nobody is paid for a network call: it brings in nothing and is owed nothing.
+    if (c.kind === 'network') continue;
     if (income) {
       if (c.realIncome !== null) income.real += c.realIncome;
       else if (c.expectedPrice !== null) income.expected += c.expectedPrice;

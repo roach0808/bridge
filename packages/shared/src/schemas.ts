@@ -1,3 +1,4 @@
+import { CALL_KINDS } from './callKind';
 import { z } from 'zod';
 import { AVATAR_AUDIENCES } from './avatars';
 import { CALL_DURATIONS, CALL_STATUSES } from './callStatus';
@@ -96,6 +97,9 @@ export const loginSchema = z.object({
 export const googleSignInSchema = z.object({ credential: z.string().min(20).max(4096) });
 /** Founder only: the email someone signs in with (and that Google sign-in is matched against). */
 export const signInEmailSchema = z.object({ email: z.string().trim().toLowerCase().email('Enter a valid email') });
+
+/** Founder only: a new password for someone else's account. */
+export const resetPasswordSchema = z.object({ password });
 export const refreshSchema = z.object({ refreshToken: z.string().min(1).optional() });
 
 export const changePasswordSchema = z.object({ current: z.string().min(1), next: password });
@@ -186,6 +190,8 @@ export const profileSchema = z.object({
     .nullish()
     .or(z.literal('').transform(() => null)),
   briefExperience: optionalText(4000).transform((v) => v ?? ''),
+  /** Left out, it stays as it is, so an older client never erases it. */
+  expertise: z.string().trim().max(500, 'At most 500 characters').optional(),
   avatarId: z.string().min(1, 'Choose an avatar'),
   dateOfBirth: isoDate
     .refine((d) => d >= '1900-01-01' && Date.parse(d) <= Date.now(), 'Enter a real date of birth')
@@ -249,6 +255,8 @@ export const durationMinutes = z.coerce
   .refine((n) => (CALL_DURATIONS as readonly number[]).includes(n), 'Duration must be 15, 30, 45 or 60 minutes');
 
 export const createCallSchema = z.object({
+  /** Defaults to a client consultation. */
+  kind: z.enum(CALL_KINDS).optional(),
   platformId: uuid,
   profileId: uuid,
   associateId: uuid.nullish(),
@@ -326,8 +334,13 @@ export const transitionSchema = z
     bankId: uuid.optional(),
     /** Required to move a call to `process_to_bank`: what actually reached the bank (USD). */
     realIncome: money.optional(),
+    /** Moving to `invoice_submit`: when the Founder expects the money to arrive. Optional. */
+    paymentEta: isoDate.optional(),
   })
   .superRefine((v, ctx) => {
+    if (v.paymentEta !== undefined && v.to !== 'invoice_submit') {
+      ctx.addIssue({ code: 'custom', path: ['paymentEta'], message: 'An ETA is set when the invoice is submitted' });
+    }
     if (v.to === 'process_to_bank' && v.realIncome === undefined) {
       ctx.addIssue({ code: 'custom', path: ['realIncome'], message: 'Enter the amount that reached the bank' });
     }

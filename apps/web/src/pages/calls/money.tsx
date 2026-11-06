@@ -16,6 +16,8 @@ export interface CallIncome {
   expected: number | null;
   real: number | null;
   cancelled: boolean;
+  /** A network associate call: nobody is paid for it. */
+  unpaid: boolean;
 }
 
 export function callIncome(call: CallDTO, role: Role): CallIncome | null {
@@ -28,12 +30,14 @@ export function callIncome(call: CallDTO, role: Role): CallIncome | null {
     expected: call.expectedPrice,
     real: call.realIncome,
     cancelled,
+    unpaid: call.kind === 'network',
   };
 }
 
 /** "$1,000/h × 33 min = $550", or why there is no figure yet. */
 export function expectedFormula(income: CallIncome): string {
   if (income.cancelled) return 'None — cancelled';
+  if (income.unpaid) return 'None — unpaid network call';
   if (income.rate === null) return 'No rate yet';
   const sum = `${formatUsd(income.rate)}/h × ${income.minutes ?? '—'} min`;
   return income.expected === null ? sum : `${sum} = ${formatUsd(income.expected)}`;
@@ -41,10 +45,10 @@ export function expectedFormula(income: CallIncome): string {
 
 /** The two income figures side by side, as a pill (header, lists) or as lines (details). */
 export function IncomeFigures({ income, variant = 'pill' }: { income: CallIncome; variant?: 'pill' | 'lines' | 'cell' }) {
-  if (income.cancelled) {
+  if (income.cancelled || income.unpaid) {
     return (
       <Typography variant="body2" color="text.secondary" component="span">
-        None — cancelled
+        {income.cancelled ? 'None — cancelled' : 'None — unpaid'}
       </Typography>
     );
   }
