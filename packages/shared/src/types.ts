@@ -853,6 +853,41 @@ export interface ProfileStatsRow {
  * Founder only. `expected` is the expected price of finished calls; `paidExpected`
  * and `real` cover only calls processed to bank, and `gap` = paidExpected − real.
  */
+/** What one Profile's delivered calls came to in a period, in the viewer's scope. */
+export interface ProfilePeriodRow {
+  profile: { id: string; name: string };
+  /** Client consultations that took place (finished or being invoiced). */
+  calls: number;
+  minutes: number;
+  /** What they are worth to the viewer: see `ProfilePeriodStats.money`. */
+  money: number;
+  /** Calls with no amount yet (no rate), left out of `money`. */
+  unpriced: number;
+}
+
+export type ProfilePeriodTotals = Omit<ProfilePeriodRow, 'profile'>;
+
+/**
+ * The Statistics page: one day, week or month, with each Profile's delivered
+ * calls and money. The Founder sees the whole company and a Manager their team,
+ * at the invoice amount; an Associate their own calls and their part; an Expert
+ * their own calls and their pay.
+ */
+export interface ProfilePeriodStats {
+  zone: string;
+  period: 'day' | 'week' | 'month';
+  /** yyyy-mm-dd: the first day of the period. */
+  start: string;
+  /** yyyy-mm-dd: the first day after it. */
+  end: string;
+  money: 'invoice' | 'part' | 'pay';
+  /** Profiles with at least one delivered call in the period. */
+  rows: ProfilePeriodRow[];
+  total: ProfilePeriodTotals;
+  /** The period before, for comparison. */
+  previous: ProfilePeriodTotals;
+}
+
 export interface FinanceCell {
   calls: number;
   finishedCalls: number;

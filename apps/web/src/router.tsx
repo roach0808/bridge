@@ -125,7 +125,7 @@ export const router = createBrowserRouter([
           { path: 'chat/all/:conversationId', element: <Page roles={['founder']}><AllChatsPage /></Page> },
           { path: 'chat/:conversationId', element: <Page><ChatPage /></Page> },
           { path: 'todos', element: <Page><TodosPage /></Page> },
-          { path: 'stats', element: <Page roles={['founder', 'manager', 'associate']}><StatsPage /></Page> },
+          { path: 'stats', element: <Page><StatsPage /></Page> },
           { path: 'invoicing', element: <Page roles={['founder']}><InvoicingPage /></Page> },
           { path: 'profiles', element: <Page><ProfilesPage /></Page> },
           { path: 'profiles/:id', element: <Page><ProfileDetailPage /></Page> },

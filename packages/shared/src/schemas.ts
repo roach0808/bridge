@@ -564,6 +564,14 @@ export const reorderTodosSchema = z
 // --- Statistics -----------------------------------------------------------------
 
 export const STATS_PERIODS = ['week', 'biweek', 'month'] as const;
+/** The Statistics page: one day, week or month (the one containing `date`; today by default). */
+export const PROFILE_STATS_PERIODS = ['day', 'week', 'month'] as const;
+export type ProfileStatsPeriod = (typeof PROFILE_STATS_PERIODS)[number];
+export const profilePeriodQuerySchema = z.object({
+  period: z.enum(PROFILE_STATS_PERIODS).default('week'),
+  date: isoDate.optional(),
+});
+
 export const statsQuerySchema = z.object({
   period: z.enum(STATS_PERIODS).default('week'),
   /** How many periods, ending with the current one. */
