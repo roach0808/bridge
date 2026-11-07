@@ -63,6 +63,7 @@ import type {
   AssociateStats,
   FinanceStats,
   ProfilePeriodStats,
+  TrendStats,
   ProfileStatsRow,
   StatsPeriodKind,
   TodoPanel,
@@ -386,6 +387,8 @@ export function createApiClient(options: ClientOptions) {
       finance: (query?: { period?: StatsPeriodKind; count?: number }) => get<FinanceStats>('/stats/finance', query),
       /** Everyone, in their own scope: one day, week or month, Profile by Profile. */
       byProfile: (query: { period: 'day' | 'week' | 'month'; date?: string }) => get<ProfilePeriodStats>('/stats/by-profile', query),
+      /** Everyone, in their own scope: delivered calls, hours and money, period by period. */
+      trend: (query: { period: 'day' | 'week' | 'month'; date?: string; count?: number }) => get<TrendStats>('/stats/trend', query),
     },
 
     push: {

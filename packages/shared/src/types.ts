@@ -867,6 +867,21 @@ export interface ProfilePeriodRow {
 
 export type ProfilePeriodTotals = Omit<ProfilePeriodRow, 'profile'>;
 
+/** One day, week or month of the Statistics trend. */
+export interface TrendPoint extends ProfilePeriodTotals {
+  /** yyyy-mm-dd: the first day of the period. */
+  start: string;
+}
+
+/** Delivered calls, hours and money period by period, in the viewer's scope (as `ProfilePeriodStats`). */
+export interface TrendStats {
+  zone: string;
+  period: 'day' | 'week' | 'month';
+  money: 'invoice' | 'part' | 'pay';
+  /** Oldest first; the last is the period containing the date asked for. */
+  points: TrendPoint[];
+}
+
 /**
  * The Statistics page: one day, week or month, with each Profile's delivered
  * calls and money. The Founder sees the whole company and a Manager their team,
