@@ -78,3 +78,30 @@ describe('GET /stats/by-profile', () => {
     expect(e1.total).toMatchObject({ calls: 1, money: 120 });
   });
 });
+
+describe('GET /stats/trend', () => {
+  it('gives each period in a row, quiet ones as zeros, ending with the one asked for, in the viewer’s scope', async () => {
+    await prisma.profilePlatformStatus.create({ data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 600 } });
+    await delivered({ associate: fx.a1, expert: fx.e1, status: 'finished', scheduledAt: inWeek(0) }, 60);
+    await delivered({ associate: fx.a3, expert: fx.e3, status: 'finished', scheduledAt: inWeek(0) }, 45);
+    await delivered({ associate: fx.a1, expert: fx.e1, status: 'process_to_bank', scheduledAt: inWeek(2) }, 30);
+    await delivered({ associate: fx.a1, expert: fx.e1, status: 'finished', kind: 'network', scheduledAt: inWeek(1) }, 30);
+
+    const founder = (await (await as(fx.founder)).get('/stats/trend', { period: 'week', date: '2026-10-15' })).body;
+    expect(founder).toMatchObject({ zone: 'America/New_York', period: 'week', money: 'invoice' });
+    expect(founder.points).toHaveLength(12);
+    expect(founder.points.at(-1)).toEqual({ start: '2026-10-12', calls: 2, minutes: 105, money: 600, unpriced: 1 });
+    expect(founder.points.at(-2)).toEqual({ start: '2026-10-05', calls: 0, minutes: 0, money: 0, unpriced: 0 });
+    expect(founder.points.at(-3)).toMatchObject({ start: '2026-09-28', calls: 1, money: 300 });
+
+    const days = (await (await as(fx.founder)).get('/stats/trend', { period: 'day', date: '2026-10-14' })).body;
+    expect(days.points).toHaveLength(30);
+    expect(days.points.at(-1)).toMatchObject({ start: '2026-10-14', calls: 2 });
+    const months = (await (await as(fx.founder)).get('/stats/trend', { period: 'month', date: '2026-10-01', count: 3 })).body;
+    expect(months.points.map((p: { start: string; calls: number }) => [p.start, p.calls])).toEqual([['2026-08-01', 0], ['2026-09-01', 1], ['2026-10-01', 2]]);
+
+    // The second team's Manager sees only their team's call.
+    const m2 = (await (await as(fx.m2)).get('/stats/trend', { period: 'week', date: '2026-10-15' })).body;
+    expect(m2.points.reduce((t: number, p: { calls: number }) => t + p.calls, 0)).toBe(1);
+  });
+});

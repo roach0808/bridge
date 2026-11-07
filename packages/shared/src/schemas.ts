@@ -572,6 +572,11 @@ export const profilePeriodQuerySchema = z.object({
   date: isoDate.optional(),
 });
 
+/** The trend: `count` periods up to the one containing `date` (30 days, 12 weeks or 12 months by default). */
+export const trendQuerySchema = profilePeriodQuerySchema.extend({
+  count: z.coerce.number().int().min(2).max(366).optional(),
+});
+
 export const statsQuerySchema = z.object({
   period: z.enum(STATS_PERIODS).default('week'),
   /** How many periods, ending with the current one. */

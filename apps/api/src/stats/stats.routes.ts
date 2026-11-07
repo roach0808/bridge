@@ -4,6 +4,9 @@ import {
   expectedPrice,
   profilePeriodQuerySchema,
   statsQuerySchema,
+  trendQuerySchema,
+  type TrendPoint,
+  type TrendStats,
   type ProfilePeriodRow,
   type ProfilePeriodStats,
   type ProfilePeriodTotals,
@@ -338,18 +341,59 @@ statsRouter.get('/stats/finance', async (req, res) => {
   res.json(body);
 });
 
-// --- By profile: one day, week or month -------------------------------------------------
+// --- By profile, and the trend ------------------------------------------------------------
 
 const UNITS = { day: 'day', week: 'week', month: 'month' } as const;
+
+/** What a viewer's statistics count money in: the invoice amount, an Associate's part, an Expert's pay. */
+const moneyKindFor = (actor: Actor): ProfilePeriodStats['money'] => (actor.role === 'expert' ? 'pay' : actor.role === 'associate' ? 'part' : 'invoice');
+
+/**
+ * The client consultations that took place between `from` and `to`, in the
+ * viewer's scope, each with how long it ran and what it is worth to them. The
+ * amount is read from the call as the viewer may see it, so nobody learns a
+ * figure they could not read on the call itself; null when it has no amount yet.
+ */
+async function deliveredFor(actor: Actor, from: DateTime, to: DateTime) {
+  const money = moneyKindFor(actor);
+  const rows = await prisma.call.findMany({
+    where: {
+      AND: [
+        visibleCallsWhere(actor),
+        // An Associate's statistics are their own calls, not their teammates'.
+        actor.role === 'associate' ? { associateId: actor.id } : {},
+        { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation', scheduledAt: { gte: from.toJSDate(), lt: to.toJSDate() } },
+      ],
+    },
+    include: callInclude,
+    orderBy: { scheduledAt: 'asc' },
+  });
+  return rows.map((row) => {
+    const dto = toCallDTO(row, actor);
+    const amount =
+      money === 'invoice'
+        ? dto.expectedPrice
+        : money === 'part'
+          ? (dto.payouts.associate?.amount ?? dto.payouts.associate?.expected ?? null)
+          : (dto.payouts.expert?.amount ?? null);
+    return { row, minutes: row.actualDurationMinutes ?? row.durationMinutes, amount };
+  });
+}
+
+const emptyTotals = (): ProfilePeriodTotals => ({ calls: 0, minutes: 0, money: 0, unpriced: 0 });
+function addTo(into: ProfilePeriodTotals, minutes: number, amount: number | null) {
+  into.calls += 1;
+  into.minutes += minutes;
+  if (amount === null) into.unpriced += 1;
+  else into.money = addMoney(into.money, amount);
+}
 
 /**
  * The Statistics page (§6.14): for one day, week or month, each Profile's client
  * consultations that took place, how long they ran, and what they are worth to the
  * viewer; and the same totals for the period before. The Founder sees the whole
  * company and a Manager their team, at the invoice amount; an Associate their own
- * calls and their part; an Expert their own calls and their pay. Each figure is
- * read from the call as the viewer may see it, so nobody learns an amount they
- * could not read on the call itself.
+ * calls and their part; an Expert their own calls and their pay.
  */
 statsRouter.get('/stats/by-profile', async (req, res) => {
   const actor = actorOf(req);
@@ -359,55 +403,53 @@ statsRouter.get('/stats/by-profile', async (req, res) => {
   const start = (date ? DateTime.fromISO(date, { zone }) : DateTime.now().setZone(zone)).startOf(unit);
   const end = start.plus({ [`${unit}s`]: 1 });
   const before = start.minus({ [`${unit}s`]: 1 });
-  const rows = await prisma.call.findMany({
-    where: {
-      AND: [
-        visibleCallsWhere(actor),
-        // An Associate's statistics are their own calls, not their teammates'.
-        actor.role === 'associate' ? { associateId: actor.id } : {},
-        { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation', scheduledAt: { gte: before.toJSDate(), lt: end.toJSDate() } },
-      ],
-    },
-    include: callInclude,
-  });
-  const money: ProfilePeriodStats['money'] = actor.role === 'expert' ? 'pay' : actor.role === 'associate' ? 'part' : 'invoice';
-  const empty = (): ProfilePeriodTotals => ({ calls: 0, minutes: 0, money: 0, unpriced: 0 });
-  const total = empty();
-  const previous = empty();
+  const total = emptyTotals();
+  const previous = emptyTotals();
   const byProfile = new Map<string, ProfilePeriodRow>();
-  const add = (into: ProfilePeriodTotals, minutes: number, amount: number | null) => {
-    into.calls += 1;
-    into.minutes += minutes;
-    if (amount === null) into.unpriced += 1;
-    else into.money = addMoney(into.money, amount);
-  };
-  for (const row of rows) {
-    const dto = toCallDTO(row, actor);
-    const minutes = row.actualDurationMinutes ?? row.durationMinutes;
-    const amount =
-      money === 'invoice'
-        ? dto.expectedPrice
-        : money === 'part'
-          ? (dto.payouts.associate?.amount ?? dto.payouts.associate?.expected ?? null)
-          : (dto.payouts.expert?.amount ?? null);
+  for (const { row, minutes, amount } of await deliveredFor(actor, before, end)) {
     if (row.scheduledAt < start.toJSDate()) {
-      add(previous, minutes, amount);
+      addTo(previous, minutes, amount);
       continue;
     }
-    add(total, minutes, amount);
+    addTo(total, minutes, amount);
     let r = byProfile.get(row.profileId);
-    if (!r) byProfile.set(row.profileId, (r = { profile: { id: row.profile.id, name: row.profile.name }, ...empty() }));
-    add(r, minutes, amount);
+    if (!r) byProfile.set(row.profileId, (r = { profile: { id: row.profile.id, name: row.profile.name }, ...emptyTotals() }));
+    addTo(r, minutes, amount);
   }
   const body: ProfilePeriodStats = {
     zone,
     period,
     start: start.toISODate()!,
     end: end.toISODate()!,
-    money,
+    money: moneyKindFor(actor),
     rows: [...byProfile.values()].sort((x, y) => y.calls - x.calls || y.money - x.money || x.profile.name.localeCompare(y.profile.name)),
     total,
     previous,
   };
+  res.json(body);
+});
+
+const TREND_COUNT = { day: 30, week: 12, month: 12 } as const;
+
+/**
+ * The trend on the Statistics page: delivered calls, hours and money for each of
+ * `count` days, weeks or months, ending with the one containing `date` (today by
+ * default). Same scope and money as `/stats/by-profile`; quiet periods are zeros.
+ */
+statsRouter.get('/stats/trend', async (req, res) => {
+  const actor = actorOf(req);
+  const { period, date, count: asked } = parseQuery(trendQuerySchema, req);
+  const count = asked ?? TREND_COUNT[period];
+  const zone = displayZoneFor(actor);
+  const unit = UNITS[period];
+  const last = (date ? DateTime.fromISO(date, { zone }) : DateTime.now().setZone(zone)).startOf(unit);
+  const first = last.minus({ [`${unit}s`]: count - 1 });
+  const points = new Map<string, TrendPoint>();
+  for (let at = first; at <= last; at = at.plus({ [`${unit}s`]: 1 })) points.set(at.toISODate()!, { start: at.toISODate()!, ...emptyTotals() });
+  for (const { row, minutes, amount } of await deliveredFor(actor, first, last.plus({ [`${unit}s`]: 1 }))) {
+    const p = points.get(DateTime.fromJSDate(row.scheduledAt).setZone(zone).startOf(unit).toISODate()!);
+    if (p) addTo(p, minutes, amount);
+  }
+  const body: TrendStats = { zone, period, money: moneyKindFor(actor), points: [...points.values()] };
   res.json(body);
 });
