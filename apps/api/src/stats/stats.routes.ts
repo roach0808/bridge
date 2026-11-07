@@ -1,6 +1,12 @@
 import {
+  FINANCE_STATUSES,
+  displayZoneFor,
   expectedPrice,
+  profilePeriodQuerySchema,
   statsQuerySchema,
+  type ProfilePeriodRow,
+  type ProfilePeriodStats,
+  type ProfilePeriodTotals,
   TEAM_TIME_ZONE,
   type AssociateStats,
   type AssociateStatsCell,
@@ -14,6 +20,8 @@ import { Prisma } from '@prisma/client';
 import { Router } from 'express';
 import { DateTime } from 'luxon';
 import { actorOf, requireAuth, requireRole, type Actor } from '../auth/middleware';
+import { visibleCallsWhere } from '../calls/calls.access';
+import { callInclude, toCallDTO } from '../calls/calls.serialize';
 import { prisma } from '../db';
 import { forbidden } from '../errors';
 import { isoOrNull, parseQuery } from '../http';
@@ -326,6 +334,80 @@ statsRouter.get('/stats/finance', async (req, res) => {
     total,
     byPlatform: platforms.map((platform) => ({ platform, cell: byPlatform.get(platform.id)! })).sort(largestFirst),
     byProfile: profiles.map((profile) => ({ profile, cell: byProfile.get(profile.id)! })).sort(largestFirst),
+  };
+  res.json(body);
+});
+
+// --- By profile: one day, week or month -------------------------------------------------
+
+const UNITS = { day: 'day', week: 'week', month: 'month' } as const;
+
+/**
+ * The Statistics page (§6.14): for one day, week or month, each Profile's client
+ * consultations that took place, how long they ran, and what they are worth to the
+ * viewer; and the same totals for the period before. The Founder sees the whole
+ * company and a Manager their team, at the invoice amount; an Associate their own
+ * calls and their part; an Expert their own calls and their pay. Each figure is
+ * read from the call as the viewer may see it, so nobody learns an amount they
+ * could not read on the call itself.
+ */
+statsRouter.get('/stats/by-profile', async (req, res) => {
+  const actor = actorOf(req);
+  const { period, date } = parseQuery(profilePeriodQuerySchema, req);
+  const zone = displayZoneFor(actor);
+  const unit = UNITS[period];
+  const start = (date ? DateTime.fromISO(date, { zone }) : DateTime.now().setZone(zone)).startOf(unit);
+  const end = start.plus({ [`${unit}s`]: 1 });
+  const before = start.minus({ [`${unit}s`]: 1 });
+  const rows = await prisma.call.findMany({
+    where: {
+      AND: [
+        visibleCallsWhere(actor),
+        // An Associate's statistics are their own calls, not their teammates'.
+        actor.role === 'associate' ? { associateId: actor.id } : {},
+        { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation', scheduledAt: { gte: before.toJSDate(), lt: end.toJSDate() } },
+      ],
+    },
+    include: callInclude,
+  });
+  const money: ProfilePeriodStats['money'] = actor.role === 'expert' ? 'pay' : actor.role === 'associate' ? 'part' : 'invoice';
+  const empty = (): ProfilePeriodTotals => ({ calls: 0, minutes: 0, money: 0, unpriced: 0 });
+  const total = empty();
+  const previous = empty();
+  const byProfile = new Map<string, ProfilePeriodRow>();
+  const add = (into: ProfilePeriodTotals, minutes: number, amount: number | null) => {
+    into.calls += 1;
+    into.minutes += minutes;
+    if (amount === null) into.unpriced += 1;
+    else into.money = addMoney(into.money, amount);
+  };
+  for (const row of rows) {
+    const dto = toCallDTO(row, actor);
+    const minutes = row.actualDurationMinutes ?? row.durationMinutes;
+    const amount =
+      money === 'invoice'
+        ? dto.expectedPrice
+        : money === 'part'
+          ? (dto.payouts.associate?.amount ?? dto.payouts.associate?.expected ?? null)
+          : (dto.payouts.expert?.amount ?? null);
+    if (row.scheduledAt < start.toJSDate()) {
+      add(previous, minutes, amount);
+      continue;
+    }
+    add(total, minutes, amount);
+    let r = byProfile.get(row.profileId);
+    if (!r) byProfile.set(row.profileId, (r = { profile: { id: row.profile.id, name: row.profile.name }, ...empty() }));
+    add(r, minutes, amount);
+  }
+  const body: ProfilePeriodStats = {
+    zone,
+    period,
+    start: start.toISODate()!,
+    end: end.toISODate()!,
+    money,
+    rows: [...byProfile.values()].sort((x, y) => y.calls - x.calls || y.money - x.money || x.profile.name.localeCompare(y.profile.name)),
+    total,
+    previous,
   };
   res.json(body);
 });

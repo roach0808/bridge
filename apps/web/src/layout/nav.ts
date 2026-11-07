@@ -7,6 +7,7 @@ import DashboardRounded from '@mui/icons-material/DashboardRounded';
 import GroupsRounded from '@mui/icons-material/GroupsRounded';
 import HistoryRounded from '@mui/icons-material/HistoryRounded';
 import HubRounded from '@mui/icons-material/HubRounded';
+import InsightsRounded from '@mui/icons-material/InsightsRounded';
 import KeyRounded from '@mui/icons-material/KeyRounded';
 import ManageAccountsRounded from '@mui/icons-material/ManageAccountsRounded';
 import NotificationsRounded from '@mui/icons-material/NotificationsRounded';
@@ -35,7 +36,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/calendar', label: 'Calendar', icon: CalendarMonthRounded, roles: ALL, section: 'work' },
   { to: '/chat', label: 'Chat', icon: ChatRounded, roles: ALL, section: 'work', badge: 'chat' },
   { to: '/todos', label: 'Tasks', icon: ChecklistRounded, roles: ALL, section: 'work', badge: 'todos' },
-  // Statistics (/stats) is left out of the sidebar until it is needed; the page still works at its address.
+  { to: '/stats', label: 'Statistics', icon: InsightsRounded, roles: ALL, section: 'work' },
   { to: '/invoicing', label: 'Invoicing', icon: ReceiptLongRounded, roles: ['founder'], section: 'work' },
   { to: '/profiles', label: 'Profiles', icon: AccountTreeRounded, roles: ALL, section: 'admin' },
   { to: '/banks', label: 'Banks', icon: AccountBalanceRounded, roles: ['founder'], section: 'admin' },

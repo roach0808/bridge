@@ -1,60 +1,323 @@
-import InsightsRounded from '@mui/icons-material/InsightsRounded';
-import SearchOffRounded from '@mui/icons-material/SearchOffRounded';
+import ChevronLeftRounded from '@mui/icons-material/ChevronLeftRounded';
+import ChevronRightRounded from '@mui/icons-material/ChevronRightRounded';
 import {
   Box,
+  Button,
+  Card,
+  CardContent,
   Grid,
-  MenuItem,
+  IconButton,
   Skeleton,
   Stack,
-  Tab,
   Table,
   TableBody,
   TableCell,
   TableFooter,
   TableHead,
   TableRow,
-  Tabs,
-  TextField,
+  ToggleButton,
+  ToggleButtonGroup,
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { AssociateStatsCell, FinanceCell, ProfileStatsRow, StatsPeriodKind } from '@god/shared';
-import { useQuery } from '@tanstack/react-query';
+import type { ProfilePeriodRow, ProfilePeriodStats, ProfilePeriodTotals } from '@god/shared';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useMe } from '@/auth/AuthProvider';
-import { DeactivatedPill, ProfileStatusChip } from '@/components/ProfileDetails';
-import { EmptyState, ErrorState, PageHeader } from '@/components/common';
-import { UserAvatar, UserChip } from '@/components/identity';
+import { ErrorState, PageHeader } from '@/components/common';
 import { api } from '@/lib/api';
-import { qk } from '@/lib/queryKeys';
-import { formatUsd, relativeTime } from '@/lib/time';
-import { FilterChips, SearchField, StatTile, TableSurface } from '../admin/adminShared';
+import { formatUsd } from '@/lib/time';
+import { StatTile, TableSurface } from '../admin/adminShared';
 
-type TabKey = 'associates' | 'profiles' | 'finance';
+type Period = ProfilePeriodStats['period'];
+type Measure = 'calls' | 'money';
+type View = 'chart' | 'table';
 
-const PERIODS: Array<{ value: StatsPeriodKind; label: string; count: number; current: string }> = [
-  { value: 'week', label: 'Weekly', count: 8, current: 'This week' },
-  { value: 'biweek', label: 'Bi-weekly', count: 6, current: 'These two weeks' },
-  { value: 'month', label: 'Monthly', count: 6, current: 'This month' },
-];
+const MONEY_LABEL: Record<ProfilePeriodStats['money'], string> = { invoice: 'Invoice amount', part: 'Your part', pay: 'Your pay' };
+const MONEY_HINT: Record<ProfilePeriodStats['money'], string> = {
+  invoice: 'Rate × how long each call ran.',
+  part: 'Your part of each call you ran.',
+  pay: 'Your rate × how long each call ran.',
+};
+const PERIOD_WORD: Record<Period, string> = { day: 'day', week: 'week', month: 'month' };
 
-const NUM = { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const;
-const EXPECTED_COLOR = '#3f8fd6';
-const REAL_COLOR = '#3fb68b';
-const GAP_COLOR = '#e0913a';
+/** The bars' one colour, checked for contrast and saturation on each surface. */
+const BAR = { light: '#0B8F86', dark: '#12A89A' };
 
+const hoursOf = (minutes: number) => `${(minutes / 60).toLocaleString('en-US', { maximumFractionDigits: 1 })} h`;
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+function periodLabel(start: string, period: Period, zone: string) {
+  const d = DateTime.fromISO(start, { zone });
+  if (period === 'day') return d.toFormat('cccc, LLLL d, yyyy');
+  if (period === 'month') return d.toFormat('LLLL yyyy');
+  const end = d.plus({ days: 6 });
+  return d.month === end.month ? `${d.toFormat('LLL d')} – ${end.toFormat('d, yyyy')}` : `${d.toFormat('LLL d')} – ${end.toFormat('LLL d, yyyy')}`;
+}
+
+/** Round axis steps: 1, 2, 2.5 or 5 times a power of ten; whole numbers for counts. */
+function niceTicks(max: number, whole: boolean): number[] {
+  if (max <= 0) return [0, 1];
+  const raw = max / 4;
+  const mag = 10 ** Math.floor(Math.log10(raw));
+  let step = [1, 2, 2.5, 5, 10].map((m) => m * mag).find((s) => s >= raw)!;
+  if (whole) step = Math.max(1, Math.ceil(step));
+  const top = Math.ceil(max / step) * step;
+  return Array.from({ length: Math.round(top / step) + 1 }, (_, i) => Math.round(i * step * 100) / 100);
+}
+
+const compactUsd = (v: number) => (v >= 10000 ? `$${(v / 1000).toLocaleString('en-US', { maximumFractionDigits: 1 })}K` : formatUsd(v).replace(/\.00$/, ''));
+
+/** "+3 (+20%) vs last week", or nothing to compare. */
+function Change({ now, before, period, money }: { now: number; before: number; period: Period; money?: boolean }) {
+  if (now === 0 && before === 0) return <Typography variant="caption" color="text.secondary">None in this or the last {PERIOD_WORD[period]}</Typography>;
+  const diff = Math.round((now - before) * 100) / 100;
+  if (diff === 0) return <Typography variant="caption" color="text.secondary">Same as the {PERIOD_WORD[period]} before</Typography>;
+  const pct = before ? Math.round((Math.abs(diff) / before) * 100) : null;
+  const up = diff > 0;
+  return (
+    <Typography variant="caption" sx={{ color: up ? 'success.main' : 'error.main' }}>
+      {up ? '▲' : '▼'} {money ? formatUsd(Math.abs(diff)) : Math.abs(diff)}
+      {pct !== null ? ` (${pct}%)` : ''} vs the {PERIOD_WORD[period]} before
+    </Typography>
+  );
+}
+
+const PLOT_HEIGHT = 300;
+const AXIS_BAND = 92;
+const Y_AXIS = 56;
+const SLOT_MIN = 44;
+const BAR_WIDTH = 24;
+
+/**
+ * One column per Profile, tallest first. The bar is the hit target: hover or
+ * keyboard focus shows the Profile's figures, which the table view also lists.
+ */
+function ProfileColumns({ rows, measure, money, label }: { rows: ProfilePeriodRow[]; measure: Measure; money: ProfilePeriodStats['money']; label: string }) {
+  // The scrolling box sets the width: the chart fills it, and scrolls inside it when crowded.
+  const scroller = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(800);
+  const [scrollLeft, setScrollLeft] = useState(0);
+  const [active, setActive] = useState<number | null>(null);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth));
+    ro.observe(el);
+    setWidth(el.clientWidth);
+    return () => ro.disconnect();
+  }, []);
+
+  const value = (r: ProfilePeriodRow) => (measure === 'calls' ? r.calls : r.money);
+  const sorted = [...rows].sort((a, b) => value(b) - value(a) || a.profile.name.localeCompare(b.profile.name));
+  const ticks = niceTicks(Math.max(0, ...sorted.map(value)), measure === 'calls');
+  const top = ticks.at(-1)!;
+  const plotWidth = Math.max(width - Y_AXIS, sorted.length * SLOT_MIN);
+  const slot = plotWidth / Math.max(1, sorted.length);
+  const svgWidth = plotWidth + Y_AXIS;
+  const y = (v: number) => PLOT_HEIGHT - (v / top) * PLOT_HEIGHT;
+  const fmt = (v: number) => (measure === 'calls' ? String(v) : compactUsd(v));
+  const best = sorted[0] ? value(sorted[0]) : 0;
+
+  return (
+    <Box sx={{ position: 'relative' }}>
+      <Box ref={scroller} onScroll={(e) => setScrollLeft(e.currentTarget.scrollLeft)} sx={{ overflowX: 'auto', overflowY: 'hidden' }}>
+        <Box
+          component="svg"
+          role="img"
+          aria-label={label}
+          width={svgWidth}
+          height={PLOT_HEIGHT + AXIS_BAND + 16}
+          viewBox={`0 -16 ${svgWidth} ${PLOT_HEIGHT + AXIS_BAND + 16}`}
+          sx={(t) => ({
+            display: 'block',
+            // Theme colours as CSS variables, so the dark scheme gets its own.
+            '& .grid': { stroke: (t.vars ?? t).palette.divider, strokeWidth: 1, shapeRendering: 'crispEdges' },
+            '& .tick, & .name': { fill: (t.vars ?? t).palette.text.secondary, fontSize: 12, fontFamily: 'inherit' },
+            '& .cap': { fill: (t.vars ?? t).palette.text.primary, fontSize: 12, fontWeight: 600, fontFamily: 'inherit' },
+            '& .bar': { fill: BAR.light, transition: 'opacity 120ms' },
+            '& .hit:hover .bar, & .hit:focus-visible .bar': { opacity: 0.78 },
+            '& .hit:focus-visible': { outline: 'none' },
+            '& .hit:focus-visible .focus': { stroke: (t.vars ?? t).palette.text.primary, strokeWidth: 1.5 },
+            ...t.applyStyles('dark', { '& .bar': { fill: BAR.dark } }),
+          })}
+        >
+          {/* Recessive hairline grid, with round ticks. */}
+          {ticks.map((t) => (
+            <g key={t}>
+              <line className="grid" x1={Y_AXIS} x2={svgWidth} y1={y(t) + 0.5} y2={y(t) + 0.5} />
+              <text className="tick" x={Y_AXIS - 8} y={y(t)} textAnchor="end" dominantBaseline="middle" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {fmt(t)}
+              </text>
+            </g>
+          ))}
+          {sorted.map((r, i) => {
+            const v = value(r);
+            const cx = Y_AXIS + slot * i + slot / 2;
+            const h = Math.max(v > 0 ? 2 : 0, (v / top) * PLOT_HEIGHT);
+            const w = Math.min(BAR_WIDTH, slot - 8);
+            const r4 = Math.min(4, h, w / 2);
+            const name = r.profile.name.length > 18 ? `${r.profile.name.slice(0, 17)}…` : r.profile.name;
+            return (
+              <g
+                key={r.profile.id}
+                className="hit"
+                tabIndex={0}
+                role="graphics-symbol"
+                aria-label={`${r.profile.name}: ${plural(r.calls, 'call')}, ${hoursOf(r.minutes)}, ${MONEY_LABEL[money]} ${formatUsd(r.money)}`}
+                onPointerEnter={() => setActive(i)}
+                onPointerLeave={() => setActive((a) => (a === i ? null : a))}
+                onFocus={() => setActive(i)}
+                onBlur={() => setActive((a) => (a === i ? null : a))}
+                style={{ cursor: 'default' }}
+              >
+                {/* The whole slot answers the pointer, not only the painted bar. */}
+                <rect x={cx - slot / 2} y={0} width={slot} height={PLOT_HEIGHT} fill="transparent" />
+                {h > 0 && (
+                  <path
+                    className="bar"
+                    d={`M${cx - w / 2},${PLOT_HEIGHT} V${PLOT_HEIGHT - h + r4} Q${cx - w / 2},${PLOT_HEIGHT - h} ${cx - w / 2 + r4},${PLOT_HEIGHT - h} H${cx + w / 2 - r4} Q${cx + w / 2},${PLOT_HEIGHT - h} ${cx + w / 2},${PLOT_HEIGHT - h + r4} V${PLOT_HEIGHT} Z`}
+                  />
+                )}
+                <rect className="focus" x={cx - slot / 2 + 2} y={1} width={slot - 4} height={PLOT_HEIGHT - 1} fill="none" rx={4} />
+                {/* The leader's figure on its cap; the rest are on the axis, in the tooltip and the table. */}
+                {v === best && v > 0 && (
+                  <text className="cap" x={cx} y={PLOT_HEIGHT - h - 6} textAnchor="middle">
+                    {measure === 'calls' ? v : compactUsd(v)}
+                  </text>
+                )}
+                <text className="name" transform={`translate(${cx + 4}, ${PLOT_HEIGHT + 12}) rotate(-40)`} textAnchor="end">
+                  {name}
+                </text>
+              </g>
+            );
+          })}
+          <line className="grid" x1={Y_AXIS} x2={svgWidth} y1={PLOT_HEIGHT + 0.5} y2={PLOT_HEIGHT + 0.5} />
+        </Box>
+      </Box>
+      {active !== null && sorted[active] && (
+        <Box
+          role="tooltip"
+          sx={{
+            position: 'absolute',
+            top: 4,
+            left: Math.min(Math.max(0, Y_AXIS + slot * active + slot / 2 - 90 - scrollLeft), Math.max(0, width - 190)),
+            width: 180,
+            pointerEvents: 'none',
+            bgcolor: 'background.paper',
+            border: 1,
+            borderColor: 'divider',
+            borderRadius: 2,
+            boxShadow: 3,
+            px: 1.5,
+            py: 1,
+            zIndex: 2,
+          }}
+        >
+          <Typography variant="body2" fontWeight={700} sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {measure === 'calls' ? plural(sorted[active].calls, 'call') : formatUsd(sorted[active].money)}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ wordBreak: 'break-word' }}>
+            {sorted[active].profile.name}
+          </Typography>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ fontVariantNumeric: 'tabular-nums' }}>
+            {measure === 'calls' ? `${MONEY_LABEL[money]} ${formatUsd(sorted[active].money)}` : plural(sorted[active].calls, 'call')} · {hoursOf(sorted[active].minutes)}
+            {sorted[active].unpriced > 0 && ` · ${sorted[active].unpriced} without a rate`}
+          </Typography>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+function ProfileTable({ rows, total, money }: { rows: ProfilePeriodRow[]; total: ProfilePeriodTotals; money: ProfilePeriodStats['money'] }) {
+  const sorted = [...rows].sort((a, b) => b.calls - a.calls || b.money - a.money);
+  const num = { fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const;
+  return (
+    <TableSurface minWidth={520}>
+      <Table size="small">
+        <TableHead>
+          <TableRow>
+            <TableCell>Profile</TableCell>
+            <TableCell align="right">Calls</TableCell>
+            <TableCell align="right">Hours</TableCell>
+            <TableCell align="right">{MONEY_LABEL[money]}</TableCell>
+          </TableRow>
+        </TableHead>
+        <TableBody>
+          {sorted.map((r) => (
+            <TableRow key={r.profile.id}>
+              <TableCell>{r.profile.name}</TableCell>
+              <TableCell align="right" sx={num}>{r.calls}</TableCell>
+              <TableCell align="right" sx={num}>{hoursOf(r.minutes)}</TableCell>
+              <TableCell align="right" sx={num}>
+                {formatUsd(r.money)}
+                {r.unpriced > 0 && (
+                  <Typography component="span" variant="caption" color="warning.main" sx={{ ml: 0.75 }}>
+                    {r.unpriced} without a rate
+                  </Typography>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+        <TableFooter>
+          <TableRow sx={{ '& td': { fontWeight: 600, color: 'text.primary' } }}>
+            <TableCell>Total</TableCell>
+            <TableCell align="right" sx={num}>{total.calls}</TableCell>
+            <TableCell align="right" sx={num}>{hoursOf(total.minutes)}</TableCell>
+            <TableCell align="right" sx={num}>{formatUsd(total.money)}</TableCell>
+          </TableRow>
+        </TableFooter>
+      </Table>
+    </TableSurface>
+  );
+}
+
+/**
+ * Statistics, as one page: pick what the bars show (calls, or money), the
+ * period (a day, a week or a month) and step back through earlier ones; each
+ * Profile is a column. Everyone sees their own scope: the Founder the whole
+ * company and a Manager their team, at the invoice amount; an Associate their
+ * own calls and part; an Expert their own calls and pay.
+ */
 export default function StatsPage() {
   const me = useMe();
-  const isFounder = me.role === 'founder';
   const [params, setParams] = useSearchParams();
-  const requested = params.get('tab') as TabKey | null;
-  // Experts never reach this page; Associates count their calls but never see what calls bring in.
-  const seesMoney = me.role === 'founder' || me.role === 'manager';
-  const tab: TabKey = (requested === 'profiles' && isFounder) || (requested === 'finance' && seesMoney) ? requested : 'associates';
-  const period = (PERIODS.find((p) => p.value === params.get('period')) ?? PERIODS[0])!;
-  const set = (key: string, value: string) => setParams((p) => ({ ...Object.fromEntries(p), [key]: value }), { replace: true });
+  const period: Period = params.get('period') === 'day' || params.get('period') === 'month' ? (params.get('period') as Period) : 'week';
+  const measure: Measure = params.get('show') === 'money' ? 'money' : 'calls';
+  const view: View = params.get('view') === 'table' ? 'table' : 'chart';
+  const date = params.get('date') ?? undefined;
+  const set = (changes: Record<string, string | null>) =>
+    setParams(
+      (p) => {
+        const next = new URLSearchParams(p);
+        for (const [k, v] of Object.entries(changes)) {
+          if (v === null) next.delete(k);
+          else next.set(k, v);
+        }
+        return next;
+      },
+      { replace: true },
+    );
+
+  const { data, isLoading, isFetching, error, refetch } = useQuery({
+    queryKey: ['stats', 'by-profile', period, date ?? 'today'],
+    queryFn: () => api.stats.byProfile({ period, date }),
+    placeholderData: keepPreviousData,
+  });
+
+  const zone = data?.zone ?? 'America/New_York';
+  const moneyLabel = data ? MONEY_LABEL[data.money] : me.role === 'expert' ? 'Your pay' : me.role === 'associate' ? 'Your part' : 'Invoice amount';
+  const current = useMemo(() => DateTime.now().setZone(zone).startOf(period).toISODate()!, [zone, period]);
+  const isCurrent = !data || data.start >= current;
+  const step = (n: number) => {
+    if (!data) return;
+    const next = DateTime.fromISO(data.start, { zone }).plus({ [`${period}s`]: n }).toISODate()!;
+    set({ date: next >= current ? null : next });
+  };
 
   return (
     <Box>
@@ -62,597 +325,109 @@ export default function StatsPage() {
         title="Statistics"
         subtitle={
           me.role === 'founder'
-            ? 'Calls and money by Associate and by Profile, and expected against real income.'
+            ? 'Calls delivered and invoice amount, Profile by Profile.'
             : me.role === 'manager'
-              ? 'Scheduled calls, potential money and income across your team.'
-              : 'Your scheduled and finished calls.'
+              ? 'Your team’s calls delivered and invoice amount, Profile by Profile.'
+              : me.role === 'expert'
+                ? 'Your calls delivered and your pay, Profile by Profile.'
+                : 'Your calls delivered and your part, Profile by Profile.'
         }
       />
 
-      <Tabs value={tab} onChange={(_, v: TabKey) => set('tab', v)} sx={{ mb: 2, borderBottom: 1, borderColor: 'divider' }} variant="scrollable" allowScrollButtonsMobile>
-        <Tab value="associates" label="By associate" />
-        {isFounder && <Tab value="profiles" label="By profile" />}
-        {seesMoney && <Tab value="finance" label="Finance" />}
-      </Tabs>
-
-      {tab !== 'profiles' && (
-        <Box sx={{ mb: 2 }}>
-          <FilterChips
-            ariaLabel="Period"
-            value={period.value}
-            onChange={(v) => set('period', v)}
-            options={PERIODS.map((p) => ({ value: p.value, label: p.label }))}
-          />
-        </Box>
-      )}
-
-      {tab === 'associates' && <AssociatesTab period={period} />}
-      {tab === 'profiles' && <ProfilesTab />}
-      {tab === 'finance' && <FinanceTab period={period} />}
-    </Box>
-  );
-}
-
-function Loading() {
-  return (
-    <Stack spacing={2}>
-      <Grid container spacing={1.5}>
-        {Array.from({ length: 4 }, (_, i) => (
-          <Grid key={i} size={{ xs: 6, md: 3 }}>
-            <Skeleton variant="rounded" height={92} />
-          </Grid>
-        ))}
-      </Grid>
-      <Skeleton variant="rounded" height={320} />
-    </Stack>
-  );
-}
-
-function SectionTitle({ children, hint }: { children: ReactNode; hint?: ReactNode }) {
-  return (
-    <Box sx={{ mt: 3, mb: 1.25 }}>
-      <Typography variant="h6">{children}</Typography>
-      {hint && (
-        <Typography variant="body2" color="text.secondary">
-          {hint}
-        </Typography>
-      )}
-    </Box>
-  );
-}
-
-const periodTooltip = (p: { start: string; end: string }) =>
-  `${DateTime.fromISO(p.start).toFormat('LLL d, yyyy')} – ${DateTime.fromISO(p.end).minus({ days: 1 }).toFormat('LLL d, yyyy')} (New York time)`;
-
-// --- By associate --------------------------------------------------------------------
-
-function AssociateCell({ cell, strong, money = true }: { cell: AssociateStatsCell; strong?: boolean; money?: boolean }) {
-  if (cell.calls === 0) {
-    return (
-      <Typography variant="body2" color="text.disabled">
-        —
-      </Typography>
-    );
-  }
-  return (
-    <Tooltip
-      title={`${cell.calls} call${cell.calls === 1 ? '' : 's'}, ${cell.finishedCalls} finished${cell.unpriced ? `, ${cell.unpriced} without a rate` : ''}`}
-    >
-      <Box sx={NUM}>
-        {money && (
-          <Typography variant="body2" fontWeight={strong ? 650 : 550}>
-            {formatUsd(cell.potential)}
-            {cell.unpriced > 0 && (
-              <Box component="span" sx={{ color: GAP_COLOR }}>
-                {' *'}
-              </Box>
-            )}
+      {/* One row of controls, above everything they change. */}
+      <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap sx={{ mb: 2 }}>
+        <ToggleButtonGroup size="small" exclusive value={measure} onChange={(_, v: Measure | null) => v && set({ show: v === 'calls' ? null : v })} aria-label="Bars show">
+          <ToggleButton value="calls">Calls</ToggleButton>
+          <ToggleButton value="money">{moneyLabel}</ToggleButton>
+        </ToggleButtonGroup>
+        <ToggleButtonGroup size="small" exclusive value={period} onChange={(_, v: Period | null) => v && set({ period: v === 'week' ? null : v, date: null })} aria-label="Period">
+          <ToggleButton value="day">Day</ToggleButton>
+          <ToggleButton value="week">Week</ToggleButton>
+          <ToggleButton value="month">Month</ToggleButton>
+        </ToggleButtonGroup>
+        <Stack direction="row" alignItems="center" spacing={0.25}>
+          <Tooltip title={`The ${PERIOD_WORD[period]} before`}>
+            <IconButton size="small" onClick={() => step(-1)} aria-label={`The ${PERIOD_WORD[period]} before`} disabled={!data}>
+              <ChevronLeftRounded />
+            </IconButton>
+          </Tooltip>
+          <Typography variant="body2" fontWeight={600} sx={{ minWidth: { sm: 190 }, textAlign: 'center' }} aria-live="polite">
+            {data ? periodLabel(data.start, period, zone) : ' '}
           </Typography>
-        )}
-        <Typography variant="caption" color="text.secondary">
-          {cell.calls} call{cell.calls === 1 ? '' : 's'}
-        </Typography>
-      </Box>
-    </Tooltip>
-  );
-}
-
-function AssociatesTab({ period }: { period: (typeof PERIODS)[number] }) {
-  const me = useMe();
-  const query = useQuery({
-    queryKey: qk.stats.associates(period.value, period.count),
-    queryFn: () => api.stats.associates({ period: period.value, count: period.count }),
-  });
-  if (query.isLoading) return <Loading />;
-  if (query.isError || !query.data) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  const { periods, rows, totals, total, showsMoney } = query.data;
-  const current = totals.at(-1)!;
-  const previous = totals.at(-2);
-  const unpriced = total.unpriced;
-  // Newest period first, so the current one is always in view.
-  const order = periods.map((_, i) => periods.length - 1 - i);
-
-  return (
-    <>
-      <Grid container spacing={1.5}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label={`${period.current}: calls`} value={current.calls} footer={previous && <Trend now={current.calls} before={previous.calls} />} />
-        </Grid>
-        {showsMoney && (
-          <Grid size={{ xs: 6, md: 3 }}>
-            <StatTile
-              label={`${period.current}: potential`}
-              color={EXPECTED_COLOR}
-              value={formatUsd(current.potential)}
-              footer={previous && <Trend now={current.potential} before={previous.potential} money />}
-            />
-          </Grid>
-        )}
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label={`Last ${periods.length} periods: calls`} value={total.calls} footer={<Muted>{total.finishedCalls} finished</Muted>} />
-        </Grid>
-        {showsMoney && (
-          <Grid size={{ xs: 6, md: 3 }}>
-            <StatTile label={`Last ${periods.length} periods: potential`} color={EXPECTED_COLOR} value={formatUsd(total.potential)} />
-          </Grid>
-        )}
-      </Grid>
-
-      <SectionTitle
-        hint={
-          showsMoney
-            ? 'Calls by their scheduled time. Potential money is rate × duration: the real duration once finished, the booked one before.'
-            : 'Calls by their scheduled time.'
-        }
-      >
-        {me.role === 'associate' ? 'Your calls' : me.role === 'manager' ? 'You and your team' : 'Associates and Managers'}
-      </SectionTitle>
-
-      {rows.length === 0 ? (
-        <TableSurface>
-          <EmptyState icon={<InsightsRounded />} title="No Associates yet" />
-        </TableSurface>
-      ) : (
-        <TableSurface minWidth={260 + periods.length * 110}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>Associate</TableCell>
-                <TableCell align="right">Total</TableCell>
-                {order.map((i) => (
-                  <TableCell key={periods[i]!.start} align="right" sx={{ whiteSpace: 'nowrap' }}>
-                    <Tooltip title={periodTooltip(periods[i]!)}>
-                      <span>{i === periods.length - 1 ? period.current : periods[i]!.label}</span>
-                    </Tooltip>
-                  </TableCell>
-                ))}
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {rows.map((r) => (
-                <TableRow key={r.associate.id} hover>
-                  <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1 }}>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <UserChip user={r.associate} size={26} subtitle={r.associate.role === 'manager' ? 'Manager' : r.manager ? `Team ${r.manager.nickname}` : 'No manager'} />
-                      {!r.associate.isActive && <DeactivatedPill />}
-                    </Stack>
-                  </TableCell>
-                  <TableCell align="right">
-                    <AssociateCell cell={r.total} strong money={showsMoney} />
-                  </TableCell>
-                  {order.map((i) => (
-                    <TableCell key={i} align="right">
-                      <AssociateCell cell={r.periods[i]!} money={showsMoney} />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}
-            </TableBody>
-            {rows.length > 1 && (
-              <TableFooter>
-                <TableRow>
-                  <TableCell sx={{ position: 'sticky', left: 0, bgcolor: 'background.paper', zIndex: 1, fontWeight: 650, color: 'text.primary' }}>All</TableCell>
-                  <TableCell align="right">
-                    <AssociateCell cell={total} strong money={showsMoney} />
-                  </TableCell>
-                  {order.map((i) => (
-                    <TableCell key={i} align="right">
-                      <AssociateCell cell={totals[i]!} strong money={showsMoney} />
-                    </TableCell>
-                  ))}
-                </TableRow>
-              </TableFooter>
-            )}
-          </Table>
-        </TableSurface>
-      )}
-      {unpriced > 0 && (
-        <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 1 }}>
-          <Box component="span" sx={{ color: GAP_COLOR }}>
-            *
-          </Box>{' '}
-          {unpriced} call{unpriced === 1 ? ' has' : 's have'} no rate for its Profile on that platform, so {unpriced === 1 ? 'it is' : 'they are'} not in the money.
-        </Typography>
-      )}
-    </>
-  );
-}
-
-function Muted({ children }: { children: ReactNode }) {
-  return (
-    <Typography variant="caption" color="text.secondary">
-      {children}
-    </Typography>
-  );
-}
-
-function Trend({ now, before, money }: { now: number; before: number; money?: boolean }) {
-  const diff = Math.round((now - before) * 100) / 100;
-  if (diff === 0) return <Muted>Same as previous</Muted>;
-  return (
-    <Typography variant="caption" sx={{ color: diff > 0 ? REAL_COLOR : 'text.secondary', fontWeight: 550 }}>
-      {diff > 0 ? '▲' : '▼'} {money ? formatUsd(Math.abs(diff)) : Math.abs(diff)} vs previous
-    </Typography>
-  );
-}
-
-// --- By profile ------------------------------------------------------------------------
-
-type ProfileFilter = 'all' | 'active' | 'deactivated' | 'pending' | 'rejected';
-type ProfileSort = 'name' | 'income' | 'onboarded';
-
-const profileMatches = (r: ProfileStatsRow, f: ProfileFilter) =>
-  f === 'all'
-    ? true
-    : f === 'active'
-      ? r.isActive && r.status === 'approved'
-      : f === 'deactivated'
-        ? !r.isActive
-        : r.status === f;
-
-function ProfilesTab() {
-  const [filter, setFilter] = useState<ProfileFilter>('all');
-  const [sort, setSort] = useState<ProfileSort>('income');
-  const [search, setSearch] = useState('');
-  const query = useQuery({ queryKey: qk.stats.profiles, queryFn: api.stats.profiles });
-  const all = query.data ?? [];
-
-  const visible = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const rows = all.filter(
-      (r) => profileMatches(r, filter) && (!needle || r.profile.name.toLowerCase().includes(needle) || (r.email ?? '').includes(needle)),
-    );
-    return [...rows].sort((a, b) =>
-      sort === 'income'
-        ? b.totalIncome - a.totalIncome || a.profile.name.localeCompare(b.profile.name)
-        : sort === 'onboarded'
-          ? (b.onboardedAt ?? '').localeCompare(a.onboardedAt ?? '')
-          : a.profile.name.localeCompare(b.profile.name),
-    );
-  }, [all, filter, sort, search]);
-
-  if (query.isLoading) return <Loading />;
-  if (query.isError) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-
-  const income = visible.reduce((n, r) => Math.round((n + r.totalIncome) * 100) / 100, 0);
-  const expected = visible.reduce((n, r) => Math.round((n + r.expectedIncome) * 100) / 100, 0);
-
-  return (
-    <>
-      <Grid container spacing={1.5} sx={{ mb: 2 }}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Profiles" value={all.length} footer={<Muted>{all.filter((r) => r.isActive && r.status === 'approved').length} active</Muted>} />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Deactivated" color="#9aa0a6" value={all.filter((r) => !r.isActive).length} />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Without bank details" color={GAP_COLOR} value={all.filter((r) => !r.bank && r.status === 'approved').length} />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Total income, all time" color={REAL_COLOR} value={formatUsd(all.reduce((n, r) => Math.round((n + r.totalIncome) * 100) / 100, 0))} />
-        </Grid>
-      </Grid>
-
-      <Stack direction={{ xs: 'column', md: 'row' }} spacing={1.5} justifyContent="space-between" alignItems={{ md: 'center' }} sx={{ mb: 2 }}>
-        <FilterChips
-          ariaLabel="Filter profiles"
-          value={filter}
-          onChange={setFilter}
-          options={(['all', 'active', 'deactivated', 'pending', 'rejected'] as const).map((f) => ({
-            value: f,
-            label: { all: 'All', active: 'Active', deactivated: 'Deactivated', pending: 'Pending', rejected: 'Rejected' }[f],
-            count: all.filter((r) => profileMatches(r, f)).length,
-          }))}
-        />
-        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1} alignItems={{ sm: 'center' }}>
-          <TextField select size="small" label="Sort by" value={sort} onChange={(e) => setSort(e.target.value as ProfileSort)} sx={{ minWidth: 150 }}>
-            <MenuItem value="income">Total income</MenuItem>
-            <MenuItem value="onboarded">Newest onboarded</MenuItem>
-            <MenuItem value="name">Name</MenuItem>
-          </TextField>
-          <SearchField value={search} onChange={setSearch} placeholder="Search name or email" sx={{ minWidth: { md: 220 } }} />
+          <Tooltip title={isCurrent ? '' : `The ${PERIOD_WORD[period]} after`}>
+            <span>
+              <IconButton size="small" onClick={() => step(1)} aria-label={`The ${PERIOD_WORD[period]} after`} disabled={isCurrent}>
+                <ChevronRightRounded />
+              </IconButton>
+            </span>
+          </Tooltip>
+          {!isCurrent && (
+            <Button size="small" onClick={() => set({ date: null })}>
+              This {PERIOD_WORD[period]}
+            </Button>
+          )}
         </Stack>
+        <Box sx={{ flex: 1 }} />
+        <ToggleButtonGroup size="small" exclusive value={view} onChange={(_, v: View | null) => v && set({ view: v === 'chart' ? null : v })} aria-label="View">
+          <ToggleButton value="chart">Chart</ToggleButton>
+          <ToggleButton value="table">Table</ToggleButton>
+        </ToggleButtonGroup>
       </Stack>
 
-      {visible.length === 0 ? (
-        <TableSurface>
-          <EmptyState icon={<SearchOffRounded />} title="No profiles match" />
-        </TableSurface>
+      {error ? (
+        <ErrorState error={error} onRetry={refetch} />
+      ) : isLoading || !data ? (
+        <Stack spacing={2}>
+          <Skeleton variant="rounded" height={96} />
+          <Skeleton variant="rounded" height={420} />
+        </Stack>
       ) : (
-        <TableSurface minWidth={1080}>
-          <Table size="small">
-            <TableHead>
-              <TableRow>
-                <TableCell>Profile</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Onboarded</TableCell>
-                <TableCell>Email</TableCell>
-                <TableCell>Bank</TableCell>
-                <TableCell align="right">Calls</TableCell>
-                <TableCell align="right">Expected</TableCell>
-                <TableCell align="right">Total income</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {visible.map((r) => (
-                <TableRow key={r.profile.id} hover sx={{ opacity: r.isActive ? 1 : 0.75 }}>
-                  <TableCell>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <UserAvatar avatarId={r.profile.avatarId} photoId={r.profile.photoId} label={r.profile.name} size={28} />
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="body2" fontWeight={550} noWrap>
-                          {r.profile.name}
-                        </Typography>
-                        {r.lastCallAt && <Muted>Last call {relativeTime(r.lastCallAt)}</Muted>}
-                      </Box>
-                    </Stack>
-                  </TableCell>
-                  <TableCell>
-                    <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
-                      <ProfileStatusChip status={r.status} />
-                      {!r.isActive && <DeactivatedPill />}
-                    </Stack>
-                  </TableCell>
-                  <TableCell sx={{ whiteSpace: 'nowrap' }}>{r.onboardedAt ? DateTime.fromISO(r.onboardedAt).toFormat('LLL d, yyyy') : <Muted>—</Muted>}</TableCell>
-                  <TableCell sx={{ maxWidth: 220 }}>
-                    {r.email ? (
-                      <Typography variant="body2" noWrap title={r.email}>
-                        {r.email}
-                      </Typography>
-                    ) : (
-                      <Muted>—</Muted>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {r.bank ? (
-                      <Box>
-                        <Typography variant="body2" noWrap>
-                          {r.bank.bankName}
-                        </Typography>
-                        <Muted>
-                          {r.bank.bankType}
-                          {r.bank.count > 1 ? ` · ${r.bank.count} accounts` : ''}
-                        </Muted>
-                      </Box>
-                    ) : (
-                      <Typography variant="body2" sx={{ color: r.status === 'approved' ? GAP_COLOR : 'text.disabled' }}>
-                        {r.status === 'approved' ? 'Missing' : '—'}
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell align="right" sx={NUM}>
-                    {r.calls}
-                    {r.paidCalls > 0 && <Muted> · {r.paidCalls} paid</Muted>}
-                  </TableCell>
-                  <TableCell align="right" sx={NUM}>
-                    {r.expectedIncome ? formatUsd(r.expectedIncome) : <Muted>—</Muted>}
-                  </TableCell>
-                  <TableCell align="right" sx={{ ...NUM, fontWeight: 650 }}>
-                    {r.totalIncome ? formatUsd(r.totalIncome) : <Muted>—</Muted>}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-            <TableFooter>
-              <TableRow>
-                <TableCell colSpan={6} sx={{ fontWeight: 650, color: 'text.primary' }}>
-                  {visible.length} profile{visible.length === 1 ? '' : 's'}
-                </TableCell>
-                <TableCell align="right" sx={{ ...NUM, fontWeight: 650, color: 'text.primary' }}>
-                  {formatUsd(expected)}
-                </TableCell>
-                <TableCell align="right" sx={{ ...NUM, fontWeight: 650, color: 'text.primary' }}>
-                  {formatUsd(income)}
-                </TableCell>
-              </TableRow>
-            </TableFooter>
-          </Table>
-        </TableSurface>
-      )}
-    </>
-  );
-}
+        // Reloading keeps the last picture on screen, a little faded.
+        <Box sx={{ opacity: isFetching ? 0.55 : 1, transition: 'opacity 150ms' }}>
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <StatTile label="Calls delivered" value={data.total.calls} footer={<Change now={data.total.calls} before={data.previous.calls} period={period} />} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <StatTile label="Hours" value={hoursOf(data.total.minutes)} footer={<Typography variant="caption" color="text.secondary">{hoursOf(data.previous.minutes)} the {PERIOD_WORD[period]} before</Typography>} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 4 }}>
+              <StatTile label={moneyLabel} value={formatUsd(data.total.money)} footer={<Change now={data.total.money} before={data.previous.money} period={period} money />} />
+            </Grid>
+          </Grid>
 
-// --- Finance -------------------------------------------------------------------------------
-
-const gapPercent = (c: FinanceCell) => (c.paidExpected > 0 ? Math.round((c.gap / c.paidExpected) * 1000) / 10 : null);
-
-function GapText({ cell }: { cell: FinanceCell }) {
-  if (cell.paidCalls === 0) return <Muted>—</Muted>;
-  const pct = gapPercent(cell);
-  return (
-    <Box component="span" sx={{ color: cell.gap > 0 ? GAP_COLOR : cell.gap < 0 ? REAL_COLOR : 'text.secondary', fontWeight: 550 }}>
-      {cell.gap < 0 ? '+' : cell.gap > 0 ? '−' : ''}
-      {formatUsd(Math.abs(cell.gap))}
-      {pct !== null && pct !== 0 && <Muted> ({Math.abs(pct)}%)</Muted>}
-    </Box>
-  );
-}
-
-/** Expected (blue) and real (green) income side by side, scaled to the largest value. */
-function Bars({ cell, max }: { cell: FinanceCell; max: number }) {
-  const width = (v: number) => `${max > 0 ? Math.max((v / max) * 100, v > 0 ? 2 : 0) : 0}%`;
-  return (
-    <Stack spacing={0.4} sx={{ minWidth: 120 }} aria-hidden>
-      <Box sx={{ height: 7, borderRadius: 4, bgcolor: EXPECTED_COLOR, width: width(cell.expected) }} />
-      <Box sx={{ height: 7, borderRadius: 4, bgcolor: REAL_COLOR, width: width(cell.real) }} />
-    </Stack>
-  );
-}
-
-function FinanceRows({ rows, max }: { rows: Array<{ key: string; label: ReactNode; cell: FinanceCell }>; max: number }) {
-  return (
-    <>
-      {rows.map((r) => (
-        <TableRow key={r.key} hover>
-          <TableCell>{r.label}</TableCell>
-          <TableCell align="right" sx={NUM}>
-            {r.cell.finishedCalls}
-            {r.cell.paidCalls > 0 && <Muted> · {r.cell.paidCalls} paid</Muted>}
-          </TableCell>
-          <TableCell align="right" sx={NUM}>
-            {r.cell.expected ? formatUsd(r.cell.expected) : <Muted>—</Muted>}
-            {r.cell.unpriced > 0 && (
-              <Tooltip title={`${r.cell.unpriced} finished call${r.cell.unpriced === 1 ? '' : 's'} without a rate`}>
-                <Box component="span" sx={{ color: GAP_COLOR }}>
-                  {' *'}
+          <Card>
+            <CardContent sx={{ p: { xs: 2, md: 2.5 }, '&:last-child': { pb: { xs: 2, md: 2.5 } } }}>
+              <Typography variant="h6" component="h2">
+                {measure === 'calls' ? 'Calls delivered' : moneyLabel} by Profile
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+                {periodLabel(data.start, period, zone)} · {plural(data.rows.length, 'Profile')}
+                {measure === 'money' && ` · ${MONEY_HINT[data.money]}`}
+              </Typography>
+              {data.rows.length === 0 ? (
+                <Box sx={{ py: 8, textAlign: 'center', color: 'text.secondary', border: 1, borderColor: 'divider', borderStyle: 'dashed', borderRadius: 2 }}>
+                  <Typography variant="body2">No calls were delivered in this {PERIOD_WORD[period]}.</Typography>
                 </Box>
-              </Tooltip>
-            )}
-          </TableCell>
-          <TableCell align="right" sx={{ ...NUM, fontWeight: 600 }}>
-            {r.cell.real ? formatUsd(r.cell.real) : <Muted>—</Muted>}
-          </TableCell>
-          <TableCell align="right" sx={NUM}>
-            <GapText cell={r.cell} />
-          </TableCell>
-          <TableCell sx={{ width: '22%' }}>
-            <Bars cell={r.cell} max={max} />
-          </TableCell>
-        </TableRow>
-      ))}
-    </>
-  );
-}
-
-function FinanceTable({ first, rows }: { first: string; rows: Array<{ key: string; label: ReactNode; cell: FinanceCell }> }) {
-  const max = Math.max(0, ...rows.flatMap((r) => [r.cell.expected, r.cell.real]));
-  return (
-    <TableSurface minWidth={820}>
-      <Table size="small">
-        <TableHead>
-          <TableRow>
-            <TableCell>{first}</TableCell>
-            <TableCell align="right">Finished calls</TableCell>
-            <TableCell align="right">Expected</TableCell>
-            <TableCell align="right">Real income</TableCell>
-            <TableCell align="right">
-              <Tooltip title="Expected price of the paid calls minus what reached the bank">
-                <span>Gap</span>
-              </Tooltip>
-            </TableCell>
-            <TableCell>
-              <Stack direction="row" spacing={1.5}>
-                <Legend color={EXPECTED_COLOR}>Expected</Legend>
-                <Legend color={REAL_COLOR}>Real</Legend>
-              </Stack>
-            </TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          <FinanceRows rows={rows} max={max} />
-        </TableBody>
-      </Table>
-    </TableSurface>
-  );
-}
-
-function Legend({ color, children }: { color: string; children: ReactNode }) {
-  return (
-    <Stack direction="row" spacing={0.5} alignItems="center">
-      <Box sx={{ width: 8, height: 8, borderRadius: 2, bgcolor: color }} />
-      <span>{children}</span>
-    </Stack>
-  );
-}
-
-function FinanceTab({ period }: { period: (typeof PERIODS)[number] }) {
-  const query = useQuery({
-    queryKey: qk.stats.finance(period.value, period.count),
-    queryFn: () => api.stats.finance({ period: period.value, count: period.count }),
-  });
-  if (query.isLoading) return <Loading />;
-  if (query.isError || !query.data) return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
-  const { periods, byPeriod, total, byPlatform, byProfile } = query.data;
-  const pct = gapPercent(total);
-  const awaiting = Math.round((total.expected - total.paidExpected) * 100) / 100;
-
-  return (
-    <>
-      <Grid container spacing={1.5}>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Expected" color={EXPECTED_COLOR} value={formatUsd(total.expected)} footer={<Muted>{total.finishedCalls} finished call{total.finishedCalls === 1 ? '' : 's'}</Muted>} />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Real income" color={REAL_COLOR} value={formatUsd(total.real)} footer={<Muted>{total.paidCalls} call{total.paidCalls === 1 ? '' : 's'} paid to bank</Muted>} />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile
-            label="Gap on paid calls"
-            color={GAP_COLOR}
-            value={total.paidCalls ? `${total.gap > 0 ? '−' : total.gap < 0 ? '+' : ''}${formatUsd(Math.abs(total.gap))}` : '—'}
-            footer={<Muted>{pct !== null ? `${pct}% of their expected ${formatUsd(total.paidExpected)}` : 'Nothing paid yet'}</Muted>}
-          />
-        </Grid>
-        <Grid size={{ xs: 6, md: 3 }}>
-          <StatTile label="Not paid yet" value={formatUsd(awaiting)} footer={<Muted>Expected price of finished, unpaid calls</Muted>} />
-        </Grid>
-      </Grid>
-
-      <SectionTitle hint={`Calls by their scheduled time over the last ${periods.length} periods, for the calls you can see. The gap compares only calls that were processed to bank.`}>
-        By period
-      </SectionTitle>
-      <FinanceTable
-        first="Period"
-        rows={periods
-          .map((p, i) => ({
-            key: p.start,
-            label: (
-              <Tooltip title={periodTooltip(p)}>
-                <span>{i === periods.length - 1 ? period.current : p.label}</span>
-              </Tooltip>
-            ),
-            cell: byPeriod[i]!,
-          }))
-          .reverse()}
-      />
-
-      <SectionTitle>By platform</SectionTitle>
-      {byPlatform.length === 0 ? (
-        <Muted>No calls in these periods.</Muted>
-      ) : (
-        <FinanceTable first="Platform" rows={byPlatform.map((r) => ({ key: r.platform.id, label: r.platform.name, cell: r.cell }))} />
+              ) : view === 'chart' ? (
+                <ProfileColumns
+                  rows={data.rows}
+                  measure={measure}
+                  money={data.money}
+                  label={`${measure === 'calls' ? 'Calls delivered' : moneyLabel} by Profile, ${periodLabel(data.start, period, zone)}. ${data.rows.length} Profiles; the table view lists every figure.`}
+                />
+              ) : (
+                <ProfileTable rows={data.rows} total={data.total} money={data.money} />
+              )}
+              {data.total.unpriced > 0 && (
+                <Typography variant="caption" color="text.secondary" component="p" sx={{ mt: 1.5 }}>
+                  {plural(data.total.unpriced, 'call')} without a rate {data.total.unpriced === 1 ? 'is' : 'are'} counted in calls, not yet in the money.
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+        </Box>
       )}
-
-      <SectionTitle>By profile</SectionTitle>
-      {byProfile.length === 0 ? (
-        <Muted>No calls in these periods.</Muted>
-      ) : (
-        <FinanceTable
-          first="Profile"
-          rows={byProfile.map((r) => ({
-            key: r.profile.id,
-            label: (
-              <Stack direction="row" spacing={1} alignItems="center">
-                <span>{r.profile.name}</span>
-                {!r.profile.isActive && <DeactivatedPill />}
-              </Stack>
-            ),
-            cell: r.cell,
-          }))}
-        />
-      )}
-    </>
+    </Box>
   );
 }

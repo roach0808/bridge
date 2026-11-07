@@ -62,6 +62,7 @@ import type {
   SignInDetailsDTO,
   AssociateStats,
   FinanceStats,
+  ProfilePeriodStats,
   ProfileStatsRow,
   StatsPeriodKind,
   TodoPanel,
@@ -383,6 +384,8 @@ export function createApiClient(options: ClientOptions) {
       profiles: () => get<ProfileStatsRow[]>('/stats/profiles'),
       /** Founder only. */
       finance: (query?: { period?: StatsPeriodKind; count?: number }) => get<FinanceStats>('/stats/finance', query),
+      /** Everyone, in their own scope: one day, week or month, Profile by Profile. */
+      byProfile: (query: { period: 'day' | 'week' | 'month'; date?: string }) => get<ProfilePeriodStats>('/stats/by-profile', query),
     },
 
     push: {
