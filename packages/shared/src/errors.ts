@@ -11,6 +11,8 @@ export const ERROR_CODES = {
   expertBusy: 'expert_busy',
   profileNotApproved: 'profile_not_approved',
   rateRequired: 'rate_required',
+  /** Applications are only recorded where the Profile is registered. */
+  notRegistered: 'not_registered',
   rateLimited: 'rate_limited',
   inactive: 'user_inactive',
   googleUnavailable: 'google_unavailable',

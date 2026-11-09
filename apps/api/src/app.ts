@@ -27,6 +27,7 @@ import { logger } from './logger';
 import { notificationsRouter } from './notifications/notifications.routes';
 import { photosRouter } from './photos/photos.routes';
 import { platformsRouter } from './platforms/platforms.routes';
+import { applicationsRouter } from './applications/applications.routes';
 import { profilesRouter } from './profiles/profiles.routes';
 import { statsRouter } from './stats/stats.routes';
 import { usersRouter } from './users/users.routes';
@@ -81,6 +82,7 @@ export function createApp() {
   api.use(photosRouter);
   api.use(banksRouter);
   api.use(profilesRouter);
+  api.use(applicationsRouter);
   api.use(callsRouter);
   api.use(financeRouter);
   api.use(chatRouter);

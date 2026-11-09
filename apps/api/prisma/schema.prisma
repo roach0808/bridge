@@ -144,46 +144,47 @@ model User {
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  manager           User?                 @relation("ManagerTeam", fields: [managerId], references: [id], onDelete: Restrict)
-  team              User[]                @relation("ManagerTeam")
-  avatar            Avatar                @relation(fields: [avatarId], references: [id])
-  photo             Photo?                @relation("UserPhoto", fields: [photoId], references: [id], onDelete: SetNull)
-  uploadedPhotos    Photo[]               @relation("PhotoCreatedBy")
-  createdBanks      ProfileBank[]         @relation("BankCreatedBy")
-  associateCalls    Call[]                @relation("CallAssociate")
-  expertCalls       Call[]                @relation("CallExpert")
-  createdCalls      Call[]                @relation("CallCreatedBy")
-  payeeCalls        Call[]                @relation("CallPayeeManager")
+  manager            User?                 @relation("ManagerTeam", fields: [managerId], references: [id], onDelete: Restrict)
+  team               User[]                @relation("ManagerTeam")
+  avatar             Avatar                @relation(fields: [avatarId], references: [id])
+  photo              Photo?                @relation("UserPhoto", fields: [photoId], references: [id], onDelete: SetNull)
+  uploadedPhotos     Photo[]               @relation("PhotoCreatedBy")
+  createdBanks       ProfileBank[]         @relation("BankCreatedBy")
+  associateCalls     Call[]                @relation("CallAssociate")
+  expertCalls        Call[]                @relation("CallExpert")
+  createdCalls       Call[]                @relation("CallCreatedBy")
+  payeeCalls         Call[]                @relation("CallPayeeManager")
   /// Profiles this Manager and their team handle.
-  handledProfiles   Profile[]             @relation("ProfileManager")
-  closedPayCycles   PayCycle[]            @relation("PayCycleClosedBy")
-  identities        AuthIdentity[]
-  chatImages        ChatImage[]           @relation("ChatImageUploader")
-  chatReactions     ChatReaction[]        @relation("ChatReactionUser")
-  statusChanges     CallStatusHistory[]
-  messages          Message[]
-  notifications     Notification[]
-  deviceTokens      DeviceToken[]
-  pushSubscriptions WebPushSubscription[]
-  refreshTokens     RefreshToken[]
-  createdProfiles   Profile[]             @relation("ProfileCreatedBy")
-  reviewedProfiles  Profile[]             @relation("ProfileReviewedBy")
-  scheduleBlocks    ScheduleBlock[]       @relation("BlockExpert")
-  createdBlocks     ScheduleBlock[]       @relation("BlockCreatedBy")
-  personalEvents    PersonalEvent[]
+  handledProfiles    Profile[]             @relation("ProfileManager")
+  closedPayCycles    PayCycle[]            @relation("PayCycleClosedBy")
+  applicationsLogged ProjectApplication[]  @relation("ApplicationUpdatedBy")
+  identities         AuthIdentity[]
+  chatImages         ChatImage[]           @relation("ChatImageUploader")
+  chatReactions      ChatReaction[]        @relation("ChatReactionUser")
+  statusChanges      CallStatusHistory[]
+  messages           Message[]
+  notifications      Notification[]
+  deviceTokens       DeviceToken[]
+  pushSubscriptions  WebPushSubscription[]
+  refreshTokens      RefreshToken[]
+  createdProfiles    Profile[]             @relation("ProfileCreatedBy")
+  reviewedProfiles   Profile[]             @relation("ProfileReviewedBy")
+  scheduleBlocks     ScheduleBlock[]       @relation("BlockExpert")
+  createdBlocks      ScheduleBlock[]       @relation("BlockCreatedBy")
+  personalEvents     PersonalEvent[]
   /// A Manager's team's saved logins (§6.17).
-  teamCredentials   Credential[]          @relation("TeamCredentials")
-  credentialsMade   Credential[]          @relation("CredentialCreatedBy")
-  credentialsEdited Credential[]          @relation("CredentialUpdatedBy")
-  conversationsA    Conversation[]        @relation("ConversationUserA")
-  conversationsB    Conversation[]        @relation("ConversationUserB")
-  groupsCreated     Conversation[]        @relation("ConversationCreatedBy")
-  groupMemberships  ConversationMember[]
-  chatMessages      ChatMessage[]         @relation("ChatMessageSender")
-  assignedTodos     Todo[]                @relation("TodoAssignee")
-  createdTodos      Todo[]                @relation("TodoCreatedBy")
-  todoNotes         TodoNote[]
-  auditLogs         AuditLog[]
+  teamCredentials    Credential[]          @relation("TeamCredentials")
+  credentialsMade    Credential[]          @relation("CredentialCreatedBy")
+  credentialsEdited  Credential[]          @relation("CredentialUpdatedBy")
+  conversationsA     Conversation[]        @relation("ConversationUserA")
+  conversationsB     Conversation[]        @relation("ConversationUserB")
+  groupsCreated      Conversation[]        @relation("ConversationCreatedBy")
+  groupMemberships   ConversationMember[]
+  chatMessages       ChatMessage[]         @relation("ChatMessageSender")
+  assignedTodos      Todo[]                @relation("TodoAssignee")
+  createdTodos       Todo[]                @relation("TodoCreatedBy")
+  todoNotes          TodoNote[]
+  auditLogs          AuditLog[]
 
   @@index([role])
   @@index([managerId])
@@ -217,6 +218,7 @@ model Platform {
 
   calls           Call[]
   profileStatuses ProfilePlatformStatus[]
+  applications    ProjectApplication[]
 
   @@map("platforms")
 }
@@ -267,6 +269,7 @@ model Profile {
   banks            ProfileBank[]
   credentials      Credential[]
   platformStatuses ProfilePlatformStatus[]
+  applications     ProjectApplication[]
   addresses        ProfileAddress[]
   createdBy        User                    @relation("ProfileCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
   manager          User?                   @relation("ProfileManager", fields: [managerId], references: [id], onDelete: SetNull)
@@ -573,10 +576,10 @@ model Photo {
   createdById String   @map("created_by") @db.Uuid
   createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
 
-  createdBy User     @relation("PhotoCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
-  user      User?    @relation("UserPhoto")
+  createdBy User          @relation("PhotoCreatedBy", fields: [createdById], references: [id], onDelete: Cascade)
+  user      User?         @relation("UserPhoto")
   group     Conversation? @relation("ConversationPhoto")
-  profile   Profile? @relation("ProfilePhoto")
+  profile   Profile?      @relation("ProfilePhoto")
 
   @@map("photos")
 }
@@ -628,6 +631,27 @@ model ProfilePlatformStatus {
 
   @@id([profileId, platformId])
   @@map("profile_platform_statuses")
+}
+
+/// How many projects a Profile applied for on a platform on one day, as the
+/// team enters it each day. No row means nobody updated it: "not updated",
+/// never zero.
+model ProjectApplication {
+  profileId   String   @map("profile_id") @db.Uuid
+  platformId  String   @map("platform_id") @db.Uuid
+  /// The calendar day, as the person entering it sees it.
+  date        DateTime @db.Date
+  applied     Int
+  updatedById String?  @map("updated_by_id") @db.Uuid
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  platform  Platform @relation(fields: [platformId], references: [id], onDelete: Cascade)
+  updatedBy User?    @relation("ApplicationUpdatedBy", fields: [updatedById], references: [id], onDelete: SetNull)
+
+  @@id([profileId, platformId, date])
+  @@index([date])
+  @@map("project_applications")
 }
 
 /// A one-to-one chat. The pair is stored once with user_a_id < user_b_id.

@@ -566,6 +566,11 @@ export const reorderTodosSchema = z
 export const STATS_PERIODS = ['week', 'biweek', 'month'] as const;
 /** The Statistics page: one day, week or month (the one containing `date`; today by default). */
 export const PROFILE_STATS_PERIODS = ['day', 'week', 'month'] as const;
+/** The project applications board (§6.19): one day, today by default. */
+export const applicationsQuerySchema = z.object({ date: isoDate.optional() });
+/** How many projects a Profile applied for on a platform on a day; null clears it back to "not updated". */
+export const applicationSchema = z.object({ applied: z.number().int().min(0).max(999).nullable() });
+
 /** The first day the Statistics page counts (yyyy-mm-dd, in the viewer's zone); calls before it are left out. */
 export const STATS_START = '2026-09-21';
 export type ProfileStatsPeriod = (typeof PROFILE_STATS_PERIODS)[number];

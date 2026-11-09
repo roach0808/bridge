@@ -29,6 +29,7 @@ import { dayLabel, formatDateTime, inZone, relativeTime, zoneAbbr } from '@/lib/
 import { errorMessage } from '@/lib/errors';
 import { TwoDayCalendar } from './calendar/TwoDayCalendar';
 import { FinanceTab } from './calls/FinanceTab';
+import { ApplicationsBoard } from '@/components/ApplicationsBoard';
 
 /** Only Experts see the chart, so only they download its charting library. */
 const DeliveredChart = lazy(() => import('@/components/DeliveredChart').then((m) => ({ default: m.DeliveredChart })));
@@ -514,6 +515,8 @@ export default function DashboardPage() {
       {header}
       <Stack spacing={2}>
         <TodayBoard today={data.today} />
+        {/* The team fills in each Profile's project applications every day. */}
+        {(me.role === 'manager' || me.role === 'associate') && <ApplicationsBoard />}
         {/* An Expert's delivered calls over time, as a trading chart. */}
         {me.role === 'expert' && (
           <Suspense fallback={<Skeleton variant="rounded" height={440} sx={{ borderRadius: 3.5 }} />}>
