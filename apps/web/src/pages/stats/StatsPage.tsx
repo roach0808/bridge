@@ -20,7 +20,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material';
-import type { ProfilePeriodStats, ProfilePeriodTotals, TrendPoint, TrendStats } from '@god/shared';
+import { STATS_START, type ProfilePeriodStats, type ProfilePeriodTotals, type TrendPoint, type TrendStats } from '@god/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { DateTime } from 'luxon';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -57,6 +57,8 @@ const oneDecimal = (v: number) => v.toLocaleString('en-US', { maximumFractionDig
 /** A metric's value on a period or a Profile, and how to write it. */
 const valueOf = (t: ProfilePeriodTotals, m: Metric) => (m === 'calls' ? t.calls : m === 'hours' ? Math.round((t.minutes / 60) * 100) / 100 : t.money);
 const writeOf = (v: number, m: Metric) => (m === 'calls' ? oneDecimal(v) : m === 'hours' ? `${oneDecimal(v)} h` : formatUsd(v));
+/** A value with its unit, short: on a column's top and on the average line. */
+const withUnit = (v: number, m: Metric) => (m === 'calls' ? `${oneDecimal(v)} ${v === 1 ? 'call' : 'calls'}` : m === 'hours' ? `${oneDecimal(v)} h` : compactUsd(v));
 const tickOf = (v: number, m: Metric) => (m === 'money' ? compactUsd(v) : m === 'hours' ? `${oneDecimal(v)}` : String(v));
 
 function periodLabel(start: string, period: Period, zone: string) {
@@ -231,7 +233,7 @@ function Columns({
                 <rect className="focus" x={cx - slot / 2 + 1} y={1} width={Math.max(2, slot - 2)} height={PLOT_HEIGHT - 1} fill="none" rx={3} />
                 {i === bestIndex && (
                   <text className="cap" x={cx} y={PLOT_HEIGHT - h - 6} textAnchor="middle">
-                    {tickOf(Math.round(c.value * 100) / 100, metric)}
+                    {withUnit(Math.round(c.value * 100) / 100, metric)}
                   </text>
                 )}
                 {/* Every so often, and always the chosen one, never crowding it. */}
@@ -252,7 +254,7 @@ function Columns({
             <g aria-hidden>
               <line className="avg" x1={Y_AXIS} x2={svgWidth} y1={y(average) + 0.5} y2={y(average) + 0.5} />
               <text className="avg-label" x={Y_AXIS + 6} y={y(average) - 6} textAnchor="start">
-                Average {metric === 'money' ? compactUsd(Math.round(average * 100) / 100) : writeOf(average, metric)}
+                Average {withUnit(Math.round(average * 100) / 100, metric)}
               </text>
             </g>
           )}
@@ -372,6 +374,9 @@ function TrendCard({ trend, metric, metricLabel, view, isCurrent }: { trend: Tre
   const s = useMemo(() => summarise(points, metric), [points, metric]);
   const last = points.at(-1);
   const word = PERIOD_WORD[period];
+  // Statistics start on STATS_START, so early on the span is shorter than usual.
+  const since = DateTime.fromISO(STATS_START, { zone });
+  const span = points[0] && DateTime.fromISO(points[0].start, { zone }) <= since ? `from ${since.toFormat('LLL d, yyyy')}` : TREND_SPAN[period];
   const columns: Column[] = points.map((p, i) => ({
     key: p.start,
     axis: axisLabel(p.start, period, zone, points[i - 1]?.start),
@@ -386,7 +391,7 @@ function TrendCard({ trend, metric, metricLabel, view, isCurrent }: { trend: Tre
           {metricLabel} over time
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          By {word}, {TREND_SPAN[period]} to {last ? periodLabel(last.start, period, zone) : ''}
+          By {word}, {span} to {last ? periodLabel(last.start, period, zone) : ''}
           {metric === 'money' && ` · ${MONEY_HINT[money]}`}
         </Typography>
 
@@ -410,12 +415,16 @@ function TrendCard({ trend, metric, metricLabel, view, isCurrent }: { trend: Tre
           />
         </Box>
 
-        {view === 'chart' ? (
+        {points.length === 0 ? (
+          <Box sx={{ py: 8, textAlign: 'center', color: 'text.secondary', border: 1, borderColor: 'divider', borderStyle: 'dashed', borderRadius: 2 }}>
+            <Typography variant="body2">Statistics start on {DateTime.fromISO(STATS_START).toFormat('LLLL d, yyyy')}.</Typography>
+          </Box>
+        ) : view === 'chart' ? (
           <Columns
             columns={columns}
             metric={metric}
             average={s.average}
-            label={`${metricLabel} by ${word}, ${TREND_SPAN[period]}. Total ${writeOf(s.total, metric)}, average ${writeOf(Math.round(s.average * 100) / 100, metric)} per ${word}. The table view lists every ${word}.`}
+            label={`${metricLabel} by ${word}, ${span}. Total ${writeOf(s.total, metric)}, average ${writeOf(Math.round(s.average * 100) / 100, metric)} per ${word}. The table view lists every ${word}.`}
             tooltip={(i) => <Readout totals={points[i]!} metric={metric} money={money} title={periodLabel(points[i]!.start, period, zone)} />}
           />
         ) : (
@@ -520,6 +529,7 @@ export default function StatsPage() {
   const metricLabel = metric === 'calls' ? 'Calls delivered' : metric === 'hours' ? 'Hours' : moneyLabel;
   const current = useMemo(() => DateTime.now().setZone(zone).startOf(period).toISODate()!, [zone, period]);
   const isCurrent = !data || data.start >= current;
+  const isFirst = !data || data.start <= DateTime.fromISO(STATS_START, { zone }).startOf(period).toISODate()!;
   const step = (n: number) => {
     if (!data) return;
     const next = DateTime.fromISO(data.start, { zone }).plus({ [`${period}s`]: n }).toISODate()!;
@@ -552,10 +562,12 @@ export default function StatsPage() {
           <ToggleButton value="month">Month</ToggleButton>
         </ToggleButtonGroup>
         <Stack direction="row" alignItems="center" spacing={0.25}>
-          <Tooltip title={`The ${PERIOD_WORD[period]} before`}>
-            <IconButton size="small" onClick={() => step(-1)} aria-label={`The ${PERIOD_WORD[period]} before`} disabled={!data}>
-              <ChevronLeftRounded />
-            </IconButton>
+          <Tooltip title={isFirst ? `Statistics start on ${DateTime.fromISO(STATS_START).toFormat('LLLL d, yyyy')}` : `The ${PERIOD_WORD[period]} before`}>
+            <span>
+              <IconButton size="small" onClick={() => step(-1)} aria-label={`The ${PERIOD_WORD[period]} before`} disabled={isFirst}>
+                <ChevronLeftRounded />
+              </IconButton>
+            </span>
           </Tooltip>
           <Typography variant="body2" fontWeight={600} sx={{ minWidth: { sm: 190 }, textAlign: 'center' }} aria-live="polite">
             {data ? periodLabel(data.start, period, zone) : ' '}

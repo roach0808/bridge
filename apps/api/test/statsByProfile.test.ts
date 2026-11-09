@@ -89,19 +89,39 @@ describe('GET /stats/trend', () => {
 
     const founder = (await (await as(fx.founder)).get('/stats/trend', { period: 'week', date: '2026-10-15' })).body;
     expect(founder).toMatchObject({ zone: 'America/New_York', period: 'week', money: 'invoice' });
-    expect(founder.points).toHaveLength(12);
+    // Twelve weeks back would reach July; Statistics start on Monday, September 21.
+    expect(founder.points.map((p: { start: string }) => p.start)).toEqual(['2026-09-21', '2026-09-28', '2026-10-05', '2026-10-12']);
     expect(founder.points.at(-1)).toEqual({ start: '2026-10-12', calls: 2, minutes: 105, money: 600, unpriced: 1 });
     expect(founder.points.at(-2)).toEqual({ start: '2026-10-05', calls: 0, minutes: 0, money: 0, unpriced: 0 });
     expect(founder.points.at(-3)).toMatchObject({ start: '2026-09-28', calls: 1, money: 300 });
 
     const days = (await (await as(fx.founder)).get('/stats/trend', { period: 'day', date: '2026-10-14' })).body;
-    expect(days.points).toHaveLength(30);
+    expect(days.points).toHaveLength(24);
+    expect(days.points[0].start).toBe('2026-09-21');
     expect(days.points.at(-1)).toMatchObject({ start: '2026-10-14', calls: 2 });
     const months = (await (await as(fx.founder)).get('/stats/trend', { period: 'month', date: '2026-10-01', count: 3 })).body;
-    expect(months.points.map((p: { start: string; calls: number }) => [p.start, p.calls])).toEqual([['2026-08-01', 0], ['2026-09-01', 1], ['2026-10-01', 2]]);
+    expect(months.points.map((p: { start: string; calls: number }) => [p.start, p.calls])).toEqual([['2026-09-01', 1], ['2026-10-01', 2]]);
+    const later = (await (await as(fx.founder)).get('/stats/trend', { period: 'week', date: '2026-12-30' })).body;
+    expect(later.points).toHaveLength(12);
 
     // The second team's Manager sees only their team's call.
     const m2 = (await (await as(fx.m2)).get('/stats/trend', { period: 'week', date: '2026-10-15' })).body;
     expect(m2.points.reduce((t: number, p: { calls: number }) => t + p.calls, 0)).toBe(1);
+  });
+});
+
+describe('Statistics start on September 21, 2026', () => {
+  it('leave out calls before it, in a period and in the trend', async () => {
+    await prisma.profilePlatformStatus.create({ data: { profileId: fx.approvedProfile.id, platformId: fx.platform.id, status: 'registered', rate: 600 } });
+    // Friday, September 18, and Tuesday, September 22, at noon in New York.
+    await delivered({ associate: fx.a1, expert: fx.e1, status: 'finished', scheduledAt: '2026-09-18T16:00:00Z' }, 60);
+    await delivered({ associate: fx.a1, expert: fx.e1, status: 'finished', scheduledAt: '2026-09-22T16:00:00Z' }, 30);
+    const month = (await (await as(fx.founder)).get('/stats/by-profile', { period: 'month', date: '2026-09-10' })).body;
+    expect(month.total).toEqual({ calls: 1, minutes: 30, money: 300, unpriced: 0 });
+    const before = (await (await as(fx.founder)).get('/stats/by-profile', { period: 'week', date: '2026-09-18' })).body;
+    expect(before.total.calls).toBe(0);
+    const trend = (await (await as(fx.founder)).get('/stats/trend', { period: 'month', date: '2026-09-30' })).body;
+    expect(trend.points).toEqual([{ start: '2026-09-01', calls: 1, minutes: 30, money: 300, unpriced: 0 }]);
+    expect((await (await as(fx.founder)).get('/stats/trend', { period: 'week', date: '2026-08-01' })).body.points).toEqual([]);
   });
 });
