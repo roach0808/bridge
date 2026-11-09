@@ -3,6 +3,7 @@ import {
   displayZoneFor,
   expectedPrice,
   profilePeriodQuerySchema,
+  STATS_START,
   statsQuerySchema,
   trendQuerySchema,
   type TrendPoint,
@@ -356,6 +357,10 @@ const moneyKindFor = (actor: Actor): ProfilePeriodStats['money'] => (actor.role 
  */
 async function deliveredFor(actor: Actor, from: DateTime, to: DateTime) {
   const money = moneyKindFor(actor);
+  // Nothing before the first day Statistics counts.
+  const since = statsStartFor(actor);
+  if (from < since) from = since;
+  if (to <= from) return [];
   const rows = await prisma.call.findMany({
     where: {
       AND: [
@@ -379,6 +384,9 @@ async function deliveredFor(actor: Actor, from: DateTime, to: DateTime) {
     return { row, minutes: row.actualDurationMinutes ?? row.durationMinutes, amount };
   });
 }
+
+/** Midnight starting STATS_START, in the viewer's zone. */
+const statsStartFor = (actor: Actor) => DateTime.fromISO(STATS_START, { zone: displayZoneFor(actor) });
 
 const emptyTotals = (): ProfilePeriodTotals => ({ calls: 0, minutes: 0, money: 0, unpriced: 0 });
 function addTo(into: ProfilePeriodTotals, minutes: number, amount: number | null) {
@@ -434,7 +442,7 @@ const TREND_COUNT = { day: 30, week: 12, month: 12 } as const;
 /**
  * The trend on the Statistics page: delivered calls, hours and money for each of
  * `count` days, weeks or months, ending with the one containing `date` (today by
- * default). Same scope and money as `/stats/by-profile`; quiet periods are zeros.
+ * default), starting no earlier than STATS_START. Same scope and money as `/stats/by-profile`; quiet periods are zeros.
  */
 statsRouter.get('/stats/trend', async (req, res) => {
   const actor = actorOf(req);
@@ -443,7 +451,10 @@ statsRouter.get('/stats/trend', async (req, res) => {
   const zone = displayZoneFor(actor);
   const unit = UNITS[period];
   const last = (date ? DateTime.fromISO(date, { zone }) : DateTime.now().setZone(zone)).startOf(unit);
-  const first = last.minus({ [`${unit}s`]: count - 1 });
+  // Back `count` periods, but not before the period of the first day Statistics counts.
+  const earliest = statsStartFor(actor).startOf(unit);
+  const back = last.minus({ [`${unit}s`]: count - 1 });
+  const first = back < earliest ? earliest : back;
   const points = new Map<string, TrendPoint>();
   for (let at = first; at <= last; at = at.plus({ [`${unit}s`]: 1 })) points.set(at.toISODate()!, { start: at.toISODate()!, ...emptyTotals() });
   for (const { row, minutes, amount } of await deliveredFor(actor, first, last.plus({ [`${unit}s`]: 1 }))) {
