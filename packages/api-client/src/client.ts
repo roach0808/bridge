@@ -1,4 +1,6 @@
 import type {
+  ApplicationBoard,
+  ApplicationCell,
   GroupDTO,
   ChatRingDTO,
   AuditEntryDTO,
@@ -262,6 +264,9 @@ export function createApiClient(options: ClientOptions) {
       setActive: (id: string, isActive: boolean) => patch<ProfileDTO>(`/profiles/${enc(id)}/active`, { isActive }),
       setPlatform: (id: string, platformId: string, body: { status?: PlatformRegistration; rate?: number | null }) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}`, { body }),
+      /** Projects a registered Profile applied for on a platform on a day; null clears it to "not updated". */
+      setApplied: (id: string, platformId: string, date: string, applied: number | null) =>
+        http.request<ApplicationCell>('PUT', `/profiles/${enc(id)}/platforms/${enc(platformId)}/applications/${enc(date)}`, { body: { applied } }),
       /** Founder only: the Manager whose team handles the Profile, or none. */
       setManager: (id: string, managerId: string | null) =>
         http.request<ProfileDTO>('PUT', `/profiles/${enc(id)}/manager`, { body: { managerId } }),
@@ -464,6 +469,10 @@ export function createApiClient(options: ClientOptions) {
       get: () => get<DashboardSummary>('/dashboard'),
       /** Experts only: their delivered consultations, day by day. */
       delivered: () => get<DeliveredHistory>('/dashboard/delivered'),
+    },
+    applications: {
+      /** Every approved Profile in the viewer's scope × every platform: projects applied on one day. */
+      board: (date?: string) => get<ApplicationBoard>('/applications', date ? { date } : undefined),
     },
   };
 }

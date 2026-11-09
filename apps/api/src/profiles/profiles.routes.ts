@@ -69,13 +69,14 @@ export function visibleProfilesWhere(actor: Pick<Actor, 'id' | 'role' | 'manager
  *   only; Associates and Experts never see income (§2.3).
  * - `deliveredCalls` on each platform: the calls there that took place.
  *   Everyone who sees platform statuses (not Experts).
+ * - `appliedProjects` on each platform: every day's entry on the applications board, added up.
  */
 export async function withCallFigures<T extends ProfileDTO | ProfileDTO[]>(actor: Actor, dto: T): Promise<T> {
   const list: ProfileDTO[] = Array.isArray(dto) ? dto : [dto];
   if (!list.length || actor.role === 'expert') return dto;
   const mine: Prisma.CallWhereInput = { AND: [visibleCallsWhere(actor), { profileId: { in: list.map((p) => p.id) } }] };
   const seesMoney = actor.role === 'founder' || actor.role === 'manager';
-  const [income, delivered] = await Promise.all([
+  const [income, delivered, applied] = await Promise.all([
     seesMoney
       ? prisma.call.groupBy({ by: ['profileId'], where: { AND: [mine, { realIncome: { not: null } }] }, _sum: { realIncome: true } })
       : Promise.resolve([]),
@@ -85,12 +86,18 @@ export async function withCallFigures<T extends ProfileDTO | ProfileDTO[]>(actor
       where: { AND: [mine, { status: { in: [...FINANCE_STATUSES] }, kind: 'consultation' }] },
       _count: { _all: true },
     }),
+    // Projects applied for, as the team entered them day by day (the applications board).
+    prisma.projectApplication.groupBy({ by: ['profileId', 'platformId'], where: { profileId: { in: list.map((p) => p.id) } }, _sum: { applied: true } }),
   ]);
+  const appliedOf = new Map(applied.map((r) => [`${r.profileId}:${r.platformId}`, r._sum.applied ?? 0]));
   const incomeOf = new Map(income.map((r) => [r.profileId, Number(r._sum.realIncome ?? 0)]));
   const deliveredOf = new Map(delivered.map((r) => [`${r.profileId}:${r.platformId}`, r._count._all]));
   for (const p of list) {
     if (seesMoney) p.totalIncome = incomeOf.get(p.id) ?? 0;
-    for (const s of p.platformStatuses ?? []) s.deliveredCalls = deliveredOf.get(`${p.id}:${s.platform.id}`) ?? 0;
+    for (const s of p.platformStatuses ?? []) {
+      s.deliveredCalls = deliveredOf.get(`${p.id}:${s.platform.id}`) ?? 0;
+      s.appliedProjects = appliedOf.get(`${p.id}:${s.platform.id}`) ?? 0;
+    }
   }
   return dto;
 }

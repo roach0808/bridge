@@ -1100,3 +1100,32 @@ export interface ClientToServerEvents {
   /** The tab went to the background, or the person went idle. */
   'presence:away': () => void;
 }
+
+/** One Profile on one platform on one day of the applications board. */
+export interface ApplicationCell {
+  /** The Profile's standing on the platform now. */
+  status: PlatformRegistration;
+  /** Projects applied for that day; null when nobody updated it (not zero). */
+  applied: number | null;
+  updatedBy: UserRef | null;
+  updatedAt: string | null;
+}
+
+export interface ApplicationBoardRow {
+  profile: Pick<ProfileDTO, 'id' | 'name' | 'avatarId' | 'photoId'>;
+  manager: UserRef | null;
+  /** One per platform, in the order of `platforms`. */
+  cells: ApplicationCell[];
+}
+
+/** The project applications board: every approved Profile in the viewer's scope × every platform, for one day. */
+export interface ApplicationBoard {
+  zone: string;
+  /** yyyy-mm-dd: the day shown. */
+  date: string;
+  /** yyyy-mm-dd: today in the viewer's zone; later days cannot be filled in. */
+  today: string;
+  canEdit: boolean;
+  platforms: Array<Pick<PlatformDTO, 'id' | 'name' | 'priority'>>;
+  rows: ApplicationBoardRow[];
+}

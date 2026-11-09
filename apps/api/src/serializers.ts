@@ -167,7 +167,7 @@ export const toProfileDTO = (
           platform,
           status: row?.status ?? 'not_registered',
           rate: row?.rate == null || viewer.role === 'associate' ? null : Number(row.rate),
-          // Filled in by `withCallFigures` (profiles.routes); nothing records applications yet.
+          // Filled in by `withCallFigures` (profiles.routes).
           appliedProjects: 0,
           deliveredCalls: 0,
         };
